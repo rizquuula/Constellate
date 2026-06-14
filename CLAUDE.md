@@ -21,6 +21,15 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 - Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
 
 ## Status
+M4 done (mission-control overview): agent runs an **in-repo pure-Go VT emulator**
+(`adapter/secondary/vt`, Williams parser + ECMA-48/VT100) producing a full-color cell grid; a
+throttled, change-gated **snapshot producer** (`app/snapshot`) ships **RLE full-color** `Snapshot`
+records over an **agent-opened NDJSON snapshot stream** when the hub enables it via `EnableSnaps`. Hub
+**overview** context (`app/overview`) caches latest-per-session + fans out to `GET /ws/overview`;
+viewer presence gates `EnableSnaps` (zero snapshot bandwidth when nobody watches). Frontend adds a
+**Workspace↔Overview** toggle, a color tile grid, and **click-to-dive**. Protocol bumped to **2**
+(window [1,2], backward compatible). Decisions folded into `DESIGN.md` §4.3/§6/§7.2/§13.
+
 M3 done (multi-session + projects): new **project** bounded context (`domain/project`, `app/projects`,
 sqlite + memory `ProjectStore`); REST `GET/POST /api/projects` and session rename `PATCH
 /api/sessions/{id}` (metadata only, no wire change). Sessions may be **project-less** (nullable
@@ -32,8 +41,8 @@ M2 (persistent terminals): agent keeps a per-session **scrollback ring buffer** 
 attach**; session manager is broadcast-buffer + per-attach drain. Agent **process restart** → its
 `running` sessions marked `lost`, detected via a per-process `instanceID` in `Hello`.
 
-Next: M4 (mission-control overview — vt parser → screen state, snapshot stream, tile grid,
-click-to-dive). Milestone roadmap in `DESIGN.md` §18.
+Next: M5 (auth + audit hardening — passkey/TOTP login, agent enrollment + revocable credentials, TLS,
+audit log, remove dev token; the gate before public exposure). Milestone roadmap in `DESIGN.md` §18.
 
 ## M1 conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is

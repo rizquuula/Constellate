@@ -12,7 +12,10 @@ const (
 	TypeOpenSession   MessageType = "OpenSession"
 	TypeResize        MessageType = "Resize"
 	TypeCloseSession  MessageType = "CloseSession"
+	TypeEnableSnaps   MessageType = "EnableSnaps"
 	TypeAttach        MessageType = "Attach"
+	TypeSnapStream    MessageType = "SnapStream"
+	TypeSnapshot      MessageType = "Snapshot"
 )
 
 // --- agent → hub ---
@@ -89,6 +92,15 @@ type Resize struct {
 type CloseSession struct {
 	Type      MessageType `json:"type"`
 	SessionID string      `json:"sessionID"`
+}
+
+// EnableSnaps instructs the agent to start (or stop) producing overview
+// snapshots. The hub enables snapshots while at least one browser is watching
+// the overview and disables them when the last viewer leaves, so the snapshot
+// stream costs nothing when nobody is watching.
+type EnableSnaps struct {
+	Type    MessageType `json:"type"`
+	Enabled bool        `json:"enabled"`
 }
 
 // --- constructors ---
@@ -171,5 +183,13 @@ func NewCloseSession(sessionID string) CloseSession {
 	return CloseSession{
 		Type:      TypeCloseSession,
 		SessionID: sessionID,
+	}
+}
+
+// NewEnableSnaps constructs an EnableSnaps message with the Type field pre-set.
+func NewEnableSnaps(enabled bool) EnableSnaps {
+	return EnableSnaps{
+		Type:    TypeEnableSnaps,
+		Enabled: enabled,
 	}
 }

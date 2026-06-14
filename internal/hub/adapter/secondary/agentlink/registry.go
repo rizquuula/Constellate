@@ -70,6 +70,11 @@ func (c *Conn) ResolveOpen(sessionID string, pid int, err error) {
 	}
 }
 
+// EnableSnaps sends an EnableSnaps control message to this agent.
+func (c *Conn) EnableSnaps(enabled bool) error {
+	return c.sendControl(transport.NewEnableSnaps(enabled))
+}
+
 // openDataStream opens a new yamux stream to the agent, sends the attach header,
 // and returns it as a net.Conn.
 func (c *Conn) openDataStream(sessionID string) (net.Conn, error) {

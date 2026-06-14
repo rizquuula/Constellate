@@ -68,6 +68,20 @@ func (c *Client) handleControlFrame(enc *transport.Encoder, frame transport.Fram
 				"machineID", c.machineID, "sessionID", msg.SessionID, "err", err)
 		}
 
+	case transport.TypeEnableSnaps:
+		msg, err := transport.Unmarshal[transport.EnableSnaps](frame)
+		if err != nil {
+			c.log.Warn("control: decode EnableSnaps failed", "machineID", c.machineID, "err", err)
+			return
+		}
+		c.mu.Lock()
+		t := c.toggle
+		c.mu.Unlock()
+		if t != nil {
+			t.SetEnabled(msg.Enabled)
+		}
+		c.log.Debug("control: snaps toggled", "machineID", c.machineID, "enabled", msg.Enabled)
+
 	case transport.TypeError:
 		e, err := transport.Unmarshal[transport.Error](frame)
 		if err != nil {

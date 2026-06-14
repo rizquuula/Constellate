@@ -19,6 +19,10 @@ import {
 } from '../features/terminal/paneTree'
 
 interface Store {
+  // ── view mode ─────────────────────────────────────────────────────────────
+  viewMode: 'workspace' | 'overview'
+  setViewMode: (mode: 'workspace' | 'overview') => void
+
   // ── server state ──────────────────────────────────────────────────────────
   machines: Machine[]
   projects: Project[]
@@ -49,6 +53,9 @@ interface Store {
 const initialLeaf = makeLeaf(null)
 
 export const useStore = create<Store>((set, get) => ({
+  viewMode: 'workspace',
+  setViewMode: (mode) => set({ viewMode: mode }),
+
   machines: [],
   projects: [],
   sessions: [],

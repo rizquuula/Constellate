@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/rizquuula/Constellate/internal/transport"
@@ -15,11 +16,12 @@ var ErrAgentOffline = errors.New("agentlink: agent offline")
 // Gateway sends control commands to agents via the agentlink Registry.
 type Gateway struct {
 	reg *Registry
+	log *slog.Logger
 }
 
 // NewGateway returns a Gateway backed by reg.
 func NewGateway(reg *Registry) *Gateway {
-	return &Gateway{reg: reg}
+	return &Gateway{reg: reg, log: slog.Default()}
 }
 
 // OpenSession instructs the agent identified by machineID to start a new PTY session.
@@ -67,6 +69,22 @@ func (g *Gateway) CloseSession(ctx context.Context, machineID, sessionID string)
 	}
 	_ = ctx
 	return conn.sendControl(transport.NewCloseSession(sessionID))
+}
+
+// SetSnapshotsEnabled broadcasts an EnableSnaps message to all currently online agents.
+// Per-conn errors are logged and swallowed so one broken connection doesn't block others.
+// Implements overview.SnapshotControl.
+func (g *Gateway) SetSnapshotsEnabled(enabled bool) {
+	ids := g.reg.OnlineIDs()
+	for _, id := range ids {
+		conn, ok := g.reg.Get(id)
+		if !ok {
+			continue
+		}
+		if err := conn.EnableSnaps(enabled); err != nil {
+			g.log.Warn("agentlink: EnableSnaps send failed", "machineID", id, "enabled", enabled, "err", err)
+		}
+	}
 }
 
 // OpenDataStream opens a hub-initiated yamux stream to the agent for the given session.

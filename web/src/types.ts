@@ -30,3 +30,24 @@ export interface Session {
   createdAt: number
   lastActiveAt: number
 }
+
+export interface SnapRun {
+  t: string      // run text (UTF-8)
+  f?: number     // FG color; omitted/0 = default
+  b?: number     // BG color; omitted/0 = default
+  a?: number     // attrs bitmask; omitted/0 = none
+}
+
+export interface SnapLine {
+  runs: SnapRun[]
+}
+
+export interface Snapshot {
+  type: 'Snapshot'
+  sessionID: string
+  machineID: string
+  cols: number
+  rows: number
+  cursor: { x: number; y: number; visible: boolean }
+  lines: SnapLine[]
+}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
+	"github.com/rizquuula/Constellate/internal/hub/app/overview"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/internal/transport"
 )
@@ -18,21 +19,31 @@ type SessionEvents interface {
 	MarkMachineSessionsLost(ctx context.Context, machineID string) error
 }
 
+// OverviewSink is the consumer-side port for overview snapshot ingress.
+// *overview.UseCase satisfies this interface.
+type OverviewSink interface {
+	ReceiveSnapshot(overview.Snapshot)
+	SnapshotsEnabled() bool
+	DropSession(sessionID string)
+}
+
 // Endpoint handles WebSocket dial-home connections from agents.
 type Endpoint struct {
 	reg      *registry.UseCase
 	links    *agentlink.Registry
 	events   SessionEvents
+	overview OverviewSink
 	devToken string
 	log      *slog.Logger
 }
 
 // NewEndpoint creates a ready Endpoint.
-func NewEndpoint(reg *registry.UseCase, links *agentlink.Registry, events SessionEvents, devToken string, log *slog.Logger) *Endpoint {
+func NewEndpoint(reg *registry.UseCase, links *agentlink.Registry, events SessionEvents, overview OverviewSink, devToken string, log *slog.Logger) *Endpoint {
 	return &Endpoint{
 		reg:      reg,
 		links:    links,
 		events:   events,
+		overview: overview,
 		devToken: devToken,
 		log:      log,
 	}

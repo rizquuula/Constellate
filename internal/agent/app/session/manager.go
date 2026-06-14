@@ -11,8 +11,9 @@ import (
 
 // liveSession holds runtime state for a single open PTY session.
 type liveSession struct {
-	pty PTY
-	sb  *terminal.Scrollback
+	pty    PTY
+	sb     *terminal.Scrollback
+	screen Screen // nil when no ScreenFactory was set; see Manager.SetScreenFactory
 }
 
 // noopNotifier is the default Notifier used until SetNotifier is called.
@@ -26,6 +27,12 @@ type Manager struct {
 	scrollbackBytes int
 	notifier        Notifier
 	log             *slog.Logger
+
+	// screens is set by SetScreenFactory; nil means no screen tracking.
+	// Trade-off: we always feed PTY output into the emulator (cheap) and only
+	// send snapshots over the wire when the hub enables them (bandwidth = 0 when
+	// nobody is watching the overview).
+	screens ScreenFactory
 
 	mu       sync.Mutex
 	sessions map[string]*liveSession
@@ -52,6 +59,15 @@ func (m *Manager) SetNotifier(n Notifier) {
 	m.mu.Unlock()
 }
 
+// SetScreenFactory installs a factory for per-session screen emulators. If
+// never called (or called with nil), no screens are tracked and existing
+// behaviour is unchanged.
+func (m *Manager) SetScreenFactory(f ScreenFactory) {
+	m.mu.Lock()
+	m.screens = f
+	m.mu.Unlock()
+}
+
 // Open starts a new PTY session with the given sessionID and spec.
 // Returns an error if sessionID already exists.
 func (m *Manager) Open(sessionID string, spec PTYSpec) (pid int, err error) {
@@ -73,6 +89,9 @@ func (m *Manager) Open(sessionID string, spec PTYSpec) (pid int, err error) {
 	}
 
 	m.mu.Lock()
+	if m.screens != nil {
+		ls.screen = m.screens.NewScreen(spec.Cols, spec.Rows)
+	}
 	m.sessions[sessionID] = ls
 	m.mu.Unlock()
 
@@ -152,6 +171,9 @@ func (m *Manager) Resize(sessionID string, cols, rows int) error {
 	if err != nil {
 		return err
 	}
+	if ls.screen != nil {
+		ls.screen.Resize(cols, rows)
+	}
 	return ls.pty.Resize(cols, rows)
 }
 
@@ -179,6 +201,67 @@ func (m *Manager) Shutdown() {
 	}
 }
 
+// RunningScreens renders every running session that has a screen emulator and
+// returns one terminal.SessionScreen per session. The session map is snapshotted
+// under the manager lock; Render is called outside the lock to avoid nesting.
+func (m *Manager) RunningScreens() []terminal.SessionScreen {
+	type entry struct {
+		id     string
+		screen Screen
+	}
+
+	m.mu.Lock()
+	entries := make([]entry, 0, len(m.sessions))
+	for id, ls := range m.sessions {
+		if ls.screen != nil {
+			entries = append(entries, entry{id: id, screen: ls.screen})
+		}
+	}
+	m.mu.Unlock()
+
+	result := make([]terminal.SessionScreen, 0, len(entries))
+	for _, e := range entries {
+		scr, rev := e.screen.Render()
+		result = append(result, terminal.SessionScreen{
+			ID:     e.id,
+			Screen: scr,
+			Rev:    rev,
+		})
+	}
+	return result
+}
+
+// RunningScreenRevs returns a lightweight list of (sessionID, rev) pairs for
+// every running session that has a screen emulator. Callers use this to cheaply
+// decide which sessions need a full render before building a snapshot.
+func (m *Manager) RunningScreenRevs() []terminal.SessionRev {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]terminal.SessionRev, 0, len(m.sessions))
+	for id, ls := range m.sessions {
+		if ls.screen != nil {
+			result = append(result, terminal.SessionRev{ID: id, Rev: ls.screen.Rev()})
+		}
+	}
+	return result
+}
+
+// RenderScreen renders the screen for a single session. Returns false if the
+// session does not exist or has no screen emulator.
+func (m *Manager) RenderScreen(id string) (terminal.SessionScreen, bool) {
+	m.mu.Lock()
+	ls, ok := m.sessions[id]
+	if !ok || ls.screen == nil {
+		m.mu.Unlock()
+		return terminal.SessionScreen{}, false
+	}
+	screen := ls.screen
+	m.mu.Unlock()
+
+	scr, rev := screen.Render()
+	return terminal.SessionScreen{ID: id, Screen: scr, Rev: rev}, true
+}
+
 // lookup returns the liveSession for sessionID or terminal.ErrNotFound.
 func (m *Manager) lookup(sessionID string) (*liveSession, error) {
 	m.mu.Lock()
@@ -199,6 +282,9 @@ func (m *Manager) readPump(sessionID string, ls *liveSession) {
 		n, err := ls.pty.Read(buf)
 		if n > 0 {
 			ls.sb.Write(buf[:n])
+			if ls.screen != nil {
+				ls.screen.Write(buf[:n])
+			}
 		}
 		if err != nil {
 			break

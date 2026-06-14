@@ -14,13 +14,20 @@ import (
 
 	"github.com/rizquuula/Constellate/internal/agent/adapter/primary/hubclient"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/pty"
+	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/vt"
 	"github.com/rizquuula/Constellate/internal/agent/app/session"
+	"github.com/rizquuula/Constellate/internal/agent/app/snapshot"
 	platconfig "github.com/rizquuula/Constellate/internal/platform/config"
 	"github.com/rizquuula/Constellate/internal/platform/id"
 	platlog "github.com/rizquuula/Constellate/internal/platform/log"
 	"github.com/rizquuula/Constellate/internal/platform/version"
 	"github.com/rizquuula/Constellate/internal/transport"
 )
+
+// vtScreenFactory adapts vt.Emulator to session.Screen at the composition root.
+type vtScreenFactory struct{}
+
+func (vtScreenFactory) NewScreen(cols, rows int) session.Screen { return vt.New(cols, rows) }
 
 func main() {
 	args := os.Args[1:]
@@ -129,12 +136,18 @@ func cmdConnect(args []string) {
 		Log:               log,
 		Sessions:          mgr,
 	})
+
+	prod := snapshot.New(mgr, client, snapshot.DefaultInterval, log)
+	client.SetSnapshotToggle(prod)
+	mgr.SetScreenFactory(vtScreenFactory{})
 	mgr.SetNotifier(client)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	log.Info("connecting", "hub", cfg.HubURL, "machineID", machineID)
+
+	go func() { _ = prod.Run(ctx) }()
 
 	if err := client.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("connect: run error", "err", err)

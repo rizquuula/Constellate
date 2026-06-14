@@ -17,6 +17,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/sqlite"
 	"github.com/rizquuula/Constellate/internal/hub/app/attach"
+	"github.com/rizquuula/Constellate/internal/hub/app/overview"
 	"github.com/rizquuula/Constellate/internal/hub/app/projects"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
@@ -30,6 +31,7 @@ import (
 // Compile-time interface assertions.
 var _ sessions.AgentGateway = (*agentlink.Gateway)(nil)
 var _ attach.AgentGateway = (*agentlink.Gateway)(nil)
+var _ overview.SnapshotControl = (*agentlink.Gateway)(nil)
 var _ projects.ProjectStore = (*sqlite.ProjectStore)(nil)
 var _ sessions.SessionStore = (*sqlite.SessionStore)(nil)
 var _ httpapi.ProjectService = (*projects.UseCase)(nil)
@@ -129,10 +131,12 @@ func cmdServe(args []string) {
 	sessionsUC := sessions.New(sessStore, gateway, sessions.SystemClock{}, id.New, log)
 	projectsUC := projects.New(projStore, projects.SystemClock{}, id.New, log)
 	attachUC := attach.New(sessStore, gateway, log)
+	overviewUC := overview.New(gateway, log)
 
-	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, cfg.DevToken, log)
+	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, overviewUC, cfg.DevToken, log)
 	termHandler := wsbrowser.NewTerminalHandler(attachUC, log)
-	srv := httpapi.NewServer(cfg.Addr, reg, sessionsUC, projectsUC, endpoint, termHandler, log)
+	overviewHandler := wsbrowser.NewOverviewHandler(overviewUC, log)
+	srv := httpapi.NewServer(cfg.Addr, reg, sessionsUC, projectsUC, endpoint, termHandler, overviewHandler, log)
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

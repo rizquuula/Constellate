@@ -3,6 +3,7 @@ package hubclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/rand/v2"
@@ -14,6 +15,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
 	"github.com/rizquuula/Constellate/internal/agent/app/session"
+	"github.com/rizquuula/Constellate/internal/agent/domain/terminal"
 	"github.com/rizquuula/Constellate/internal/transport"
 )
 
@@ -57,6 +59,12 @@ type Config struct {
 	Sessions          SessionManager
 }
 
+// snapshotToggle is a consumer-side interface for enabling/disabling the
+// snapshot producer. *snapshot.Producer satisfies this structurally.
+type snapshotToggle interface {
+	SetEnabled(bool)
+}
+
 // Client manages a persistent, auto-reconnecting connection to the hub.
 type Client struct {
 	hubURL            string
@@ -70,6 +78,18 @@ type Client struct {
 
 	mu      sync.Mutex
 	ctrlEnc *transport.Encoder
+
+	// yamux session for the current connection; nil when disconnected.
+	// Used by SendSnapshot to lazily open the snapshot stream.
+	muxSess *yamux.Session
+
+	// snapStream / snapEnc are the lazily-opened snapshot stream for the
+	// current connection. Guarded by mu; cleared on disconnect.
+	snapStream net.Conn
+	snapEnc    *transport.Encoder
+
+	// toggle is the snapshot producer; may be nil when not wired.
+	toggle snapshotToggle
 }
 
 // New creates a Client from cfg. Zero HeartbeatInterval defaults to 5s; nil
@@ -134,6 +154,85 @@ func (c *Client) SessionExited(sessionID string, exitCode int) {
 			return
 		}
 		c.log.Warn("SessionExited: send failed", "sessionID", sessionID, "err", err)
+	}
+}
+
+// SetSnapshotToggle wires the snapshot producer so that EnableSnaps messages
+// from the hub can start/stop it.
+func (c *Client) SetSnapshotToggle(t snapshotToggle) {
+	c.mu.Lock()
+	c.toggle = t
+	c.mu.Unlock()
+}
+
+// SendSnapshot encodes one session's screen and writes it to the snapshot
+// stream. It lazily opens the stream on the first call per connection.
+// If the client is not connected, the snapshot is silently dropped (the
+// producer will retry on the next tick once reconnected).
+// Called from a single goroutine (the producer ticker), but the stream/session
+// fields are guarded by mu because connectOnce/serve mutate them.
+// Network I/O (OpenStream + header write) happens WITHOUT holding mu to avoid
+// contending with reconnect teardown.
+func (c *Client) SendSnapshot(s terminal.SessionScreen) error {
+	// Read sess and current encoder under mu, then release.
+	c.mu.Lock()
+	sess := c.muxSess
+	enc := c.snapEnc
+	c.mu.Unlock()
+
+	if sess == nil {
+		return nil // not connected; drop silently
+	}
+
+	// If we don't have an encoder yet, open the stream without holding mu.
+	if enc == nil {
+		stream, err := sess.OpenStream()
+		if err != nil {
+			return fmt.Errorf("hubclient: open snapshot stream: %w", err)
+		}
+		newEnc := transport.NewEncoder(stream)
+		if err := newEnc.Encode(transport.NewSnapStreamHeader()); err != nil {
+			_ = stream.Close()
+			return fmt.Errorf("hubclient: write snap stream header: %w", err)
+		}
+		// Re-acquire mu and store only if the session hasn't been replaced by a reconnect.
+		c.mu.Lock()
+		if c.muxSess != sess {
+			// A reconnect happened while we were opening — discard our stream.
+			c.mu.Unlock()
+			_ = stream.Close()
+			return nil
+		}
+		if c.snapEnc != nil {
+			// Another goroutine (shouldn't happen — single producer) beat us; discard ours.
+			c.mu.Unlock()
+			_ = stream.Close()
+			enc = c.snapEnc
+		} else {
+			c.snapStream = stream
+			c.snapEnc = newEnc
+			enc = newEnc
+			c.mu.Unlock()
+		}
+	}
+
+	snap := encodeSnapshot(s, c.machineID)
+	if err := enc.Encode(snap); err != nil {
+		c.mu.Lock()
+		c.clearSnapStream()
+		c.mu.Unlock()
+		return fmt.Errorf("hubclient: write snapshot: %w", err)
+	}
+	return nil
+}
+
+// clearSnapStream closes and nils the snapshot stream fields. Must be called
+// with c.mu held.
+func (c *Client) clearSnapStream() {
+	if c.snapStream != nil {
+		_ = c.snapStream.Close()
+		c.snapStream = nil
+		c.snapEnc = nil
 	}
 }
 
@@ -227,6 +326,19 @@ func (c *Client) connectOnce(ctx context.Context) (connected bool, err error) {
 	if err := sendHello(ctrlEnc, c.machineID, c.instanceID, c.name); err != nil {
 		return false, err
 	}
+
+	// Store the yamux session so SendSnapshot can open streams on it.
+	c.mu.Lock()
+	c.muxSess = sess
+	c.mu.Unlock()
+
+	// Clear session and snapshot stream when this connection ends.
+	defer func() {
+		c.mu.Lock()
+		c.muxSess = nil
+		c.clearSnapStream()
+		c.mu.Unlock()
+	}()
 
 	// From here the handshake succeeded.
 	c.log.Info("connected to hub", "machineID", c.machineID, "hub", c.hubURL)

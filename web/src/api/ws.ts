@@ -1,6 +1,10 @@
-export function openTerminalSocket(sessionID: string): WebSocket {
+export function wsBaseURL(): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  const url = `${proto}://${window.location.host}/ws/term?session=${sessionID}`
+  return `${proto}://${window.location.host}`
+}
+
+export function openTerminalSocket(sessionID: string): WebSocket {
+  const url = `${wsBaseURL()}/ws/term?session=${sessionID}`
   const ws = new WebSocket(url)
   ws.binaryType = 'arraybuffer'
   return ws

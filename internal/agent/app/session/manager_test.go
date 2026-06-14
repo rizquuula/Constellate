@@ -466,3 +466,180 @@ func TestManagerLookupMissing(t *testing.T) {
 		t.Errorf("Close missing: got %v, want ErrNotFound", err)
 	}
 }
+
+// --- Screen integration tests ---
+
+// fakeScreen records Write/Resize calls and returns a canned screen + rev.
+type fakeScreen struct {
+	mu      sync.Mutex
+	writes  [][]byte
+	resizes [][2]int
+	screen  terminal.Screen
+	rev     uint64
+}
+
+func (s *fakeScreen) Write(p []byte) {
+	s.mu.Lock()
+	cp := make([]byte, len(p))
+	copy(cp, p)
+	s.writes = append(s.writes, cp)
+	s.mu.Unlock()
+}
+
+func (s *fakeScreen) Resize(cols, rows int) {
+	s.mu.Lock()
+	s.resizes = append(s.resizes, [2]int{cols, rows})
+	s.mu.Unlock()
+}
+
+func (s *fakeScreen) Rev() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rev
+}
+
+func (s *fakeScreen) Render() (terminal.Screen, uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.screen, s.rev
+}
+
+func (s *fakeScreen) allWrites() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []byte
+	for _, w := range s.writes {
+		out = append(out, w...)
+	}
+	return out
+}
+
+// fakeScreenFactory returns the pre-built fakeScreen.
+type fakeScreenFactory struct {
+	screen *fakeScreen
+}
+
+func (f *fakeScreenFactory) NewScreen(_, _ int) Screen { return f.screen }
+
+// TestManagerScreenCreatedOnOpen verifies SetScreenFactory causes a screen to
+// be created when a session is opened.
+func TestManagerScreenCreatedOnOpen(t *testing.T) {
+	fake := newFakePTY(10)
+	factory := &fakeFactory{pty: fake}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := NewManager(factory, 64*1024, log)
+
+	scr := &fakeScreen{rev: 7, screen: terminal.Screen{Cols: 80, Rows: 24}}
+	m.SetScreenFactory(&fakeScreenFactory{screen: scr})
+
+	if _, err := m.Open("s1", PTYSpec{Shell: "/bin/sh", Cols: 80, Rows: 24}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	screens := m.RunningScreens()
+	if len(screens) != 1 {
+		t.Fatalf("RunningScreens: got %d, want 1", len(screens))
+	}
+	if screens[0].ID != "s1" {
+		t.Errorf("ID: got %q, want %q", screens[0].ID, "s1")
+	}
+	if screens[0].Rev != 7 {
+		t.Errorf("Rev: got %d, want 7", screens[0].Rev)
+	}
+
+	_ = fake.Close()
+}
+
+// TestManagerReadPumpFeedsScreen verifies that PTY output reaches the screen.
+func TestManagerReadPumpFeedsScreen(t *testing.T) {
+	fake := newFakePTY(11)
+	factory := &fakeFactory{pty: fake}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := NewManager(factory, 64*1024, log)
+
+	scr := &fakeScreen{}
+	m.SetScreenFactory(&fakeScreenFactory{screen: scr})
+
+	if _, err := m.Open("s-feed", PTYSpec{Shell: "/bin/sh"}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	const want = "hello-screen"
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := fake.outputW.Write([]byte(want))
+		writeDone <- err
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write fake PTY output: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out writing PTY output")
+	}
+
+	// Give readPump time to process.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if bytes.Contains(scr.allWrites(), []byte(want)) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !bytes.Contains(scr.allWrites(), []byte(want)) {
+		t.Errorf("screen did not receive PTY output; got %q", scr.allWrites())
+	}
+
+	_ = fake.Close()
+}
+
+// TestManagerResizePropagatesScreen verifies that Resize forwards dimensions to the screen.
+func TestManagerResizePropagatesScreen(t *testing.T) {
+	fake := newFakePTY(12)
+	factory := &fakeFactory{pty: fake}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := NewManager(factory, 64*1024, log)
+
+	scr := &fakeScreen{}
+	m.SetScreenFactory(&fakeScreenFactory{screen: scr})
+
+	if _, err := m.Open("s-resize", PTYSpec{Shell: "/bin/sh", Cols: 80, Rows: 24}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if err := m.Resize("s-resize", 120, 40); err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+
+	scr.mu.Lock()
+	resizes := append([][2]int(nil), scr.resizes...)
+	scr.mu.Unlock()
+
+	if len(resizes) != 1 {
+		t.Fatalf("screen Resize call count: got %d, want 1", len(resizes))
+	}
+	if resizes[0] != [2]int{120, 40} {
+		t.Errorf("screen Resize args: got %v, want [120 40]", resizes[0])
+	}
+
+	_ = fake.Close()
+}
+
+// TestManagerRunningScreensNoFactory verifies that without a ScreenFactory,
+// RunningScreens returns an empty slice (nil-safe behaviour).
+func TestManagerRunningScreensNoFactory(t *testing.T) {
+	fake := newFakePTY(13)
+	m, _ := newTestManager(fake)
+
+	if _, err := m.Open("s-nofact", PTYSpec{Shell: "/bin/sh"}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	screens := m.RunningScreens()
+	if len(screens) != 0 {
+		t.Errorf("RunningScreens without factory: got %d, want 0", len(screens))
+	}
+
+	_ = fake.Close()
+}

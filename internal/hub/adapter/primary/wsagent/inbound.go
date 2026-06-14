@@ -10,6 +10,7 @@ import (
 
 	"github.com/hashicorp/yamux"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
+	"github.com/rizquuula/Constellate/internal/hub/app/overview"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/internal/transport"
 )
@@ -67,6 +68,18 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 	}
 	e.log.Info("agent online", "machineID", hello.MachineID, "name", hello.Name)
 
+	// Gate: if overview viewers are already watching, tell this agent to start producing snapshots.
+	if e.overview != nil && e.overview.SnapshotsEnabled() {
+		if serr := conn.EnableSnaps(true); serr != nil {
+			e.log.Warn("wsagent: EnableSnaps on connect failed", "machineID", hello.MachineID, "err", serr)
+		}
+	}
+
+	// Accept additional agent-opened streams (snapshot stream, etc.) in the background.
+	if e.overview != nil {
+		go e.handleAgentStreams(ctx, sess, hello.MachineID)
+	}
+
 	for {
 		frame, err := dec.Next()
 		if err != nil {
@@ -117,9 +130,112 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 					e.log.Error("wsagent: MarkExited failed", "sessionID", msg.SessionID, "err", err)
 				}
 			}
+			if e.overview != nil {
+				e.overview.DropSession(msg.SessionID)
+			}
 
 		default:
 			e.log.Debug("wsagent: ignoring unknown frame type", "type", frame.Type, "machineID", hello.MachineID)
 		}
+	}
+}
+
+// handleAgentStreams accepts yamux streams that the agent opens (beyond the control stream).
+// Currently handles the snapshot stream (type "SnapStream").
+func (e *Endpoint) handleAgentStreams(ctx context.Context, sess *yamux.Session, machineID string) {
+	for {
+		stream, err := sess.AcceptStream()
+		if err != nil {
+			// Session closed or context done; normal shutdown.
+			if !errors.Is(err, io.EOF) && ctx.Err() == nil {
+				e.log.Debug("wsagent: AcceptStream ended", "machineID", machineID, "err", err)
+			}
+			return
+		}
+
+		go e.handleAgentStream(ctx, stream, machineID)
+	}
+}
+
+// handleAgentStream reads the first NDJSON line to identify the stream kind,
+// then dispatches accordingly.
+func (e *Endpoint) handleAgentStream(ctx context.Context, stream io.ReadWriteCloser, machineID string) {
+	defer func() { _ = stream.Close() }()
+
+	dec := transport.NewDecoder(stream)
+
+	hdrFrame, err := dec.Next()
+	if err != nil {
+		e.log.Warn("wsagent: read agent stream header failed", "machineID", machineID, "err", err)
+		return
+	}
+
+	switch hdrFrame.Type {
+	case transport.TypeSnapStream:
+		e.log.Debug("wsagent: snapshot stream opened", "machineID", machineID)
+		e.readSnapshotStream(ctx, dec, machineID)
+	default:
+		e.log.Warn("wsagent: unknown agent stream type, closing", "machineID", machineID, "type", hdrFrame.Type)
+	}
+}
+
+// readSnapshotStream reads Snapshot frames from dec and forwards them to the overview use case.
+func (e *Endpoint) readSnapshotStream(ctx context.Context, dec *transport.Decoder, machineID string) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		frame, err := dec.Next()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				e.log.Debug("wsagent: snapshot stream ended", "machineID", machineID, "err", err)
+			}
+			return
+		}
+
+		if frame.Type != transport.TypeSnapshot {
+			e.log.Debug("wsagent: unexpected frame on snapshot stream", "machineID", machineID, "type", frame.Type)
+			continue
+		}
+
+		tsnap, err := transport.Unmarshal[transport.Snapshot](frame)
+		if err != nil {
+			e.log.Warn("wsagent: unmarshal Snapshot failed", "machineID", machineID, "err", err)
+			continue
+		}
+
+		e.overview.ReceiveSnapshot(transportToOverview(tsnap))
+	}
+}
+
+// transportToOverview converts a transport.Snapshot to an overview.Snapshot (field copy).
+func transportToOverview(t transport.Snapshot) overview.Snapshot {
+	lines := make([]overview.SnapLine, len(t.Lines))
+	for i, l := range t.Lines {
+		runs := make([]overview.SnapRun, len(l.Runs))
+		for j, r := range l.Runs {
+			runs[j] = overview.SnapRun{
+				Text:  r.Text,
+				FG:    r.FG,
+				BG:    r.BG,
+				Attrs: r.Attrs,
+			}
+		}
+		lines[i] = overview.SnapLine{Runs: runs}
+	}
+	return overview.Snapshot{
+		Type:      string(t.Type),
+		SessionID: t.SessionID,
+		MachineID: t.MachineID,
+		Cols:      t.Cols,
+		Rows:      t.Rows,
+		Cursor: overview.Cursor{
+			X:       t.Cursor.X,
+			Y:       t.Cursor.Y,
+			Visible: t.Cursor.Visible,
+		},
+		Lines: lines,
+		Rev:   t.Rev,
 	}
 }

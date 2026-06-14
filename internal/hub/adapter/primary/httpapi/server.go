@@ -32,7 +32,7 @@ type Server struct {
 }
 
 // NewServer wires up the mux and returns a ready-to-start Server.
-func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, agentWS http.Handler, termWS http.Handler, log *slog.Logger) *Server {
+func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, agentWS http.Handler, termWS http.Handler, overviewWS http.Handler, log *slog.Logger) *Server {
 	s := &Server{
 		addr:     addr,
 		machines: machines,
@@ -53,6 +53,9 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 	mux.Handle("/ws/agent", agentWS)
 	if termWS != nil {
 		mux.Handle("/ws/term", termWS)
+	}
+	if overviewWS != nil {
+		mux.Handle("/ws/overview", overviewWS)
 	}
 
 	distFS := web.Dist()

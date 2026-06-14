@@ -154,7 +154,7 @@ Each agent holds exactly one WebSocket to the hub. That socket is wrapped as a `
 |--------|-----------|---------|
 | **control** (first stream) | bidirectional | NDJSON control messages: `Hello`, `Heartbeat`, `OpenSession`, `Resize`, `CloseSession`, `SessionExited`, errors |
 | **data** (one per attached session) | bidirectional | raw PTY bytes; first line is an `AttachHeader{sessionID}` |
-| **snapshot** (M4, one per agent) | agent → hub | throttled screen snapshots for the overview |
+| **snapshot** (M4, one per agent) | agent → hub | NDJSON full-color screen snapshots for the overview; opened by the agent, gated by `EnableSnaps` |
 
 Multiplexing over one socket means a single TLS handshake, a single auth check, and one thing to
 reconnect — while still giving every terminal its own independent, back-pressured byte pipe.
@@ -227,14 +227,37 @@ EnableSnaps   { enabled }                 // M4
 **Data stream** — first line is `AttachHeader{ sessionID }` (NDJSON); everything after is raw,
 unframed PTY bytes in both directions (it is a byte pipe — xterm speaks straight to the shell).
 
-**Snapshot stream (M4)** — length-prefixed `Snapshot` records, agent → hub:
+**Snapshot stream (M4)** — **NDJSON**, agent → hub. The stream is **agent-opened/hub-accepted**
+(the mirror of data streams, which are hub-opened/agent-accepted). Its first line is a
+`SnapStreamHeader{type:"SnapStream"}` so the hub can tell it from any other agent-opened stream;
+every line after is one `Snapshot`. One snapshot stream per agent connection carries snapshots for
+**all** of that agent's sessions (each record is self-identifying). NDJSON was chosen over the
+originally-planned length-prefixed framing so the snapshot stream reuses the exact same `codec`
+(one (de)serializer to maintain, debuggable on the wire) as the control stream.
+
+Snapshots are **full-color** and **run-length encoded** per row (adjacent cells sharing fg/bg/attrs
+collapse to one run), which keeps even colored frames small:
 ```
-Snapshot      { sessionID, cols, rows, cursor:{x,y}, lines:[…], rev }
+SnapStreamHeader { type:"SnapStream" }
+Snapshot { sessionID, machineID, cols, rows, cursor:{x,y,visible}, lines:[ {runs:[ {t,f?,b?,a?} ]} ], rev }
 ```
+- `t` = run text (UTF-8); `f`/`b` = fg/bg color; `a` = attribute bitmask (omitted when default/zero).
+- **Color encoding** (one int): `0` = terminal default; `1..256` = palette index+1 (0–15 ANSI,
+  16–255 xterm-256); `>= 0x1000000` = truecolor, RGB = value & 0xFFFFFF.
+- **Attr bits**: bold 1, faint 2, italic 4, underline 8, blink 16, inverse 32, hidden 64, strike 128.
+- `rev` increases only when the visible screen changed, so the agent sends a session's snapshot
+  only on actual change (plus one initial frame when a viewer connects).
+
+**Snapshot gating** — `EnableSnaps{enabled}` (hub → agent, control stream) turns the snapshot stream
+on/off. The agent **always** feeds PTY output into its vt emulator (cheap; keeps the screen current),
+but only **sends** snapshots while enabled. The hub enables snapshots when the first `/ws/overview`
+viewer connects and disables them when the last leaves (and enables a freshly-(re)connected agent if
+viewers are already present), so the stream costs nothing when nobody is watching.
 
 Frame envelopes, type tags, and (de)serialization all live in `internal/transport`, imported by
 **both** hub and agent. Protocol DTOs are translated into each side's domain types at the adapter
-boundary and never leak into a use case.
+boundary and never leak into a use case (the agent's vt screen and the hub's overview snapshot are
+distinct types from `transport.Snapshot`).
 
 ---
 
@@ -250,17 +273,27 @@ sequences) so replay is faithful; only the cap is enforced, oldest bytes dropped
 Rendering N full live terminals at once would overwhelm the browser, so the overview does **not**
 attach N data streams. Instead:
 
-1. The agent feeds each session's output through an **ANSI/vt parser** (`adapter/secondary/vt`)
-   that maintains the **current visible screen** (an 80×24-ish grid of cells + cursor).
-2. On a throttled tick (coalesced, ~2–4 fps, only when the screen changed since last `rev`), the
-   agent serializes the grid into a compact `Snapshot` and sends it on the snapshot stream.
-3. The hub's **overview** use case fans snapshots out to any browser subscribed to `/ws/overview`.
-4. Each browser **tile** renders a snapshot cheaply (a small read-only xterm or a styled `<pre>`).
-5. **Click-to-dive**: clicking a tile opens a normal data-stream attach (§5.3) — full fidelity,
-   input enabled — and stops rendering that tile from snapshots.
+1. The agent feeds each session's output through an **ANSI/vt emulator** (`adapter/secondary/vt`)
+   that maintains the **current visible screen** (a grid of full-color cells + cursor). The emulator
+   is an **in-repo, pure-Go** implementation (a Williams ANSI state machine + ECMA-48/VT100
+   semantics) — deliberately *not* a third-party dependency, to keep `CGO_ENABLED=0` static builds
+   and a self-contained module; it sits behind the `Screen` port so it is swappable. Feeding is
+   **always-on** (cheap, and gives an instantly-correct screen when a viewer connects).
+2. On a throttled tick (~4 fps, only when the screen's `rev` changed since last sent), the agent
+   serializes the grid into a **run-length-encoded, full-color** `Snapshot` (§6) and — **only while
+   `EnableSnaps` is on** — sends it on the snapshot stream. This split (always parse, send only when
+   watched) is what keeps bandwidth at zero when nobody has the overview open.
+3. The hub's **overview** use case caches the latest snapshot per session and fans snapshots out to
+   any browser subscribed to `/ws/overview`; a newly-subscribed browser is first replayed the cache
+   so every tile populates immediately. Subscriber count drives `EnableSnaps` on the agents.
+4. Each browser **tile** renders a snapshot cheaply as **styled HTML** (rows of colored `<span>`
+   runs — not an xterm instance per tile, which would not scale to a full grid).
+5. **Click-to-dive**: clicking a tile switches to the workspace view and loads that session into the
+   focused pane — a normal data-stream attach (§5.3), full fidelity, input enabled.
 
 Bandwidth stays bounded and roughly constant regardless of how busy the shells are, because
-snapshots are screen-sized and rate-capped, not a copy of the output stream.
+snapshots are screen-sized, RLE-compressed, rate-capped, and change-gated — not a copy of the
+output stream — and are only produced while someone is watching.
 
 ---
 
@@ -610,6 +643,12 @@ shutdown.
 | TOTP (M5) | `github.com/pquerna/otp` | fallback |
 | Lint | `golangci-lint` | `go vet` + staticcheck + more |
 
+> **VT/ANSI emulator (M4)** is **in-repo**, not a dependency: a pure-Go terminal emulator under
+> `internal/agent/adapter/secondary/vt` (Williams parser + ECMA-48/VT100 semantics) producing a
+> full-color cell grid. A library (`vito/midterm`, `danielgatis/go-headless-term`, `charmbracelet/x/vt`)
+> was evaluated; an in-repo implementation was chosen to keep the module self-contained with zero new
+> deps and full control, kept swappable behind the `Screen` port.
+
 **Frontend:** Vite + React + TypeScript · `@xterm/xterm` + `@xterm/addon-fit` +
 `@xterm/addon-webgl` · `zustand` (client state) + TanStack Query (server state) · React Router ·
 Tailwind CSS. Built to `web/dist` and embedded into the hub binary via `go:embed`.
@@ -630,10 +669,14 @@ Two axes, deliberately separate:
   `hub version` / `agent version` print their own. Release tags are component-scoped —
   `hub/vX.Y.Z`, `agent/vX.Y.Z`.
 - **Protocol version — the real compatibility gate.** `transport.ProtocolVersion` (an int, bumped
-  only on a breaking wire change) is sent in `Hello`. The hub enforces a minimum supported protocol
-  plus a compat window, accepting or rejecting with a clear message. This is *why* independent
-  binary versions are safe: interop depends only on the negotiated protocol, never on the release
-  labels — so hub `1.4.0` and agent `0.9.2` talk fine as long as their protocols are in range.
+  on a wire-protocol change — breaking *or* a new capability worth advertising) is sent in `Hello`.
+  The hub enforces a minimum supported protocol plus a **compat window**, accepting or rejecting with
+  a clear message; older peers in the window keep working. This is *why* independent binary versions
+  are safe: interop depends only on the negotiated protocol, never on the release labels — so hub
+  `1.4.0` and agent `0.9.2` talk fine as long as their protocols are in range. M4 bumped the protocol
+  to **2** (adds `EnableSnaps` + the snapshot stream) with the window held open at **[1, 2]**: the
+  additions are backward compatible, so a v1 and a v2 peer still interoperate — just without the
+  overview feed.
 
 Both `version` commands print all three for skew debugging, e.g.
 `constellate-agent 0.9.2 (commit a1b2c3d, proto 3)`.
