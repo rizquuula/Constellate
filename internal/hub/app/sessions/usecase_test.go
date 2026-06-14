@@ -74,6 +74,16 @@ func (s *fakeSessionStore) MarkRunningLost(_ context.Context, machineID string, 
 	return nil
 }
 
+func (s *fakeSessionStore) SetTitle(_ context.Context, id, title string) error {
+	ss, ok := s.data[id]
+	if !ok {
+		return session.ErrNotFound
+	}
+	ss.SetTitle(title)
+	s.data[id] = ss
+	return nil
+}
+
 type fakeGateway struct {
 	openErr    error
 	closeCalls []string
@@ -234,6 +244,42 @@ func TestClose_NotFound(t *testing.T) {
 	err := uc.Close(context.Background(), "no-such-id")
 	if !errors.Is(err, session.ErrNotFound) {
 		t.Errorf("Close missing: got %v, want session.ErrNotFound", err)
+	}
+}
+
+func TestRename_Found(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+
+	s, err := uc.Open(context.Background(), sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if err := uc.Rename(context.Background(), s.ID(), "new-title"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	got, err := store.ByID(context.Background(), s.ID())
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Title() != "new-title" {
+		t.Errorf("Title: got %q, want new-title", got.Title())
+	}
+}
+
+func TestRename_NotFound(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+
+	err := uc.Rename(context.Background(), "no-such-id", "title")
+	if !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("Rename missing: got %v, want session.ErrNotFound", err)
 	}
 }
 

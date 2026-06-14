@@ -27,15 +27,17 @@ type Server struct {
 	mux      *http.ServeMux
 	machines MachineService
 	sessions SessionService
+	projects ProjectService
 	log      *slog.Logger
 }
 
 // NewServer wires up the mux and returns a ready-to-start Server.
-func NewServer(addr string, machines MachineService, sessions SessionService, agentWS http.Handler, termWS http.Handler, log *slog.Logger) *Server {
+func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, agentWS http.Handler, termWS http.Handler, log *slog.Logger) *Server {
 	s := &Server{
 		addr:     addr,
 		machines: machines,
 		sessions: sessions,
+		projects: projects,
 		log:      log,
 	}
 
@@ -45,6 +47,9 @@ func NewServer(addr string, machines MachineService, sessions SessionService, ag
 	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	mux.HandleFunc("GET /api/machines/{id}/sessions", s.handleListSessionsByMachine)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleCloseSession)
+	mux.HandleFunc("PATCH /api/sessions/{id}", s.handleRenameSession)
+	mux.HandleFunc("GET /api/projects", s.handleListProjects)
+	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	mux.Handle("/ws/agent", agentWS)
 	if termWS != nil {
 		mux.Handle("/ws/term", termWS)

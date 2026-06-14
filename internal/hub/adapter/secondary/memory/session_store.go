@@ -1,0 +1,113 @@
+package memory
+
+import (
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/rizquuula/Constellate/internal/hub/domain/session"
+)
+
+// SessionStore is a thread-safe in-memory implementation of sessions.SessionStore.
+// Used in tests and the in-process E2E harness.
+type SessionStore struct {
+	mu   sync.RWMutex
+	data map[string]session.Session
+}
+
+// NewSessionStore returns an empty SessionStore.
+func NewSessionStore() *SessionStore {
+	return &SessionStore{data: make(map[string]session.Session)}
+}
+
+// Create inserts a new session record.
+func (s *SessionStore) Create(_ context.Context, ss session.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[ss.ID()] = ss
+	return nil
+}
+
+// ByID returns the session with the given id.
+// Returns session.ErrNotFound (wrapped) if not present.
+func (s *SessionStore) ByID(_ context.Context, id string) (session.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ss, ok := s.data[id]
+	if !ok {
+		return session.Session{}, fmt.Errorf("memory: by id %q: %w", id, session.ErrNotFound)
+	}
+	return ss, nil
+}
+
+// List returns a snapshot of all stored sessions.
+func (s *SessionStore) List(_ context.Context) ([]session.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]session.Session, 0, len(s.data))
+	for _, ss := range s.data {
+		out = append(out, ss)
+	}
+	return out, nil
+}
+
+// ListByMachine returns all sessions for the given machine.
+func (s *SessionStore) ListByMachine(_ context.Context, machineID string) ([]session.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var out []session.Session
+	for _, ss := range s.data {
+		if ss.MachineID() == machineID {
+			out = append(out, ss)
+		}
+	}
+	return out, nil
+}
+
+// SetExited updates the session's status, exit_code, and last_active_at.
+// Returns session.ErrNotFound (wrapped) if no session with the given id exists.
+func (s *SessionStore) SetExited(_ context.Context, id string, exitCode int, ts int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ss, ok := s.data[id]
+	if !ok {
+		return fmt.Errorf("memory: set exited %q: %w", id, session.ErrNotFound)
+	}
+	ss.SetExited(exitCode, ts)
+	s.data[id] = ss
+	return nil
+}
+
+// MarkRunningLost bulk-marks all running sessions for a machine as lost.
+func (s *SessionStore) MarkRunningLost(_ context.Context, machineID string, ts int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, ss := range s.data {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning {
+			ss.SetStatus(session.StatusLost)
+			ss.Touch(ts)
+			s.data[id] = ss
+		}
+	}
+	return nil
+}
+
+// SetTitle updates the session's title (metadata only; last_active_at is not touched).
+// Returns session.ErrNotFound (wrapped) if no session with the given id exists.
+func (s *SessionStore) SetTitle(_ context.Context, id, title string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ss, ok := s.data[id]
+	if !ok {
+		return fmt.Errorf("memory: set title %q: %w", id, session.ErrNotFound)
+	}
+	ss.SetTitle(title)
+	s.data[id] = ss
+	return nil
+}

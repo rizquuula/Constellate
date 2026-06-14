@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
@@ -16,6 +17,7 @@ type SessionService interface {
 	List(ctx context.Context) ([]session.Session, error)
 	ListByMachine(ctx context.Context, machineID string) ([]session.Session, error)
 	Close(ctx context.Context, id string) error
+	Rename(ctx context.Context, id, title string) error
 }
 
 type openSessionRequest struct {
@@ -89,6 +91,29 @@ func (s *Server) handleCloseSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.sessions.Close(r.Context(), id); err != nil {
 		writeError(w, statusFor(err), "close_failed", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type renameSessionRequest struct {
+	Title string `json:"title"`
+}
+
+func (s *Server) handleRenameSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req renameSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		writeError(w, http.StatusBadRequest, "empty_title", "title must not be empty")
+		return
+	}
+	if err := s.sessions.Rename(r.Context(), id, title); err != nil {
+		writeError(w, statusFor(err), "rename_failed", err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

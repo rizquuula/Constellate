@@ -10,6 +10,15 @@ export interface Machine {
   status: string
 }
 
+export interface Project {
+  id: string
+  machineID: string
+  name: string
+  path: string
+  color: string
+  createdAt: number
+}
+
 export interface Session {
   id: string
   machineID: string

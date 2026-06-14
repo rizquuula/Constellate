@@ -23,6 +23,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/sqlite"
 	"github.com/rizquuula/Constellate/internal/hub/app/attach"
+	"github.com/rizquuula/Constellate/internal/hub/app/projects"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
 	"github.com/rizquuula/Constellate/internal/platform/id"
@@ -51,14 +52,16 @@ func newInProcessHub(t *testing.T) (ts *httptest.Server, sessionsUC *sessions.Us
 
 	machineStore := sqlite.NewMachineStore(db)
 	sessStore := sqlite.NewSessionStore(db)
+	projStore := sqlite.NewProjectStore(db)
 	links := agentlink.NewRegistry()
 	gateway := agentlink.NewGateway(links)
 	reg := registry.New(machineStore, links, registry.SystemClock{}, logger)
 	sessionsUC = sessions.New(sessStore, gateway, sessions.SystemClock{}, id.New, logger)
+	projectsUC := projects.New(projStore, projects.SystemClock{}, id.New, logger)
 	attachUC := attach.New(sessStore, gateway, logger)
 	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, e2eToken, logger)
 	termHandler := wsbrowser.NewTerminalHandler(attachUC, logger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, sessionsUC, endpoint, termHandler, logger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, sessionsUC, projectsUC, endpoint, termHandler, logger)
 
 	ts = httptest.NewServer(srv.Handler())
 	wsURL = func(path string) string {

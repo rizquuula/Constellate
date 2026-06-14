@@ -3,6 +3,7 @@ package httpapi
 import (
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/internal/hub/domain/machine"
+	"github.com/rizquuula/Constellate/internal/hub/domain/project"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 )
 
@@ -43,6 +44,27 @@ func sessionToDTO(s session.Session) SessionDTO {
 		ExitCode:     s.ExitCode(),
 		CreatedAt:    s.CreatedAt(),
 		LastActiveAt: s.LastActiveAt(),
+	}
+}
+
+// ProjectDTO is the HTTP representation of a project.
+type ProjectDTO struct {
+	ID        string `json:"id"`
+	MachineID string `json:"machineID"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Color     string `json:"color"`
+	CreatedAt int64  `json:"createdAt"`
+}
+
+func projectToDTO(p project.Project) ProjectDTO {
+	return ProjectDTO{
+		ID:        p.ID(),
+		MachineID: p.MachineID(),
+		Name:      p.Name(),
+		Path:      p.Path(),
+		Color:     p.Color(),
+		CreatedAt: p.CreatedAt(),
 	}
 }
 

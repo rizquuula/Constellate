@@ -123,6 +123,29 @@ func (s *SessionStore) SetExited(ctx context.Context, id string, exitCode int, t
 	return nil
 }
 
+// SetTitle updates the session's title (metadata only; last_active_at is not touched).
+// An empty title is stored as NULL. Returns session.ErrNotFound on 0 rows affected.
+func (s *SessionStore) SetTitle(ctx context.Context, id, title string) error {
+	var t sql.NullString
+	if title != "" {
+		t = sql.NullString{String: title, Valid: true}
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET title = ? WHERE id = ?
+	`, t, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: set title %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: set title %q: %w", id, session.ErrNotFound)
+	}
+	return nil
+}
+
 func collectSessions(rows *sql.Rows) ([]session.Session, error) {
 	var out []session.Session
 	for rows.Next() {

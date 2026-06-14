@@ -351,9 +351,10 @@ Browser-facing (hub). All REST is JSON; all auth via session cookie (M5).
 GET    /api/machines                     list machines + online status
 GET    /api/machines/{id}/sessions       sessions on a machine
 GET    /api/projects                     list projects
-POST   /api/projects                     create a project
+POST   /api/projects                     create a project {machineID, name, path, color?}
 GET    /api/sessions                     all sessions (overview index)
-POST   /api/sessions                     open a session {machineID, projectID?, cwd, shell, cols, rows}
+POST   /api/sessions                     open a session {machineID, projectID?, cwd, shell, cols, rows, title?}
+PATCH  /api/sessions/{id}                 rename a session {title}   (metadata only; no wire-protocol change)
 DELETE /api/sessions/{id}                close a session
 POST   /api/auth/webauthn/begin|finish   passkey login           (M5)
 POST   /api/auth/totp                    TOTP fallback           (M5)
@@ -786,7 +787,16 @@ acceptance check passes.
 
 ### M3 — Multi-session + projects
 - Many sessions per machine; create/rename/close; group by project; persist projects.
-- **Done when:** sessions are organized by project across machines, not a flat host list.
+- Sessions may be **project-less** (an "ungrouped" bucket per machine) — `projectID` is nullable.
+  Rename is metadata-only (`PATCH /api/sessions/{id}`, no agent/PTY disruption). **No project
+  delete in M3** (close sessions individually; project deletion is deferred).
+- **Terminal UI is a recursive split-pane workspace**: a binary split tree whose leaves are each a
+  live terminal bound to one session, splittable horizontally/vertically, with a focused pane you can
+  split or close. This collapses the project axis (sidebar tree) and the session axis (panes) into a
+  single browser tab — the core motivation in §1.
+- `sessions.activity` remains a DB-only column, unread/unwritten until M7.
+- **Done when:** sessions are organized by project across machines, not a flat host list, and several
+  live shells are visible at once in split panes.
 
 ### M4 — Mission-control overview
 - vt parser → screen state; throttled snapshot stream; `/ws/overview` fan-out; tile grid;
@@ -816,7 +826,10 @@ acceptance check passes.
 - **Hub** — the single public Go service brokering everything.
 - **Agent** — the per-machine Go binary that owns PTYs and dials home.
 - **Session** — one terminal (one PTY on the agent; metadata row on the hub).
-- **Project** — a named grouping of sessions bound to a machine + working dir.
+- **Project** — a named grouping of sessions bound to a machine + working dir; uniqueness is
+  `(machine_id, path)`. A session may be project-less (ungrouped).
+- **Pane** — one leaf of the terminal split tree: a single live session rendered in part of the
+  viewport. Panes split horizontally/vertically; the workspace is the tree of panes.
 - **Dial-home** — the agent's outbound connection to the hub (no inbound ports on machines).
 - **agentlink** — the hub's live `machineID → connection` registry + outbound `AgentGateway`.
 - **Snapshot** — a compact, rate-capped copy of a session's visible screen, for the overview.

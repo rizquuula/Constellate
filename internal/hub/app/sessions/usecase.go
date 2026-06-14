@@ -107,3 +107,9 @@ func (u *UseCase) MarkExited(ctx context.Context, id string, exitCode int) error
 func (u *UseCase) MarkMachineSessionsLost(ctx context.Context, machineID string) error {
 	return u.store.MarkRunningLost(ctx, machineID, u.clock.Now())
 }
+
+// Rename updates the title of a session. Returns session.ErrNotFound if no
+// session with the given id exists.
+func (u *UseCase) Rename(ctx context.Context, id, title string) error {
+	return u.store.SetTitle(ctx, id, title)
+}

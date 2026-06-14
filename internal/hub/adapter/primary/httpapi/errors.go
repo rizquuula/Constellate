@@ -7,6 +7,7 @@ import (
 
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	"github.com/rizquuula/Constellate/internal/hub/domain/machine"
+	"github.com/rizquuula/Constellate/internal/hub/domain/project"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 )
 
@@ -35,6 +36,15 @@ func statusFor(err error) int {
 	}
 	if errors.Is(err, session.ErrNotFound) {
 		return http.StatusNotFound
+	}
+	if errors.Is(err, project.ErrNotFound) {
+		return http.StatusNotFound
+	}
+	if errors.Is(err, project.ErrInvalid) {
+		return http.StatusBadRequest
+	}
+	if errors.Is(err, project.ErrDuplicatePath) {
+		return http.StatusConflict
 	}
 	if errors.Is(err, agentlink.ErrAgentOffline) {
 		return http.StatusServiceUnavailable

@@ -70,3 +70,8 @@ func (s *Session) SetExited(code int, ts int64) {
 func (s *Session) Touch(ts int64) {
 	s.lastActiveAt = ts
 }
+
+// SetTitle updates the session title.
+func (s *Session) SetTitle(t string) {
+	s.title = t
+}

@@ -183,6 +183,76 @@ func TestSessionStore_NullableFields(t *testing.T) {
 	}
 }
 
+func TestSessionStore_SetTitle(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	s := session.New("s1", "m1", "", "old title", "/bin/bash", 1000)
+	if err := ss.Create(ctx, s); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := ss.SetTitle(ctx, "s1", "new title"); err != nil {
+		t.Fatalf("SetTitle: %v", err)
+	}
+
+	got, err := ss.ByID(ctx, "s1")
+	if err != nil {
+		t.Fatalf("ByID after SetTitle: %v", err)
+	}
+	if got.Title() != "new title" {
+		t.Errorf("Title: got %q, want 'new title'", got.Title())
+	}
+	// last_active_at must NOT be updated by a rename (metadata only).
+	if got.LastActiveAt() != s.LastActiveAt() {
+		t.Errorf("LastActiveAt must be unchanged after rename: got %d, want %d", got.LastActiveAt(), s.LastActiveAt())
+	}
+}
+
+func TestSessionStore_SetTitle_NotFound(t *testing.T) {
+	_, ss := openTestSessionDB(t)
+	err := ss.SetTitle(context.Background(), "no-such-id", "title")
+	if !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("SetTitle missing: got %v, want session.ErrNotFound", err)
+	}
+}
+
+func TestSessionStore_ProjectID_NullAndSet(t *testing.T) {
+	ms, ps, ss := openTestFullDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+	insertTestProject(t, ps, "p1", "m1", "/work")
+
+	// Session with NULL project_id.
+	sNull := session.New("s-null", "m1", "", "", "", 1000)
+	if err := ss.Create(ctx, sNull); err != nil {
+		t.Fatalf("Create s-null: %v", err)
+	}
+	gotNull, err := ss.ByID(ctx, "s-null")
+	if err != nil {
+		t.Fatalf("ByID s-null: %v", err)
+	}
+	if gotNull.ProjectID() != "" {
+		t.Errorf("s-null ProjectID: got %q, want empty", gotNull.ProjectID())
+	}
+
+	// Session with a project_id.
+	sProj := session.New("s-proj", "m1", "p1", "", "", 1000)
+	if err := ss.Create(ctx, sProj); err != nil {
+		t.Fatalf("Create s-proj: %v", err)
+	}
+	gotProj, err := ss.ByID(ctx, "s-proj")
+	if err != nil {
+		t.Fatalf("ByID s-proj: %v", err)
+	}
+	if gotProj.ProjectID() != "p1" {
+		t.Errorf("s-proj ProjectID: got %q, want p1", gotProj.ProjectID())
+	}
+}
+
 func TestSessionStore_MarkRunningLost(t *testing.T) {
 	ms, ss := openTestSessionDB(t)
 	ctx := context.Background()

@@ -14,8 +14,10 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/wsagent"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/memory"
+	"github.com/rizquuula/Constellate/internal/hub/app/projects"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
+	"github.com/rizquuula/Constellate/internal/hub/domain/project"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 	"github.com/rizquuula/Constellate/internal/platform/id"
 	"github.com/rizquuula/Constellate/internal/platform/log"
@@ -41,7 +43,16 @@ func (stubSessionService) List(_ context.Context) ([]session.Session, error) {
 func (stubSessionService) ListByMachine(_ context.Context, _ string) ([]session.Session, error) {
 	return []session.Session{}, nil
 }
-func (stubSessionService) Close(_ context.Context, _ string) error { return nil }
+func (stubSessionService) Close(_ context.Context, _ string) error       { return nil }
+func (stubSessionService) Rename(_ context.Context, _, _ string) error   { return nil }
+
+// stubProjectService satisfies httpapi.ProjectService for tests that don't exercise projects.
+type stubProjectService struct{}
+
+func (stubProjectService) Create(_ context.Context, _ projects.CreateInput) (project.Project, error) {
+	return project.Project{}, nil
+}
+func (stubProjectService) List(_ context.Context) ([]project.Project, error) { return nil, nil }
 
 func TestDialHomeTopology(t *testing.T) {
 	testLogger := log.New("error", "text")
@@ -51,7 +62,7 @@ func TestDialHomeTopology(t *testing.T) {
 	links := agentlink.NewRegistry()
 	reg := registry.New(store, links, registry.SystemClock{}, testLogger)
 	endpoint := wsagent.NewEndpoint(reg, links, noopEvents{}, devToken, testLogger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, endpoint, nil, testLogger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, stubProjectService{}, endpoint, nil, testLogger)
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

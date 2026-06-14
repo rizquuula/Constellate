@@ -94,3 +94,11 @@ func TestTouch(t *testing.T) {
 		t.Errorf("Touch must not change CreatedAt: got %d", s.CreatedAt())
 	}
 }
+
+func TestSetTitle(t *testing.T) {
+	s := session.New("sid6", "mid6", "", "original", "", 100)
+	s.SetTitle("renamed")
+	if s.Title() != "renamed" {
+		t.Errorf("SetTitle: got %q, want renamed", s.Title())
+	}
+}
