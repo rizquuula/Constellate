@@ -50,6 +50,7 @@ type Config struct {
 	HubURL            string
 	DevToken          string
 	MachineID         string
+	InstanceID        string
 	Name              string
 	HeartbeatInterval time.Duration
 	Log               *slog.Logger
@@ -61,6 +62,7 @@ type Client struct {
 	hubURL            string
 	devToken          string
 	machineID         string
+	instanceID        string
 	name              string
 	heartbeatInterval time.Duration
 	log               *slog.Logger
@@ -87,6 +89,7 @@ func New(cfg Config) *Client {
 		hubURL:            cfg.HubURL,
 		devToken:          cfg.DevToken,
 		machineID:         cfg.MachineID,
+		instanceID:        cfg.InstanceID,
 		name:              cfg.Name,
 		heartbeatInterval: cfg.HeartbeatInterval,
 		log:               cfg.Log,
@@ -221,7 +224,7 @@ func (c *Client) connectOnce(ctx context.Context) (connected bool, err error) {
 
 	// Create the single encoder for the control stream; reused by serve.
 	ctrlEnc := transport.NewEncoder(ctrl)
-	if err := sendHello(ctrlEnc, c.machineID, c.name); err != nil {
+	if err := sendHello(ctrlEnc, c.machineID, c.instanceID, c.name); err != nil {
 		return false, err
 	}
 

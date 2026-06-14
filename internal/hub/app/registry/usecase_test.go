@@ -24,7 +24,7 @@ func (s *fakeStore) Upsert(_ context.Context, m machine.Machine) error {
 	existing, ok := s.machines[m.ID()]
 	if ok {
 		// preserve enrolled_at: rehydrate with original enrolled_at
-		updated := machine.Rehydrate(m.ID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
+		updated := machine.Rehydrate(m.ID(), m.InstanceID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
 			existing.EnrolledAt(), m.LastSeenAt())
 		s.machines[m.ID()] = updated
 		return nil
@@ -38,7 +38,7 @@ func (s *fakeStore) UpdateLastSeen(_ context.Context, id string, ts int64) error
 	if !ok {
 		return machine.ErrNotFound
 	}
-	updated := machine.Rehydrate(m.ID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
+	updated := machine.Rehydrate(m.ID(), m.InstanceID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
 		m.EnrolledAt(), ts)
 	s.machines[id] = updated
 	return nil
@@ -92,13 +92,13 @@ func TestRegisterAndList_OnlineStatus(t *testing.T) {
 	uc := registry.New(store, live, clk, discardLogger())
 	ctx := context.Background()
 
-	_, err := uc.Register(ctx, registry.RegisterInput{
+	_, _, err := uc.Register(ctx, registry.RegisterInput{
 		MachineID: "m1", Name: "box1", OS: "linux", Arch: "amd64", AgentVersion: "0.1",
 	})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	_, err = uc.Register(ctx, registry.RegisterInput{
+	_, _, err = uc.Register(ctx, registry.RegisterInput{
 		MachineID: "m2", Name: "box2", OS: "linux", Arch: "arm64", AgentVersion: "0.1",
 	})
 	if err != nil {
@@ -133,7 +133,7 @@ func TestHeartbeat_UpdatesLastSeen(t *testing.T) {
 	uc := registry.New(store, live, clk, discardLogger())
 	ctx := context.Background()
 
-	_, err := uc.Register(ctx, registry.RegisterInput{MachineID: "m1", Name: "box1"})
+	_, _, err := uc.Register(ctx, registry.RegisterInput{MachineID: "m1", Name: "box1"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -159,13 +159,13 @@ func TestReRegister_PreservesEnrolledAt(t *testing.T) {
 	uc := registry.New(store, live, clk, discardLogger())
 	ctx := context.Background()
 
-	_, err := uc.Register(ctx, registry.RegisterInput{MachineID: "m1", Name: "box1"})
+	_, _, err := uc.Register(ctx, registry.RegisterInput{MachineID: "m1", Name: "box1"})
 	if err != nil {
 		t.Fatalf("first Register: %v", err)
 	}
 
 	clk.ts = 9999
-	_, err = uc.Register(ctx, registry.RegisterInput{MachineID: "m1", Name: "box1-renamed"})
+	_, _, err = uc.Register(ctx, registry.RegisterInput{MachineID: "m1", Name: "box1-renamed"})
 	if err != nil {
 		t.Fatalf("second Register: %v", err)
 	}
@@ -191,5 +191,57 @@ func TestHeartbeat_MissingMachine(t *testing.T) {
 	err := uc.Heartbeat(context.Background(), "no-such-id")
 	if !errors.Is(err, machine.ErrNotFound) {
 		t.Errorf("Heartbeat missing machine: got %v, want machine.ErrNotFound", err)
+	}
+}
+
+func TestRegister_RestartDetection(t *testing.T) {
+	store := newFakeStore()
+	live := &fakeLive{online: map[string]bool{}}
+	clk := &fakeClock{ts: 1000}
+	uc := registry.New(store, live, clk, discardLogger())
+	ctx := context.Background()
+
+	// First register (no prior row) → restarted=false.
+	_, restarted, err := uc.Register(ctx, registry.RegisterInput{
+		MachineID: "m1", InstanceID: "inst-A", Name: "box1",
+	})
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	if restarted {
+		t.Error("first register: restarted should be false (no prior row)")
+	}
+
+	// Same instanceID again → restarted=false (WS reconnect).
+	_, restarted, err = uc.Register(ctx, registry.RegisterInput{
+		MachineID: "m1", InstanceID: "inst-A", Name: "box1",
+	})
+	if err != nil {
+		t.Fatalf("second Register (same instanceID): %v", err)
+	}
+	if restarted {
+		t.Error("same instanceID: restarted should be false (reconnect, not restart)")
+	}
+
+	// Different instanceID → restarted=true (process restart).
+	_, restarted, err = uc.Register(ctx, registry.RegisterInput{
+		MachineID: "m1", InstanceID: "inst-B", Name: "box1",
+	})
+	if err != nil {
+		t.Fatalf("third Register (different instanceID): %v", err)
+	}
+	if !restarted {
+		t.Error("different instanceID: restarted should be true")
+	}
+
+	// Empty incoming instanceID → restarted=false (legacy caller).
+	_, restarted, err = uc.Register(ctx, registry.RegisterInput{
+		MachineID: "m1", InstanceID: "", Name: "box1",
+	})
+	if err != nil {
+		t.Fatalf("fourth Register (empty instanceID): %v", err)
+	}
+	if restarted {
+		t.Error("empty incoming instanceID: restarted should be false")
 	}
 }

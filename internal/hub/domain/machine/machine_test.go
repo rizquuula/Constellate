@@ -7,10 +7,13 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	m := machine.New("id1", "mybox", "linux", "amd64", "0.1.0", 1000)
+	m := machine.New("id1", "inst1", "mybox", "linux", "amd64", "0.1.0", 1000)
 
 	if m.ID() != "id1" {
 		t.Errorf("ID: got %q, want %q", m.ID(), "id1")
+	}
+	if m.InstanceID() != "inst1" {
+		t.Errorf("InstanceID: got %q, want %q", m.InstanceID(), "inst1")
 	}
 	if m.Name() != "mybox" {
 		t.Errorf("Name: got %q, want %q", m.Name(), "mybox")
@@ -33,8 +36,11 @@ func TestNew(t *testing.T) {
 }
 
 func TestRehydrate(t *testing.T) {
-	m := machine.Rehydrate("id2", "box2", "darwin", "arm64", "0.2.0", 500, 999)
+	m := machine.Rehydrate("id2", "inst2", "box2", "darwin", "arm64", "0.2.0", 500, 999)
 
+	if m.InstanceID() != "inst2" {
+		t.Errorf("InstanceID: got %q, want %q", m.InstanceID(), "inst2")
+	}
 	if m.EnrolledAt() != 500 {
 		t.Errorf("EnrolledAt: got %d, want 500", m.EnrolledAt())
 	}
@@ -44,7 +50,7 @@ func TestRehydrate(t *testing.T) {
 }
 
 func TestTouch(t *testing.T) {
-	m := machine.New("id3", "box3", "linux", "amd64", "0.1.0", 100)
+	m := machine.New("id3", "", "box3", "linux", "amd64", "0.1.0", 100)
 	if m.LastSeenAt() != 100 {
 		t.Fatalf("pre-touch LastSeenAt: got %d, want 100", m.LastSeenAt())
 	}

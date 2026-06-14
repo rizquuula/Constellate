@@ -21,6 +21,7 @@ const (
 type Hello struct {
 	Type            MessageType `json:"type"`
 	MachineID       string      `json:"machineID"`
+	InstanceID      string      `json:"instanceID"`
 	Name            string      `json:"name"`
 	OS              string      `json:"os"`
 	Arch            string      `json:"arch"`
@@ -93,10 +94,11 @@ type CloseSession struct {
 // --- constructors ---
 
 // NewHello constructs a Hello message with the Type field pre-set.
-func NewHello(machineID, name, os, arch, agentVersion string, protocolVersion int) Hello {
+func NewHello(machineID, instanceID, name, os, arch, agentVersion string, protocolVersion int) Hello {
 	return Hello{
 		Type:            TypeHello,
 		MachineID:       machineID,
+		InstanceID:      instanceID,
 		Name:            name,
 		OS:              os,
 		Arch:            arch,

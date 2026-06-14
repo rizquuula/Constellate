@@ -11,34 +11,8 @@ import (
 
 // liveSession holds runtime state for a single open PTY session.
 type liveSession struct {
-	mu     sync.Mutex
-	pty    PTY
-	writer io.WriteCloser // current attached stream; nil when no one is attached
-}
-
-func (ls *liveSession) writeToCurrent(p []byte) {
-	ls.mu.Lock()
-	w := ls.writer
-	ls.mu.Unlock()
-	if w == nil {
-		return
-	}
-	_, _ = w.Write(p)
-}
-
-func (ls *liveSession) setWriter(w io.WriteCloser) {
-	ls.mu.Lock()
-	ls.writer = w
-	ls.mu.Unlock()
-}
-
-// clearWriter clears the writer only if it is still the given stream.
-func (ls *liveSession) clearWriter(w io.WriteCloser) {
-	ls.mu.Lock()
-	if ls.writer == w {
-		ls.writer = nil
-	}
-	ls.mu.Unlock()
+	pty PTY
+	sb  *terminal.Scrollback
 }
 
 // noopNotifier is the default Notifier used until SetNotifier is called.
@@ -48,22 +22,25 @@ func (noopNotifier) SessionExited(_ string, _ int) {}
 
 // Manager manages the lifecycle of PTY sessions on the agent.
 type Manager struct {
-	factory  PTYFactory
-	notifier Notifier
-	log      *slog.Logger
+	factory         PTYFactory
+	scrollbackBytes int
+	notifier        Notifier
+	log             *slog.Logger
 
 	mu       sync.Mutex
 	sessions map[string]*liveSession
 }
 
-// NewManager creates a Manager. The notifier defaults to a no-op;
+// NewManager creates a Manager. scrollbackBytes sets the per-session scrollback
+// buffer capacity (<=0 uses the default). The notifier defaults to a no-op;
 // call SetNotifier after construction to wire up real notifications.
-func NewManager(factory PTYFactory, log *slog.Logger) *Manager {
+func NewManager(factory PTYFactory, scrollbackBytes int, log *slog.Logger) *Manager {
 	return &Manager{
-		factory:  factory,
-		notifier: noopNotifier{},
-		log:      log,
-		sessions: make(map[string]*liveSession),
+		factory:         factory,
+		scrollbackBytes: scrollbackBytes,
+		notifier:        noopNotifier{},
+		log:             log,
+		sessions:        make(map[string]*liveSession),
 	}
 }
 
@@ -90,7 +67,10 @@ func (m *Manager) Open(sessionID string, spec PTYSpec) (pid int, err error) {
 		return 0, fmt.Errorf("session: open PTY: %w", err)
 	}
 
-	ls := &liveSession{pty: pty}
+	ls := &liveSession{
+		pty: pty,
+		sb:  terminal.NewScrollback(m.scrollbackBytes),
+	}
 
 	m.mu.Lock()
 	m.sessions[sessionID] = ls
@@ -104,18 +84,64 @@ func (m *Manager) Open(sessionID string, spec PTYSpec) (pid int, err error) {
 	return pid, nil
 }
 
-// Attach connects a stream to the live PTY output and copies input from in
-// into the PTY. It blocks until in reaches EOF (detach). The PTY keeps running
-// after Attach returns.
+// Attach connects a stream to the live PTY output, replaying buffered scrollback
+// first, then streaming live output. Input from in is forwarded to the PTY.
+// Attach blocks until in reaches EOF (detach) or the session exits. The PTY
+// keeps running after Attach returns (unless it has exited).
 func (m *Manager) Attach(sessionID string, stream io.ReadWriteCloser, in io.Reader) error {
 	ls, err := m.lookup(sessionID)
 	if err != nil {
 		return err
 	}
 
-	ls.setWriter(stream)
-	_, copyErr := io.Copy(ls.pty, in)
-	ls.clearWriter(stream)
+	// stop signals the drain goroutine to exit.
+	stop := make(chan struct{})
+	// exited is closed by the drain goroutine when the session exits (ok=false).
+	exited := make(chan struct{})
+
+	var once sync.Once
+	closeStream := func() { once.Do(func() { _ = stream.Close() }) }
+
+	// drain: replay from oldest, then forward live output until stop or session exits.
+	go func() {
+		defer close(exited)
+		cursor := ls.sb.Oldest()
+		for {
+			data, next, ok := ls.sb.ReadFrom(cursor, stop)
+			if len(data) > 0 {
+				if _, werr := stream.Write(data); werr != nil {
+					return
+				}
+			}
+			cursor = next
+			if !ok {
+				closeStream()
+				return
+			}
+		}
+	}()
+
+	// Copy keystrokes from client to PTY in a separate goroutine so Attach can
+	// also unblock when the session exits.
+	copyDone := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(ls.pty, in)
+		copyDone <- copyErr
+	}()
+
+	// Wait for either the client to detach (input EOF/error) or session exit.
+	var copyErr error
+	select {
+	case copyErr = <-copyDone:
+		// Normal client detach.
+	case <-exited:
+		// Session exited; drain the copy goroutine (it may return quickly since
+		// the PTY is closed and writes to ls.pty will error).
+		copyErr = <-copyDone
+	}
+
+	close(stop)
+	closeStream()
 
 	return copyErr
 }
@@ -164,14 +190,15 @@ func (m *Manager) lookup(sessionID string) (*liveSession, error) {
 	return ls, nil
 }
 
-// readPump runs per session. It reads PTY output and forwards it to the
-// current attached writer. When the PTY closes it cleans up the session.
+// readPump runs per session. It reads PTY output into the scrollback buffer.
+// When the PTY closes it closes the scrollback, removes the session, and fires
+// the notifier.
 func (m *Manager) readPump(sessionID string, ls *liveSession) {
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := ls.pty.Read(buf)
 		if n > 0 {
-			ls.writeToCurrent(buf[:n])
+			ls.sb.Write(buf[:n])
 		}
 		if err != nil {
 			break
@@ -179,18 +206,11 @@ func (m *Manager) readPump(sessionID string, ls *liveSession) {
 	}
 
 	code, _ := ls.pty.Wait()
+	ls.sb.Close()
 
 	m.mu.Lock()
 	delete(m.sessions, sessionID)
 	m.mu.Unlock()
-
-	ls.mu.Lock()
-	w := ls.writer
-	ls.writer = nil
-	ls.mu.Unlock()
-	if w != nil {
-		_ = w.Close()
-	}
 
 	m.mu.Lock()
 	notifier := m.notifier

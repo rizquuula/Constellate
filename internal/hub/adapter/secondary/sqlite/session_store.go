@@ -93,6 +93,18 @@ func (s *SessionStore) ListByMachine(ctx context.Context, machineID string) ([]s
 	return collectSessions(rows)
 }
 
+// MarkRunningLost bulk-marks all running sessions for a machine as lost.
+func (s *SessionStore) MarkRunningLost(ctx context.Context, machineID string, ts int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET status = ?, last_active_at = ?
+		WHERE machine_id = ? AND status = ?
+	`, string(session.StatusLost), ts, machineID, string(session.StatusRunning))
+	if err != nil {
+		return fmt.Errorf("sqlite: mark running lost for machine %q: %w", machineID, err)
+	}
+	return nil
+}
+
 // SetExited updates the session's status, exit_code, and last_active_at.
 func (s *SessionStore) SetExited(ctx context.Context, id string, exitCode int, ts int64) error {
 	res, err := s.db.ExecContext(ctx, `

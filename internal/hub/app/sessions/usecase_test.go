@@ -63,6 +63,17 @@ func (s *fakeSessionStore) SetExited(_ context.Context, id string, exitCode int,
 	return nil
 }
 
+func (s *fakeSessionStore) MarkRunningLost(_ context.Context, machineID string, ts int64) error {
+	for id, ss := range s.data {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning {
+			ss.SetStatus(session.StatusLost)
+			ss.Touch(ts)
+			s.data[id] = ss
+		}
+	}
+	return nil
+}
+
 type fakeGateway struct {
 	openErr    error
 	closeCalls []string
@@ -223,5 +234,46 @@ func TestClose_NotFound(t *testing.T) {
 	err := uc.Close(context.Background(), "no-such-id")
 	if !errors.Is(err, session.ErrNotFound) {
 		t.Errorf("Close missing: got %v, want session.ErrNotFound", err)
+	}
+}
+
+func TestMarkMachineSessionsLost(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	ctx := context.Background()
+
+	// Open a running session.
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Seed a pre-exited session manually into the store.
+	exitedID := "exited-session"
+	es := session.New(exitedID, "m1", "", "", "", 1000)
+	es.SetExited(0, 1000)
+	store.data[exitedID] = es
+
+	clk.ts = 2000
+	if err := uc.MarkMachineSessionsLost(ctx, "m1"); err != nil {
+		t.Fatalf("MarkMachineSessionsLost: %v", err)
+	}
+
+	gotRun, err := store.ByID(ctx, s.ID())
+	if err != nil {
+		t.Fatalf("ByID running: %v", err)
+	}
+	if gotRun.Status() != session.StatusLost {
+		t.Errorf("running session: got status %q, want lost", gotRun.Status())
+	}
+
+	gotExit, err := store.ByID(ctx, exitedID)
+	if err != nil {
+		t.Fatalf("ByID exited: %v", err)
+	}
+	if gotExit.Status() != session.StatusExited {
+		t.Errorf("exited session: must remain exited, got %q", gotExit.Status())
 	}
 }

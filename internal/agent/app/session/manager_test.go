@@ -140,7 +140,7 @@ func (n *fakeNotifier) wait(t *testing.T, timeout time.Duration) exitCall {
 func newTestManager(pty *fakePTY) (*Manager, *fakeNotifier) {
 	factory := &fakeFactory{pty: pty}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m := NewManager(factory, log)
+	m := NewManager(factory, 64*1024, log)
 	notifier := newFakeNotifier()
 	m.SetNotifier(notifier)
 	return m, notifier
@@ -175,61 +175,87 @@ func TestManagerOpenDuplicateReturnsError(t *testing.T) {
 	_ = fake.Close()
 }
 
-func TestManagerAttachOutputReachesWriter(t *testing.T) {
+// TestManagerReplayOnAttach verifies that PTY output emitted before Attach is
+// called is replayed to the stream from the scrollback buffer.
+func TestManagerReplayOnAttach(t *testing.T) {
 	fake := newFakePTY(42)
 	m, _ := newTestManager(fake)
 
-	if _, err := m.Open("sess-out", PTYSpec{}); err != nil {
+	if _, err := m.Open("sess-replay", PTYSpec{}); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+
+	// Write output before any client is attached.
+	const preOutput = "pre-attach-output"
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := fake.outputW.Write([]byte(preOutput))
+		writeDone <- err
+	}()
+
+	// Wait for the readPump to consume the write into the scrollback.
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write fake PTY output: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out writing pre-attach PTY output")
+	}
+
+	// Give readPump time to drain the pipe into scrollback.
+	time.Sleep(20 * time.Millisecond)
 
 	stream := &capturingWriter{}
 	inR, inW := io.Pipe()
 	attachDone := make(chan error, 1)
 	go func() {
-		attachDone <- m.Attach("sess-out", stream, inR)
+		attachDone <- m.Attach("sess-replay", stream, inR)
 	}()
 
-	// Write PTY output and verify it reaches the capturing writer. The Attach
-	// goroutine sets the writer asynchronously; output emitted before the writer
-	// is attached is intentionally dropped (no scrollback in M1). Each pipe write
-	// blocks until the readPump consumes it, so write in a loop until a write
-	// lands after the writer is attached and is forwarded to the stream.
+	// Wait until the replay arrives.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := fake.outputW.Write([]byte("pty-output")); err != nil {
-			t.Fatalf("write fake output: %v", err)
-		}
-		if bytes.Contains(stream.Bytes(), []byte("pty-output")) {
+		if bytes.Contains(stream.Bytes(), []byte(preOutput)) {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if !bytes.Contains(stream.Bytes(), []byte("pty-output")) {
-		t.Errorf("PTY output not received by stream; got %q", stream.Bytes())
+	if !bytes.Contains(stream.Bytes(), []byte(preOutput)) {
+		t.Errorf("replay not received; got %q", stream.Bytes())
 	}
 
-	// Detach by closing the input pipe.
+	// Also verify live output arrives after replay.
+	const liveOutput = "live-output"
+	if _, err := fake.outputW.Write([]byte(liveOutput)); err != nil {
+		t.Fatalf("write live PTY output: %v", err)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if bytes.Contains(stream.Bytes(), []byte(liveOutput)) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !bytes.Contains(stream.Bytes(), []byte(liveOutput)) {
+		t.Errorf("live output not received; got %q", stream.Bytes())
+	}
+
 	_ = inW.Close()
 	select {
 	case err := <-attachDone:
 		if err != nil && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, io.EOF) {
-			t.Errorf("Attach returned unexpected error: %v", err)
+			t.Errorf("Attach unexpected error: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Attach did not return after input EOF")
 	}
 
-	// PTY must still be alive (session still in manager).
-	select {
-	case <-fake.exitCh:
-		t.Error("PTY was closed after detach — expected it to stay running")
-	default:
-	}
-
 	_ = fake.Close()
 }
 
+// TestManagerAttachInputReachesPTY verifies that keystrokes from the client
+// are forwarded to the PTY.
 func TestManagerAttachInputReachesPTY(t *testing.T) {
 	fake := newFakePTY(43)
 	m, _ := newTestManager(fake)
@@ -270,6 +296,81 @@ func TestManagerAttachInputReachesPTY(t *testing.T) {
 	_ = fake.Close()
 }
 
+// TestManagerDetachKeepsPTYAlive verifies that closing the client input does
+// not kill the PTY, and a second Attach replays buffered output again.
+func TestManagerDetachKeepsPTYAlive(t *testing.T) {
+	fake := newFakePTY(44)
+	m, _ := newTestManager(fake)
+
+	if _, err := m.Open("sess-detach", PTYSpec{}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Produce output that will be buffered.
+	const buffered = "buffered-output"
+	go func() { _, _ = fake.outputW.Write([]byte(buffered)) }()
+	time.Sleep(30 * time.Millisecond)
+
+	// First attach: receive buffered output, then detach.
+	s1 := &capturingWriter{}
+	inR1, inW1 := io.Pipe()
+	attach1Done := make(chan error, 1)
+	go func() { attach1Done <- m.Attach("sess-detach", s1, inR1) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if bytes.Contains(s1.Bytes(), []byte(buffered)) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !bytes.Contains(s1.Bytes(), []byte(buffered)) {
+		t.Errorf("first attach: replay not received; got %q", s1.Bytes())
+	}
+
+	_ = inW1.Close()
+	select {
+	case <-attach1Done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first Attach did not return after input EOF")
+	}
+
+	// PTY must still be alive.
+	select {
+	case <-fake.exitCh:
+		t.Error("PTY was closed after detach — expected it to stay running")
+	default:
+	}
+
+	// Second attach: must replay the same buffered output again.
+	s2 := &capturingWriter{}
+	inR2, inW2 := io.Pipe()
+	attach2Done := make(chan error, 1)
+	go func() { attach2Done <- m.Attach("sess-detach", s2, inR2) }()
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if bytes.Contains(s2.Bytes(), []byte(buffered)) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !bytes.Contains(s2.Bytes(), []byte(buffered)) {
+		t.Errorf("second attach: replay not received; got %q", s2.Bytes())
+	}
+
+	_ = inW2.Close()
+	select {
+	case <-attach2Done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Attach did not return after input EOF")
+	}
+
+	_ = fake.Close()
+}
+
+// TestManagerSessionExitedNotification verifies that when the PTY exits the
+// notifier fires with the correct code and the session is removed.
 func TestManagerSessionExitedNotification(t *testing.T) {
 	fake := newFakePTY(77)
 	fake.exitCode = 3
@@ -293,6 +394,61 @@ func TestManagerSessionExitedNotification(t *testing.T) {
 	// Session must be removed from the map.
 	if err := m.Close("sess-exit"); !errors.Is(err, terminal.ErrNotFound) {
 		t.Errorf("expected ErrNotFound after exit, got %v", err)
+	}
+}
+
+// blockingStream is an io.ReadWriteCloser where the read side blocks until
+// Close is called, matching the production behaviour where stream and in share
+// the same underlying connection.
+type blockingStream struct {
+	capturingWriter
+	pr *io.PipeReader
+	pw *io.PipeWriter
+}
+
+func newBlockingStream() *blockingStream {
+	pr, pw := io.Pipe()
+	return &blockingStream{pr: pr, pw: pw}
+}
+
+func (b *blockingStream) Read(p []byte) (int, error) { return b.pr.Read(p) }
+
+func (b *blockingStream) Close() error {
+	_ = b.capturingWriter.Close()
+	_ = b.pr.Close()
+	_ = b.pw.Close()
+	return nil
+}
+
+// TestManagerExitUnblocksAttach verifies that when a session exits while a
+// client is attached, the Attach call returns and the stream is closed.
+// The stream's Read side blocks until Close is called, mirroring a net.Conn
+// where closing the connection also unblocks any pending reads.
+func TestManagerExitUnblocksAttach(t *testing.T) {
+	fake := newFakePTY(88)
+	m, _ := newTestManager(fake)
+
+	if _, err := m.Open("sess-exitattach", PTYSpec{}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	stream := newBlockingStream()
+	attachDone := make(chan error, 1)
+	// Pass stream as both the ReadWriteCloser and the input reader so that
+	// closing the stream also unblocks the io.Copy reading from it.
+	go func() { attachDone <- m.Attach("sess-exitattach", stream, stream) }()
+
+	time.Sleep(20 * time.Millisecond)
+	_ = fake.Close() // trigger PTY exit
+
+	select {
+	case <-attachDone:
+		// Attach returned — stream.closed should be true.
+		if !stream.closed {
+			t.Error("stream was not closed when session exited")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Attach did not return after session exit")
 	}
 }
 

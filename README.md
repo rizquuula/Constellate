@@ -5,28 +5,28 @@
 > project, persistent across reconnects, with a mission-control overview of every running terminal at
 > a glance.
 
-**Status:** M1 (first live terminal) · **Module:** `github.com/rizquuula/Constellate` ·
+**Status:** M2 (persistent terminals) · **Module:** `github.com/rizquuula/Constellate` ·
 **Go:** 1.25+
 
 See [`DESIGN.md`](DESIGN.md) for the canonical architecture and the full milestone roadmap.
 
 ---
 
-## What works today (through M1)
+## What works today (through M2)
 
-A **live interactive shell in the browser**, end to end:
+A **persistent, live interactive shell in the browser**, end to end:
 
 - **Agents dial home** (outbound only) to the hub over a WebSocket, run **yamux** over it, and send
   `Hello` + periodic `Heartbeat` on a control stream — reconnecting automatically with backoff.
 - The **hub** registers agents in a live `machineID → connection` registry, persists machine + session
   metadata to **SQLite**, and brokers a browser WebSocket ↔ a yamux **data stream** ↔ a PTY on the agent.
-- The **agent** spawns a real PTY per session, pipes raw bytes both ways, and applies resizes.
+- The **agent** spawns a real PTY per session, keeps a **bounded scrollback buffer**, pipes raw bytes
+  both ways, and applies resizes.
 - A **React + xterm.js** app (embedded in the hub binary) lets you pick an online machine, open a shell,
-  type, see output, and resize. PTYs **survive a tab close** — re-attach resumes the live session.
-
-> **M1 limitation:** there is no scrollback **replay** yet, so re-attaching (or output printed before you
-> attach) won't repaint history — the prompt may appear blank until your first keystroke. Full scrollback
-> persistence lands in **M2**.
+  type, see output, and resize. PTYs **survive a tab close**, and **re-attaching or switching sessions
+  replays scrollback** — history repaints instantly, then continues live.
+- When an agent **process restarts**, its orphaned sessions are marked **`lost`** (the session list
+  stays honest); a transient reconnect of the same process does not.
 
 No mission-control overview, projects, or auth hardening yet — those arrive in M3–M5 (see `DESIGN.md` §18).
 
@@ -60,8 +60,9 @@ CONSTELLATE_NAME=my-laptop \
 ```
 
 Then open <http://127.0.0.1:8080>: the machine appears **online** in the sidebar. Click **New shell**
-to open a live terminal — type, run `ls`/`top`, resize the window. Close the tab and re-open the
-session; the shell is still running (no scrollback replay until M2).
+to open a live terminal — type, run `ls`/`top`, resize the window. Close the tab (or switch to another
+session) and re-open it; the shell is still running and **its history repaints instantly** before
+continuing live.
 
 Stop the agent (Ctrl-C) and the machine flips offline; restart it and it comes back with the same id.
 

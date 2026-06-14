@@ -4,6 +4,7 @@ package machine
 // use constructors and accessors.
 type Machine struct {
 	id           string
+	instanceID   string
 	name         string
 	os           string
 	arch         string
@@ -13,9 +14,10 @@ type Machine struct {
 }
 
 // New creates a Machine at enrollment time. lastSeenAt is set equal to enrolledAt.
-func New(id, name, osName, arch, agentVersion string, enrolledAt int64) Machine {
+func New(id, instanceID, name, osName, arch, agentVersion string, enrolledAt int64) Machine {
 	return Machine{
 		id:           id,
+		instanceID:   instanceID,
 		name:         name,
 		os:           osName,
 		arch:         arch,
@@ -26,9 +28,10 @@ func New(id, name, osName, arch, agentVersion string, enrolledAt int64) Machine 
 }
 
 // Rehydrate reconstructs a Machine from a persisted row.
-func Rehydrate(id, name, osName, arch, agentVersion string, enrolledAt, lastSeenAt int64) Machine {
+func Rehydrate(id, instanceID, name, osName, arch, agentVersion string, enrolledAt, lastSeenAt int64) Machine {
 	return Machine{
 		id:           id,
+		instanceID:   instanceID,
 		name:         name,
 		os:           osName,
 		arch:         arch,
@@ -39,6 +42,7 @@ func Rehydrate(id, name, osName, arch, agentVersion string, enrolledAt, lastSeen
 }
 
 func (m Machine) ID() string           { return m.id }
+func (m Machine) InstanceID() string   { return m.instanceID }
 func (m Machine) Name() string         { return m.name }
 func (m Machine) OS() string           { return m.os }
 func (m Machine) Arch() string         { return m.arch }

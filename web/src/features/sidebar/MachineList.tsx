@@ -6,15 +6,18 @@ export function MachineList() {
   const sessions = useStore((s) => s.sessions)
   const activeSessionId = useStore((s) => s.activeSessionId)
   const refreshMachines = useStore((s) => s.refreshMachines)
+  const refreshSessions = useStore((s) => s.refreshSessions)
   const openShell = useStore((s) => s.openShell)
   const setActive = useStore((s) => s.setActive)
 
   useEffect(() => {
-    const id = setInterval(() => {
+    const tick = () => {
       refreshMachines().catch(console.error)
-    }, 2000)
+      refreshSessions().catch(console.error)
+    }
+    const id = setInterval(tick, 2000)
     return () => clearInterval(id)
-  }, [refreshMachines])
+  }, [refreshMachines, refreshSessions])
 
   return (
     <div className="sidebar">
@@ -47,16 +50,22 @@ export function MachineList() {
         {sessions.length === 0 && (
           <p className="sidebar-empty">No active sessions</p>
         )}
-        {sessions.map((s) => (
-          <div
-            key={s.id}
-            className={`session-item ${s.id === activeSessionId ? 'session-active' : ''}`}
-            onClick={() => setActive(s.id)}
-          >
-            <span className="session-id">{s.id.slice(0, 12)}</span>
-            <span className="session-status">{s.status}</span>
-          </div>
-        ))}
+        {sessions.map((s) => {
+          const isRunning = s.status === 'running'
+          return (
+            <div
+              key={s.id}
+              className={`session-item${s.id === activeSessionId ? ' session-active' : ''}${!isRunning ? ' session-dead' : ''}`}
+              onClick={() => {
+                if (isRunning) setActive(s.id)
+              }}
+              title={isRunning ? undefined : `Session ${s.status} — cannot attach`}
+            >
+              <span className="session-id">{s.id.slice(0, 12)}</span>
+              <span className={`session-badge session-badge-${s.status}`}>{s.status}</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

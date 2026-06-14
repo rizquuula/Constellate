@@ -28,7 +28,7 @@ func openTestSessionDB(t *testing.T) (*sqlite.MachineStore, *sqlite.SessionStore
 
 func insertMachine(t *testing.T, ms *sqlite.MachineStore, id string) {
 	t.Helper()
-	m := machine.New(id, "box", "linux", "amd64", "0.1", 1000)
+	m := machine.New(id, "", "box", "linux", "amd64", "0.1", 1000)
 	if err := ms.Upsert(context.Background(), m); err != nil {
 		t.Fatalf("insert machine: %v", err)
 	}
@@ -180,5 +180,49 @@ func TestSessionStore_NullableFields(t *testing.T) {
 	}
 	if got.Shell() != "" {
 		t.Errorf("Shell should be empty, got %q", got.Shell())
+	}
+}
+
+func TestSessionStore_MarkRunningLost(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	// Seed: one running session and one already-exited session.
+	running := session.New("s-run", "m1", "", "", "", 1000)
+	if err := ss.Create(ctx, running); err != nil {
+		t.Fatalf("Create running: %v", err)
+	}
+	exited := session.New("s-exit", "m1", "", "", "", 1000)
+	if err := ss.Create(ctx, exited); err != nil {
+		t.Fatalf("Create exited: %v", err)
+	}
+	if err := ss.SetExited(ctx, "s-exit", 0, 1500); err != nil {
+		t.Fatalf("SetExited: %v", err)
+	}
+
+	// Mark running sessions lost.
+	if err := ss.MarkRunningLost(ctx, "m1", 2000); err != nil {
+		t.Fatalf("MarkRunningLost: %v", err)
+	}
+
+	gotRun, err := ss.ByID(ctx, "s-run")
+	if err != nil {
+		t.Fatalf("ByID s-run: %v", err)
+	}
+	if gotRun.Status() != session.StatusLost {
+		t.Errorf("running session: got status %q, want lost", gotRun.Status())
+	}
+	if gotRun.LastActiveAt() != 2000 {
+		t.Errorf("running session: LastActiveAt got %d, want 2000", gotRun.LastActiveAt())
+	}
+
+	gotExit, err := ss.ByID(ctx, "s-exit")
+	if err != nil {
+		t.Fatalf("ByID s-exit: %v", err)
+	}
+	if gotExit.Status() != session.StatusExited {
+		t.Errorf("exited session must remain exited, got %q", gotExit.Status())
 	}
 }

@@ -23,16 +23,17 @@ func NewMachineStore(db *sql.DB) *MachineStore {
 // enrolled_at is intentionally excluded from the UPDATE so it is never clobbered.
 func (s *MachineStore) Upsert(ctx context.Context, m machine.Machine) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO machines (id, name, os, arch, agent_version, enrolled_at, last_seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO machines (id, instance_id, name, os, arch, agent_version, enrolled_at, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
+			instance_id   = excluded.instance_id,
 			name          = excluded.name,
 			os            = excluded.os,
 			arch          = excluded.arch,
 			agent_version = excluded.agent_version,
 			last_seen_at  = excluded.last_seen_at
 	`,
-		m.ID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(), m.EnrolledAt(), m.LastSeenAt(),
+		m.ID(), m.InstanceID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(), m.EnrolledAt(), m.LastSeenAt(),
 	)
 	if err != nil {
 		return fmt.Errorf("sqlite: upsert machine %q: %w", m.ID(), err)
@@ -61,7 +62,7 @@ func (s *MachineStore) UpdateLastSeen(ctx context.Context, id string, ts int64) 
 // List returns all machine records.
 func (s *MachineStore) List(ctx context.Context) ([]machine.Machine, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, os, arch, agent_version, enrolled_at, last_seen_at
+		SELECT id, instance_id, name, os, arch, agent_version, enrolled_at, last_seen_at
 		FROM machines
 	`)
 	if err != nil {
@@ -87,7 +88,7 @@ func (s *MachineStore) List(ctx context.Context) ([]machine.Machine, error) {
 // Returns machine.ErrNotFound (wrapped) if no row matches.
 func (s *MachineStore) ByID(ctx context.Context, id string) (machine.Machine, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, os, arch, agent_version, enrolled_at, last_seen_at
+		SELECT id, instance_id, name, os, arch, agent_version, enrolled_at, last_seen_at
 		FROM machines WHERE id = ?
 	`, id)
 	m, err := scanMachine(row)
@@ -107,12 +108,13 @@ type scanner interface {
 
 func scanMachine(s scanner) (machine.Machine, error) {
 	var (
-		id, name, osName     string
-		arch, agentVersion   sql.NullString
-		enrolledAt           int64
-		lastSeenAt           sql.NullInt64
+		id, name, osName   string
+		instanceID         sql.NullString
+		arch, agentVersion sql.NullString
+		enrolledAt         int64
+		lastSeenAt         sql.NullInt64
 	)
-	if err := s.Scan(&id, &name, &osName, &arch, &agentVersion, &enrolledAt, &lastSeenAt); err != nil {
+	if err := s.Scan(&id, &instanceID, &name, &osName, &arch, &agentVersion, &enrolledAt, &lastSeenAt); err != nil {
 		return machine.Machine{}, err
 	}
 	ls := enrolledAt
@@ -120,7 +122,10 @@ func scanMachine(s scanner) (machine.Machine, error) {
 		ls = lastSeenAt.Int64
 	}
 	return machine.Rehydrate(
-		id, name, osName,
+		id,
+		instanceID.String,
+		name,
+		osName,
 		arch.String,
 		agentVersion.String,
 		enrolledAt, ls,

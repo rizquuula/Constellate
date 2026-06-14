@@ -12,7 +12,7 @@ interface Store {
   setActive: (id: string) => void
 }
 
-export const useStore = create<Store>((set) => ({
+export const useStore = create<Store>((set, get) => ({
   machines: [],
   sessions: [],
   activeSessionId: null,
@@ -24,6 +24,15 @@ export const useStore = create<Store>((set) => ({
 
   refreshSessions: async () => {
     const sessions = await listSessions()
+    // If the active session is no longer running, clear it so the UI reflects reality.
+    const activeId = get().activeSessionId
+    if (activeId !== null) {
+      const active = sessions.find((s) => s.id === activeId)
+      if (active && active.status !== 'running') {
+        set({ sessions, activeSessionId: null })
+        return
+      }
+    }
     set({ sessions })
   },
 

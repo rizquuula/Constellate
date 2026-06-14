@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -16,6 +17,7 @@ func (SystemClock) Now() int64 { return time.Now().Unix() }
 // RegisterInput carries the data needed to register or re-register a machine.
 type RegisterInput struct {
 	MachineID    string
+	InstanceID   string
 	Name         string
 	OS           string
 	Arch         string
@@ -46,15 +48,26 @@ func New(store MachineStore, live LiveAgents, clock Clock, log *slog.Logger) *Us
 	}
 }
 
-// Register upserts the machine record. On a re-register the store must preserve enrolled_at.
-func (u *UseCase) Register(ctx context.Context, in RegisterInput) (machine.Machine, error) {
-	now := u.clock.Now()
-	m := machine.New(in.MachineID, in.Name, in.OS, in.Arch, in.AgentVersion, now)
-	if err := u.store.Upsert(ctx, m); err != nil {
-		return machine.Machine{}, err
+// Register upserts the machine record and detects process restarts via instanceID.
+// restarted is true when a prior record exists with a non-empty instanceID that
+// differs from the incoming one (same instanceID means WS reconnect, not restart).
+// On a re-register the store preserves enrolled_at.
+func (u *UseCase) Register(ctx context.Context, in RegisterInput) (m machine.Machine, restarted bool, err error) {
+	prior, priorErr := u.store.ByID(ctx, in.MachineID)
+	if priorErr != nil && !errors.Is(priorErr, machine.ErrNotFound) {
+		return machine.Machine{}, false, priorErr
 	}
-	u.log.Info("machine registered", "machineID", in.MachineID, "name", in.Name)
-	return m, nil
+	if priorErr == nil && in.InstanceID != "" && prior.InstanceID() != "" && prior.InstanceID() != in.InstanceID {
+		restarted = true
+	}
+
+	now := u.clock.Now()
+	m = machine.New(in.MachineID, in.InstanceID, in.Name, in.OS, in.Arch, in.AgentVersion, now)
+	if err := u.store.Upsert(ctx, m); err != nil {
+		return machine.Machine{}, false, err
+	}
+	u.log.Info("machine registered", "machineID", in.MachineID, "name", in.Name, "restarted", restarted)
+	return m, restarted, nil
 }
 
 // Heartbeat records that the machine was seen at the current time.

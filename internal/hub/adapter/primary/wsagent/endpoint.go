@@ -15,6 +15,7 @@ import (
 // SessionEvents is a consumer-side port for async session lifecycle events.
 type SessionEvents interface {
 	MarkExited(ctx context.Context, sessionID string, exitCode int) error
+	MarkMachineSessionsLost(ctx context.Context, machineID string) error
 }
 
 // Endpoint handles WebSocket dial-home connections from agents.

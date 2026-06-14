@@ -161,7 +161,7 @@ func TestServeAgentDataPath(t *testing.T) {
 	fakeP := newFakePTY(1234)
 	factory := newFakePTYFactory(fakeP)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mgr := session.NewManager(factory, log)
+	mgr := session.NewManager(factory, 64*1024, log)
 
 	client := New(Config{
 		HubURL:            "ws://test",

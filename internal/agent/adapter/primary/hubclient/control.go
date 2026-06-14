@@ -9,9 +9,10 @@ import (
 )
 
 // sendHello encodes and sends a Hello frame on enc.
-func sendHello(enc *transport.Encoder, machineID, name string) error {
+func sendHello(enc *transport.Encoder, machineID, instanceID, name string) error {
 	return enc.Encode(transport.NewHello(
 		machineID,
+		instanceID,
 		name,
 		runtime.GOOS,
 		runtime.GOARCH,

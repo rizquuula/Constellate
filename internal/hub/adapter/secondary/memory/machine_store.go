@@ -29,7 +29,7 @@ func (s *MachineStore) Upsert(_ context.Context, m machine.Machine) error {
 	existing, ok := s.machines[m.ID()]
 	if ok {
 		updated := machine.Rehydrate(
-			m.ID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
+			m.ID(), m.InstanceID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
 			existing.EnrolledAt(), m.LastSeenAt(),
 		)
 		s.machines[m.ID()] = updated
@@ -49,7 +49,7 @@ func (s *MachineStore) UpdateLastSeen(_ context.Context, id string, ts int64) er
 	if !ok {
 		return fmt.Errorf("memory: update last_seen_at %q: %w", id, machine.ErrNotFound)
 	}
-	updated := machine.Rehydrate(m.ID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
+	updated := machine.Rehydrate(m.ID(), m.InstanceID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
 		m.EnrolledAt(), ts)
 	s.machines[id] = updated
 	return nil

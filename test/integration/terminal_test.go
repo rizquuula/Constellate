@@ -29,20 +29,21 @@ import (
 	"github.com/rizquuula/Constellate/internal/platform/log"
 )
 
-const e2eToken = "e2e-token"
-
-func TestTerminalLifecycle(t *testing.T) {
+// newInProcessHub wires up a complete hub (SQLite + all use cases) backed by a
+// temporary database and returns the test server, the sessions use case, and a
+// wsURL helper. The caller is responsible for closing the returned *httptest.Server.
+func newInProcessHub(t *testing.T) (ts *httptest.Server, sessionsUC *sessions.UseCase, wsURL func(string) string) {
+	t.Helper()
 	logger := log.New("error", "text")
 
-	// --- Wire hub: SQLite + real use cases ---
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "e2e.db")
+	dbPath := filepath.Join(dir, "hub.db")
 
 	db, err := sqlite.Open(dbPath)
 	if err != nil {
 		t.Fatalf("sqlite.Open: %v", err)
 	}
-	defer func() { _ = db.Close() }()
+	t.Cleanup(func() { _ = db.Close() })
 
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("sqlite.Migrate: %v", err)
@@ -53,21 +54,29 @@ func TestTerminalLifecycle(t *testing.T) {
 	links := agentlink.NewRegistry()
 	gateway := agentlink.NewGateway(links)
 	reg := registry.New(machineStore, links, registry.SystemClock{}, logger)
-	sessionsUC := sessions.New(sessStore, gateway, sessions.SystemClock{}, id.New, logger)
+	sessionsUC = sessions.New(sessStore, gateway, sessions.SystemClock{}, id.New, logger)
 	attachUC := attach.New(sessStore, gateway, logger)
 	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, e2eToken, logger)
 	termHandler := wsbrowser.NewTerminalHandler(attachUC, logger)
 	srv := httpapi.NewServer("127.0.0.1:0", reg, sessionsUC, endpoint, termHandler, logger)
 
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	wsURL := func(path string) string {
+	ts = httptest.NewServer(srv.Handler())
+	wsURL = func(path string) string {
 		return "ws" + strings.TrimPrefix(ts.URL, "http") + path
 	}
+	return ts, sessionsUC, wsURL
+}
+
+const e2eToken = "e2e-token"
+
+func TestTerminalLifecycle(t *testing.T) {
+	logger := log.New("error", "text")
+
+	ts, _, wsURL := newInProcessHub(t)
+	defer ts.Close()
 
 	// --- Wire agent: real PTY manager + hub client ---
-	mgr := session.NewManager(agentpty.Factory{}, logger)
+	mgr := session.NewManager(agentpty.Factory{}, 256*1024, logger)
 	machineID := id.New()
 
 	agentCtx, cancelAgent := context.WithCancel(context.Background())
@@ -171,7 +180,13 @@ func TestTerminalLifecycle(t *testing.T) {
 		t.Fatalf("step 5: re-dial /ws/term: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	// Replay assertion: before sending any new input, the scrollback from the
+	// prior attachment must be replayed to c2. e2e_marker_one was written in
+	// step 3 and must appear in the replayed buffer with zero new keystrokes.
+	if !readUntil(t, wsCtx, c2, "e2e_marker_one", 5*time.Second) {
+		t.Fatal("step 5: scrollback was not replayed on re-attach — e2e_marker_one missing from replay buffer")
+	}
+	t.Log("step 5: replay verified — e2e_marker_one found in replayed scrollback without new input")
 
 	if err := c2.Write(wsCtx, websocket.MessageBinary, []byte("echo e2e_marker_three\n")); err != nil {
 		t.Fatalf("step 5: ws write marker_three: %v", err)
@@ -236,6 +251,109 @@ func readUntil(t *testing.T, ctx context.Context, c *websocket.Conn, marker stri
 	}
 	t.Logf("readUntil: marker %q not found; accumulated output:\n%s", marker, buf.String())
 	return false
+}
+
+// TestSessionLostOnAgentRestart verifies that when an agent process restarts
+// (same machineID, different instanceID), the hub marks all running sessions
+// for that machine as "lost".
+func TestSessionLostOnAgentRestart(t *testing.T) {
+	logger := log.New("error", "text")
+
+	ts, _, wsURL := newInProcessHub(t)
+	defer ts.Close()
+
+	machineID := id.New()
+
+	// --- Start first agent instance ("inst-A") ---
+	mgrA := session.NewManager(agentpty.Factory{}, 256*1024, logger)
+	ctxA, cancelA := context.WithCancel(context.Background())
+
+	clientA := hubclient.New(hubclient.Config{
+		HubURL:            wsURL("/ws/agent"),
+		DevToken:          e2eToken,
+		MachineID:         machineID,
+		InstanceID:        "inst-A",
+		Name:              "lost-test",
+		HeartbeatInterval: 100 * time.Millisecond,
+		Sessions:          mgrA,
+		Log:               logger,
+	})
+	mgrA.SetNotifier(clientA)
+	go func() { _ = clientA.Run(ctxA) }()
+
+	// Wait for machine online
+	waitFor(t, 5*time.Second, "machine should come online (inst-A)", func() bool {
+		found, online := machineStatus(t, ts.URL, machineID)
+		return found && online
+	})
+	t.Log("inst-A: machine is online")
+
+	// Open a session — it should be running
+	body := fmt.Sprintf(`{"machineID":%q,"cols":80,"rows":24}`, machineID)
+	resp, err := http.Post(ts.URL+"/api/sessions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/sessions: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /api/sessions: expected 201, got %d", resp.StatusCode)
+	}
+
+	var sessDTO struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sessDTO); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	sid := sessDTO.ID
+	if sid == "" {
+		t.Fatal("session id is empty")
+	}
+
+	waitFor(t, 5*time.Second, "session should be running", func() bool {
+		return sessionHasStatus(t, ts.URL, sid, "running")
+	})
+	t.Logf("inst-A: session %s is running", sid)
+
+	// --- Simulate process restart: cancel inst-A, wait offline ---
+	cancelA()
+	waitFor(t, 5*time.Second, "machine should go offline after inst-A cancel", func() bool {
+		found, online := machineStatus(t, ts.URL, machineID)
+		return found && !online
+	})
+	t.Log("inst-A: machine is offline")
+
+	// --- Start second agent instance ("inst-B") with the same machineID ---
+	mgrB := session.NewManager(agentpty.Factory{}, 256*1024, logger)
+	ctxB, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+
+	clientB := hubclient.New(hubclient.Config{
+		HubURL:            wsURL("/ws/agent"),
+		DevToken:          e2eToken,
+		MachineID:         machineID,
+		InstanceID:        "inst-B",
+		Name:              "lost-test",
+		HeartbeatInterval: 100 * time.Millisecond,
+		Sessions:          mgrB,
+		Log:               logger,
+	})
+	mgrB.SetNotifier(clientB)
+	go func() { _ = clientB.Run(ctxB) }()
+
+	// Wait for machine online again
+	waitFor(t, 5*time.Second, "machine should come back online (inst-B)", func() bool {
+		found, online := machineStatus(t, ts.URL, machineID)
+		return found && online
+	})
+	t.Log("inst-B: machine is online")
+
+	// The session opened under inst-A must now be "lost"
+	waitFor(t, 5*time.Second, "session should become lost after agent restart", func() bool {
+		return sessionHasStatus(t, ts.URL, sid, "lost")
+	})
+	t.Logf("inst-B: session %s is correctly marked lost after process restart", sid)
 }
 
 // sessionHasStatus GETs /api/sessions and returns true when the session with

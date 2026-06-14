@@ -21,9 +21,11 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 - Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
 
 ## Status
-M1 done (first live terminal: browser ↔ hub data-stream ↔ agent PTY; React + xterm.js embedded in the
-hub; create/attach/resize/detach/close; PTYs survive detach). No scrollback **replay** yet — that's M2.
-Next: M2 (session persistence / scrollback). Milestone roadmap in `DESIGN.md` §18.
+M2 done (persistent terminals): agent keeps a per-session **scrollback ring buffer** and **replays it
+on attach** (fixes blank-on-switch); session manager is broadcast-buffer + per-attach drain (a slow
+client can't stall the PTY). Agent **process restart** → its `running` sessions marked `lost`, detected
+via a per-process `instanceID` in `Hello` (transient reconnects don't false-trigger). Next: M3
+(multi-session + projects). Milestone roadmap in `DESIGN.md` §18.
 
 ## M1 conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is

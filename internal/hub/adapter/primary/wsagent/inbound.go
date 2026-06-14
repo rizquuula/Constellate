@@ -49,8 +49,9 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 	e.links.Add(hello.MachineID, conn)
 	defer e.links.Remove(hello.MachineID)
 
-	_, err = e.reg.Register(ctx, registry.RegisterInput{
+	_, restarted, err := e.reg.Register(ctx, registry.RegisterInput{
 		MachineID:    hello.MachineID,
+		InstanceID:   hello.InstanceID,
 		Name:         hello.Name,
 		OS:           hello.OS,
 		Arch:         hello.Arch,
@@ -59,6 +60,10 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 	if err != nil {
 		e.log.Error("wsagent: register machine failed", "machineID", hello.MachineID, "err", err)
 		return
+	}
+	if restarted && e.events != nil {
+		e.log.Info("wsagent: process restart detected, marking running sessions lost", "machineID", hello.MachineID)
+		_ = e.events.MarkMachineSessionsLost(ctx, hello.MachineID)
 	}
 	e.log.Info("agent online", "machineID", hello.MachineID, "name", hello.Name)
 

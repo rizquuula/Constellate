@@ -101,3 +101,9 @@ func (u *UseCase) Close(ctx context.Context, id string) error {
 func (u *UseCase) MarkExited(ctx context.Context, id string, exitCode int) error {
 	return u.store.SetExited(ctx, id, exitCode, u.clock.Now())
 }
+
+// MarkMachineSessionsLost bulk-marks all running sessions for a machine as lost.
+// Called when a process restart is detected (new instanceID on Hello).
+func (u *UseCase) MarkMachineSessionsLost(ctx context.Context, machineID string) error {
+	return u.store.MarkRunningLost(ctx, machineID, u.clock.Now())
+}

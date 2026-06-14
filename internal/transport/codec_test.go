@@ -13,7 +13,7 @@ func TestEncodeDecodeHello(t *testing.T) {
 	enc := NewEncoder(&buf)
 	dec := NewDecoder(&buf)
 
-	want := NewHello("machine-1", "devbox", "linux", "amd64", "0.1.0", ProtocolVersion)
+	want := NewHello("machine-1", "", "devbox", "linux", "amd64", "0.1.0", ProtocolVersion)
 	if err := enc.Encode(want); err != nil {
 		t.Fatalf("Encode Hello: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestMultipleFrames(t *testing.T) {
 	enc := NewEncoder(&buf)
 	dec := NewDecoder(&buf)
 
-	hello := NewHello("m1", "box", "linux", "arm64", "0.1.0", 1)
+	hello := NewHello("m1", "", "box", "linux", "arm64", "0.1.0", 1)
 	hb := NewHeartbeat(12345, nil)
 
 	if err := enc.Encode(hello); err != nil {

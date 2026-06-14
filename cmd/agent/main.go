@@ -115,12 +115,15 @@ func cmdConnect(args []string) {
 		os.Exit(1)
 	}
 
-	mgr := session.NewManager(pty.Factory{}, log)
+	instanceID := id.New()
+
+	mgr := session.NewManager(pty.Factory{}, cfg.ScrollbackBytes, log)
 
 	client := hubclient.New(hubclient.Config{
 		HubURL:            cfg.HubURL,
 		DevToken:          cfg.DevToken,
 		MachineID:         machineID,
+		InstanceID:        instanceID,
 		Name:              cfg.Name,
 		HeartbeatInterval: 5 * time.Second,
 		Log:               log,

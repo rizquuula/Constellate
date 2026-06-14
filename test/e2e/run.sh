@@ -15,6 +15,11 @@ AGENT_LOG=$(mktemp /tmp/constellate-agent-XXXXXX.log)
 HUB_PID=""
 AGENT_PID=""
 
+# Pick a port that is not already in use (avoid conflicts with Docker services).
+HUB_PORT=18080
+HUB_HOST=127.0.0.1
+HUB_BASE="http://${HUB_HOST}:${HUB_PORT}"
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 cleanup() {
@@ -31,16 +36,17 @@ trap cleanup EXIT
 
 # ── Start hub ─────────────────────────────────────────────────────────────────
 
-echo "==> Starting hub..."
+echo "==> Starting hub on ${HUB_BASE}..."
 CONSTELLATE_DB_PATH="$TMP_DB" \
   CONSTELLATE_DEV_TOKEN=e2e \
+  CONSTELLATE_ADDR="${HUB_HOST}:${HUB_PORT}" \
   ./bin/constellate-hub serve >"$HUB_LOG" 2>&1 &
 HUB_PID=$!
 
 # ── Start agent ───────────────────────────────────────────────────────────────
 
 echo "==> Starting agent..."
-CONSTELLATE_HUB_URL=ws://127.0.0.1:8080/ws/agent \
+CONSTELLATE_HUB_URL="ws://${HUB_HOST}:${HUB_PORT}/ws/agent" \
   CONSTELLATE_DEV_TOKEN=e2e \
   CONSTELLATE_ID_FILE="$TMP_ID" \
   CONSTELLATE_NAME=e2e-box \
@@ -52,7 +58,7 @@ AGENT_PID=$!
 echo "==> Waiting for hub API and agent to come online (up to 30s)..."
 WAIT_ELAPSED=0
 until [ "$WAIT_ELAPSED" -ge 30 ]; do
-  RESPONSE=$(curl -s http://127.0.0.1:8080/api/machines 2>/dev/null || echo "")
+  RESPONSE=$(wget -q -O- "${HUB_BASE}/api/machines" 2>/dev/null || echo "")
   if echo "$RESPONSE" | grep -q '"online":true'; then
     echo "  ok: agent is online"
     break
@@ -76,4 +82,4 @@ echo "==> Installing npm dependencies and running Playwright tests..."
 cd test/e2e
 npm ci
 npx playwright install chromium >/dev/null 2>&1 || npx playwright install --with-deps chromium
-npx playwright test
+BASE_URL="${HUB_BASE}" npx playwright test

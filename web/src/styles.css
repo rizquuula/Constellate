@@ -127,6 +127,15 @@ body {
   background: #1a1a26;
 }
 
+.session-item.session-dead {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.session-item.session-dead:hover {
+  background: transparent;
+}
+
 .session-active {
   background: #1a2540;
 }
@@ -137,9 +146,31 @@ body {
   color: #aaa;
 }
 
-.session-status {
-  font-size: 11px;
-  color: #777;
+.session-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.session-badge-running {
+  background: #1a3a1a;
+  color: #4dbb4d;
+  border: 1px solid #2a5a2a;
+}
+
+.session-badge-exited {
+  background: #2a2a2a;
+  color: #888;
+  border: 1px solid #444;
+}
+
+.session-badge-lost {
+  background: #3a1a1a;
+  color: #cc6644;
+  border: 1px solid #5a2a1a;
 }
 
 /* Terminal area */
@@ -158,6 +189,20 @@ body {
   justify-content: center;
   color: #444;
   font-size: 14px;
+}
+
+.terminal-ended {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2a1a1a;
+  color: #cc6644;
+  border: 1px solid #5a2a1a;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  z-index: 10;
 }
 
 .terminal-container {

@@ -26,7 +26,8 @@ const devToken = "test-token"
 // noopEvents satisfies wsagent.SessionEvents for tests that don't exercise session lifecycle.
 type noopEvents struct{}
 
-func (noopEvents) MarkExited(_ context.Context, _ string, _ int) error { return nil }
+func (noopEvents) MarkExited(_ context.Context, _ string, _ int) error            { return nil }
+func (noopEvents) MarkMachineSessionsLost(_ context.Context, _ string) error      { return nil }
 
 // stubSessionService satisfies httpapi.SessionService for tests that don't exercise sessions.
 type stubSessionService struct{}
