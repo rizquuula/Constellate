@@ -1,0 +1,824 @@
+# Constellate — Design
+
+> A self-hosted control plane for a fleet of developer machines: one web UI, served from a
+> public hub, giving a single operator live terminal access to every machine they own —
+> organized by project, persistent across reconnects, with a mission-control overview of every
+> running terminal at a glance.
+
+**Status:** design under review · **Module:** `github.com/rizquuula/Constellate` · **Go:** 1.25+
+
+---
+
+## Table of contents
+1. [Problem & motivation](#1-problem--motivation)
+2. [Goals / Non-goals](#2-goals--non-goals)
+3. [Locked decisions](#3-locked-decisions)
+4. [System architecture](#4-system-architecture)
+5. [Connection & session lifecycle](#5-connection--session-lifecycle)
+6. [Wire protocol](#6-wire-protocol)
+7. [Persistence & the overview pipeline](#7-persistence--the-overview-pipeline)
+8. [Data model](#8-data-model)
+9. [HTTP / WebSocket API surface](#9-http--websocket-api-surface)
+10. [Security model](#10-security-model)
+11. [Hexagonal design & layering](#11-hexagonal-design--layering)
+12. [Target folder tree & CLI commands](#12-target-folder-tree--cli-commands)
+13. [Technology stack](#13-technology-stack)
+14. [Configuration](#14-configuration)
+15. [Observability](#15-observability)
+16. [Testing & environments](#16-testing--environments)
+17. [Build, release & deployment](#17-build-release--deployment)
+18. [Milestone roadmap](#18-milestone-roadmap)
+19. [Glossary](#19-glossary)
+
+---
+
+## 1. Problem & motivation
+
+The operator works across **4 machines** and many projects. Today that means juggling terminal
+tabs along two independent axes at once: one per project, and one per SSH session into each
+machine. Switching context means hunting for the right tab, re-establishing SSH after a sleep or
+network change, and losing track of what is running where.
+
+Constellate collapses both axes into **one browser tab**: pick a machine or a project, get a live
+shell; see every running terminal on a single overview; reconnect from any device without losing
+in-flight work.
+
+It is explicitly a **single-operator** tool for **machines you already own** — not a multi-tenant
+PaaS, not an environment provisioner, not a web IDE.
+
+---
+
+## 2. Goals / Non-goals
+
+### Goals (v1)
+- **G1 — Web terminal per machine.** Open the web app, pick a machine, get a live interactive
+  shell in the browser.
+- **G2 — Persistent sessions.** Shells survive disconnects, tab close, laptop sleep, and switching
+  client devices (tmux-like).
+- **G3 — Projects.** Sessions are grouped by project (name + machine + working dir) across the
+  fleet, not as a flat list of hosts.
+- **G4 — Mission-control overview.** A single page renders every live terminal as a tile; click a
+  tile to dive into the full interactive session.
+- **G5 — Progress dashboard.** At-a-glance activity/status rollups across machines and projects.
+
+### Non-goals
+- Multi-user / teams / RBAC — single operator.
+- Provisioning machines or environments — Constellate connects to *existing* machines; it is not
+  Coder/Gitpod.
+- A full web IDE — terminals and orchestration, not an editor.
+- File sync / large file transfer — use scp/rsync.
+
+### Quality bars
+- A cold reconnect to a busy session restores scrollback and resumes live in **< 1 s** on a LAN.
+- The overview stays responsive with **all 4 machines × ~10 sessions** visible.
+- The agent is a **single static binary** with no runtime dependencies beyond a shell.
+- Nothing faces the public internet until the security milestone (M5) lands.
+
+---
+
+## 3. Locked decisions
+
+| # | Area | Choice | Why | Rejected alternative |
+|---|------|--------|-----|----------------------|
+| D1 | Topology | **Agents dial home** (outbound only) | Works behind NAT/residential firewalls; zero inbound ports on dev boxes; central auth | Hub SSHes *out* → needs reachable machines + parks keys on the public box |
+| D2 | Languages | **Go** for hub + agent (one module) | One language, strong PTY/websocket/concurrency story, static binaries | Rust (slower iteration); split stacks (two toolchains) |
+| D3 | Transport | **TLS WebSocket + yamux** mux | Simple, proxy-friendly, one transport family; many logical streams over one conn | gRPC (browser can't bidi-stream); NATS (extra infra); SSH broker (re-wraps what we replace) |
+| D4 | Frontend | **React + xterm.js** | Largest ecosystem, best terminal/websocket precedent | Flutter web (immature xterm); SolidJS (small community) |
+| D5 | Store | **SQLite** on the hub (metadata/history only) | Single VPS, single operator; zero extra services | Postgres (operational weight); bbolt (weak relational queries) |
+| D6 | Persistence | **In-process PTY** on the agent + scrollback buffer | Survives disconnects; simplest robust model | tmux-backed PTYs — rejected (extra dep; an agent restart dropping its sessions is an accepted trade-off) |
+| D7 | Auth | **Passkey (WebAuthn) + TOTP** fallback | Phishing-resistant, no shared secret | Password (weak); OIDC (ties login to a provider) — kept as an option |
+
+Decisions D1–D7 are settled. The detail *below* each (protocol framing, schema, package
+boundaries) is what this review is for.
+
+---
+
+## 4. System architecture
+
+### 4.1 Components
+
+**Hub** (Go, runs on the public VPS) — the only public surface.
+- Serves the React app (embedded in the binary) and a JSON REST API over HTTPS.
+- Terminates **two** browser WebSocket roles: terminal-attach and the overview feed.
+- Accepts **inbound agent connections** (agents dial home) and authenticates them.
+- **Brokers**: routes an authenticated browser terminal ↔ the right agent ↔ the right PTY.
+- Owns the SQLite store, the machine/project/session registry, the audit log, and operator auth.
+- Holds **no shells itself** — it is a pure control plane and relay.
+
+**Agent** (Go, one static binary per machine) — outbound only.
+- Dials home to the hub and maintains **one** persistent, multiplexed connection (auto-reconnect).
+- **Owns the PTYs** — spawns shells, pipes I/O, applies resizes, reaps on exit.
+- Keeps each session's **scrollback ring buffer** and (M4) current **screen state**.
+- Survives browser disconnects: PTYs keep running; re-attach replays scrollback then resumes live.
+
+**Web app** (React + xterm.js, served by the hub).
+- **Overview** grid (the signature view), project-grouped **sidebar**, live **terminal** view, and
+  the **dashboard**.
+
+### 4.2 Deployment topology
+
+```
+                         Public VPS
+   ┌───────────────────────────────────────────────────────────┐
+   │                          HUB                                │
+   │   ┌─────────────────────────────────────────────────────┐  │
+   │   │ httpapi    REST + embedded React app        (HTTPS)  │  │
+   │   │ wsbrowser  /ws/term     browser terminal attach      │  │
+   │   │ wsbrowser  /ws/overview snapshot feed         (M4)   │  │
+   │   │ wsagent    /ws/agent    agent dial-home endpoint     │  │
+   │   │ agentlink  live machineID → connection registry      │  │
+   │   │ sqlite     machines · projects · sessions · audit    │  │
+   │   └───────────────▲─────────────────────▲───────────────┘  │
+   └───────────────────┼─────────────────────┼──────────────────┘
+        browser (HTTPS │ WSS)                 │ one TLS WebSocket per agent
+   ┌───────────────────┴───────┐             │ (outbound dial-home, yamux-muxed)
+   │  Browser + xterm.js        │      ┌──────┴───────┬──────────────┬───────────┐
+   │  overview · terminal · dash│      │              │              │           │
+   └────────────────────────────┘  ┌───┴───┐     ┌────┴───┐     ┌────┴───┐   ┌───┴───┐
+                                   │Machine1│     │Machine2│ ... │Machine4│   │  ...  │
+                                   │ AGENT  │     │ AGENT  │     │ AGENT  │   │       │
+                                   │ ├ PTYs │     │ ├ PTYs │     │ ├ PTYs │   │       │
+                                   │ └ vt   │     │ └ vt   │     │ └ vt   │   │       │
+                                   └────────┘     └────────┘     └────────┘   └───────┘
+```
+
+The hub **never initiates** connections into machines. Every machine link is an outbound dial from
+the agent; the hub multiplexes browser sessions onto whichever agent connection is live.
+
+### 4.3 Stream model (yamux over one WebSocket)
+
+Each agent holds exactly one WebSocket to the hub. That socket is wrapped as a `net.Conn` and a
+**yamux** session is run over it. Logical streams:
+
+| Stream | Direction | Carries |
+|--------|-----------|---------|
+| **control** (first stream) | bidirectional | NDJSON control messages: `Hello`, `Heartbeat`, `OpenSession`, `Resize`, `CloseSession`, `SessionExited`, errors |
+| **data** (one per attached session) | bidirectional | raw PTY bytes; first line is an `AttachHeader{sessionID}` |
+| **snapshot** (M4, one per agent) | agent → hub | throttled screen snapshots for the overview |
+
+Multiplexing over one socket means a single TLS handshake, a single auth check, and one thing to
+reconnect — while still giving every terminal its own independent, back-pressured byte pipe.
+
+---
+
+## 5. Connection & session lifecycle
+
+### 5.1 Agent enrollment (M5)
+1. Operator generates a one-time **enrollment token** in the hub UI (short TTL).
+2. Agent is started once with the token; it generates a keypair, calls the hub, and registers.
+3. Hub stores the agent's public key, assigns a `machineID` (ULID), and returns a **long-lived
+   credential** (signed token / client cert). Token is now spent.
+4. Every later dial-home authenticates with that credential. Revocable from the hub.
+
+*Before M5*, M0–M4 use a shared `CONSTELLATE_DEV_TOKEN` on a private network only.
+
+### 5.2 Dial-home
+1. Agent opens `wss://hub/ws/agent`, presenting its credential.
+2. Hub validates, registers the connection in **agentlink** (`machineID → conn`), starts the yamux
+   server side, accepts the control stream.
+3. Agent sends `Hello{…, agentVersion, protocolVersion}`; the hub checks the protocol is in its
+   supported range (else rejects with a clear error), upserts the machine, and marks it **online**.
+4. Agent sends `Heartbeat` every ~5 s with light session stats; hub updates `last_seen_at`.
+5. On socket close or missed heartbeats (≥ N intervals), hub marks the machine **offline** and
+   tears down routes; agent reconnects with exponential backoff + jitter (cap ~30 s).
+
+### 5.3 Open / attach a terminal
+1. Browser opens `wss://hub/ws/term?session=<id|new>` (authenticated).
+2. If new: the **attach** use case asks **agentlink** to `OpenSession{sessionID, cwd, shell,
+   cols, rows}`; the agent spawns a PTY and replies `SessionOpened`.
+3. Hub opens a yamux **data** stream to the agent, writes `AttachHeader{sessionID}`.
+4. Agent matches the stream to the PTY, **replays the scrollback buffer**, then pipes PTY ↔ stream.
+5. Hub pipes browser WS ↔ data stream (binary, bidirectional). Keystrokes flow up, output flows
+   down.
+6. **Resize**: browser → hub → control `Resize{sessionID, cols, rows}` → agent applies `TIOCSWINSZ`.
+
+### 5.4 Detach vs close
+- **Detach** (tab close, network drop): hub closes the data stream only. The **PTY stays alive** on
+  the agent. Re-attach repeats §5.3 from step 3 — scrollback replay then live.
+- **Close** (explicit): hub sends control `CloseSession`; agent sends `SIGHUP`, reaps the process,
+  emits `SessionExited{exitCode}`; hub marks the session `exited`.
+- **Lost**: if the agent process dies (in-process PTYs), its sessions are marked `lost` on
+  reconnect — an accepted trade-off of the in-process model (D6).
+
+---
+
+## 6. Wire protocol
+
+**Control stream** — newline-delimited JSON, each line `{"type": "...", ...}`. NDJSON is chosen for
+M0–M4 for debuggability; the `codec` package isolates it so msgpack/protobuf can replace it without
+touching use cases.
+
+Agent → Hub:
+```
+Hello         { machineID, name, os, arch, agentVersion, protocolVersion }
+Heartbeat     { ts, sessions: [{ id, status, bytesOut }] }
+SessionOpened { sessionID, pid }
+SessionExited { sessionID, exitCode }
+Error         { sessionID?, code, message }
+```
+Hub → Agent:
+```
+OpenSession   { sessionID, cwd, shell, cols, rows, env? }
+Resize        { sessionID, cols, rows }
+CloseSession  { sessionID }
+EnableSnaps   { enabled }                 // M4
+```
+
+**Data stream** — first line is `AttachHeader{ sessionID }` (NDJSON); everything after is raw,
+unframed PTY bytes in both directions (it is a byte pipe — xterm speaks straight to the shell).
+
+**Snapshot stream (M4)** — length-prefixed `Snapshot` records, agent → hub:
+```
+Snapshot      { sessionID, cols, rows, cursor:{x,y}, lines:[…], rev }
+```
+
+Frame envelopes, type tags, and (de)serialization all live in `internal/transport`, imported by
+**both** hub and agent. Protocol DTOs are translated into each side's domain types at the adapter
+boundary and never leak into a use case.
+
+---
+
+## 7. Persistence & the overview pipeline
+
+### 7.1 Scrollback (G2)
+Each agent session owns a **bounded ring buffer** (default 256 KiB, configurable) of recent output.
+On attach, the agent writes the buffer to the data stream before going live, so a reconnecting
+browser repaints history instantly. The buffer is byte-oriented (raw terminal output incl. escape
+sequences) so replay is faithful; only the cap is enforced, oldest bytes dropped first.
+
+### 7.2 Screen state & snapshots (G4, M4)
+Rendering N full live terminals at once would overwhelm the browser, so the overview does **not**
+attach N data streams. Instead:
+
+1. The agent feeds each session's output through an **ANSI/vt parser** (`adapter/secondary/vt`)
+   that maintains the **current visible screen** (an 80×24-ish grid of cells + cursor).
+2. On a throttled tick (coalesced, ~2–4 fps, only when the screen changed since last `rev`), the
+   agent serializes the grid into a compact `Snapshot` and sends it on the snapshot stream.
+3. The hub's **overview** use case fans snapshots out to any browser subscribed to `/ws/overview`.
+4. Each browser **tile** renders a snapshot cheaply (a small read-only xterm or a styled `<pre>`).
+5. **Click-to-dive**: clicking a tile opens a normal data-stream attach (§5.3) — full fidelity,
+   input enabled — and stops rendering that tile from snapshots.
+
+Bandwidth stays bounded and roughly constant regardless of how busy the shells are, because
+snapshots are screen-sized and rate-capped, not a copy of the output stream.
+
+---
+
+## 8. Data model
+
+SQLite on the hub. **Metadata and history only** — live PTY state lives in the agent and is never
+persisted. Timestamps are unix seconds.
+
+```sql
+-- one row per enrolled agent
+CREATE TABLE machines (
+    id            TEXT PRIMARY KEY,        -- ULID, assigned at enrollment
+    name          TEXT NOT NULL,
+    os            TEXT NOT NULL,
+    arch          TEXT,
+    agent_version TEXT,
+    enrolled_at   INTEGER NOT NULL,
+    last_seen_at  INTEGER,                 -- bumped on heartbeat
+    revoked_at    INTEGER                  -- soft revoke (M5)
+);
+
+-- long-lived agent credential (M5)
+CREATE TABLE machine_credentials (
+    machine_id TEXT PRIMARY KEY REFERENCES machines(id),
+    public_key BLOB NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+-- logical grouping of sessions, bound to a machine + working dir
+CREATE TABLE projects (
+    id         TEXT PRIMARY KEY,           -- ULID
+    machine_id TEXT NOT NULL REFERENCES machines(id),
+    name       TEXT NOT NULL,
+    path       TEXT NOT NULL,              -- working dir on the machine
+    color      TEXT,                       -- UI hint
+    created_at INTEGER NOT NULL,
+    UNIQUE (machine_id, path)
+);
+
+-- terminal session metadata (live I/O is NOT here)
+CREATE TABLE sessions (
+    id             TEXT PRIMARY KEY,       -- ULID; also the wire id
+    project_id     TEXT REFERENCES projects(id),
+    machine_id     TEXT NOT NULL REFERENCES machines(id),
+    title          TEXT,
+    shell          TEXT,
+    status         TEXT NOT NULL,          -- running | exited | lost
+    activity       TEXT,                   -- reserved for M7: active | idle | awaiting-input
+    exit_code      INTEGER,
+    created_at     INTEGER NOT NULL,
+    last_active_at INTEGER
+);
+CREATE INDEX idx_sessions_machine ON sessions(machine_id);
+CREATE INDEX idx_sessions_project ON sessions(project_id);
+
+-- security-relevant actions (M5)
+CREATE TABLE audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts         INTEGER NOT NULL,
+    actor      TEXT NOT NULL,              -- operator id | "system"
+    action     TEXT NOT NULL,              -- login | enroll | attach | open | close | revoke
+    machine_id TEXT,
+    session_id TEXT,
+    detail     TEXT                        -- JSON
+);
+CREATE INDEX idx_audit_ts ON audit_log(ts);
+
+-- operator auth (M5): passkey + TOTP + recovery
+CREATE TABLE operator_credentials (
+    id           TEXT PRIMARY KEY,
+    kind         TEXT NOT NULL,            -- webauthn | totp | recovery
+    data         BLOB NOT NULL,
+    created_at   INTEGER NOT NULL,
+    last_used_at INTEGER
+);
+```
+
+Migrations are embedded SQL (`//go:embed`) applied at hub startup.
+
+---
+
+## 9. HTTP / WebSocket API surface
+
+Browser-facing (hub). All REST is JSON; all auth via session cookie (M5).
+
+**REST**
+```
+GET    /api/machines                     list machines + online status
+GET    /api/machines/{id}/sessions       sessions on a machine
+GET    /api/projects                     list projects
+POST   /api/projects                     create a project
+GET    /api/sessions                     all sessions (overview index)
+POST   /api/sessions                     open a session {machineID, projectID?, cwd, shell, cols, rows}
+DELETE /api/sessions/{id}                close a session
+POST   /api/auth/webauthn/begin|finish   passkey login           (M5)
+POST   /api/auth/totp                    TOTP fallback           (M5)
+```
+
+**WebSocket**
+```
+GET /ws/term?session={id|new}            browser terminal attach (binary, bidirectional)
+GET /ws/overview                         snapshot feed for the grid (server push)   (M4)
+GET /ws/agent                            agent dial-home endpoint (credential auth; NOT browser-facing)
+```
+
+**Static**
+```
+GET /  and /assets/*                     the React app, embedded in the hub binary via go:embed
+```
+
+DTOs live in `adapter/primary/httpapi`; domain errors map to status codes in one place
+(`httpapi/errors.go`).
+
+---
+
+## 10. Security model
+
+The hub is a **remote-code-execution gateway to every machine**. If it is compromised, the attacker
+owns the fleet. The model is built around that fact.
+
+**Trust boundaries**
+- Browser ↔ hub: untrusted client → authenticated operator session.
+- Hub ↔ agent: mutually authenticated; the agent trusts only its enrolled hub, the hub trusts only
+  enrolled agents.
+- Agent ↔ shell: full local privilege of the agent's user (by design — it *is* your shell).
+
+**Controls**
+- **TLS end to end** — browser↔hub and agent↔hub. In production the hub sits behind Caddy/nginx for
+  certs; agents pin/verify the hub cert.
+- **Operator auth** — passkey (WebAuthn) primary, TOTP fallback, recovery codes. No plain password.
+  Every terminal attach re-checks the session.
+- **Agent enrollment** — one-time token → long-lived, **revocable** per-machine credential. The hub
+  stores no long-lived shell credentials; it brokers trust.
+- **Audit log** — login, enroll, attach, open/close, revoke — every security-relevant action.
+- **Least exposure** — only the hub is public; agents open **no** inbound ports.
+- **Process discipline** — dev-token path (`CONSTELLATE_DEV_TOKEN`) is compiled behind a clear flag
+  and removed/disabled once M5 lands.
+
+**Hard rule:** the hub does **not** face the public internet until M5 is complete. M0–M4 run on
+localhost or a private network (Tailscale/WireGuard/LAN) only.
+
+---
+
+## 11. Hexagonal design & layering
+
+Two bounded contexts in one module — `internal/hub` and `internal/agent` — each its own hexagon.
+They share only `internal/transport` (the wire protocol) and `internal/platform` (logging, ids,
+config). Neither context imports the other.
+
+**Rules (enforced by review + lint):**
+- **Domain** (`*/domain/*`) is pure: stdlib only, business types with behavior and unexported
+  fields, no infra imports. Domain tests run in milliseconds.
+- **App** (`*/app/<usecase>`) holds one `UseCase` type per package — *glue, not logic*. Each package
+  declares the **SPI interfaces it needs** in its own `ports.go` (consumer-side; no central
+  `port/` package).
+- **Ports are shaped by the core's needs**, not a vendor API. `MachineStore.ByID(ctx, id)` — never
+  `Query(ctx, sql, args...)`.
+- **Adapters** split into `primary/` (driving — http, browser WS, agent endpoint) and `secondary/`
+  (driven — sqlite, agentlink, pty, vt). Secondary adapters wrap infra errors into domain errors
+  (`sql.ErrNoRows → machine.ErrNotFound`). DTOs stay in the adapter and never reach a use case.
+- **`cmd/*/main.go` is the composition root** — plain constructors wire concrete adapters into use
+  cases; the compiler verifies the graph.
+
+The bidirectional agent link is the one subtlety: from the **hub's** view the same physical
+connection is *both* a primary adapter (`wsagent` — agents push `Hello`/`Heartbeat`/output) and a
+secondary adapter (`agentlink` — the hub calls `AgentGateway.OpenSession/Resize/Close`). They share
+one connection registry but sit on opposite sides of the hexagon, which is correct: inbound events
+drive use cases; use cases drive outbound commands.
+
+---
+
+## 12. Target folder tree & CLI commands
+
+### Folder tree
+`[Mx]` marks the milestone that introduces a node; unmarked nodes exist from **M0**.
+
+```
+Constellate/
+├── DESIGN.md                       # ← this document (canonical architecture)
+├── README.md                       # quickstart + run instructions
+├── LICENSE
+├── Makefile                        # build/run/test/lint targets (hub, agent, web)
+├── go.mod                          # module github.com/rizquuula/Constellate · go 1.25
+├── go.sum
+├── .gitignore
+├── .golangci.yml                   # linter config
+├── configs/                        # hub.example.yaml · agent.example.yaml (copy + edit)
+│
+├── cmd/                            # entrypoints = composition roots (wiring only, no logic)
+│   ├── hub/
+│   │   ├── main.go                 # load config → wire internal/hub adapters → start servers
+│   │   └── VERSION                 # hub's semver, stamped into the binary at build
+│   └── agent/
+│       ├── main.go                 # load config → wire internal/agent → dial home
+│       └── VERSION                 # agent's semver, stamped into the binary at build
+│
+├── internal/
+│   │
+│   ├── hub/                        # ───── HUB bounded context (control plane) ─────
+│   │   ├── domain/                 # pure business; stdlib only
+│   │   │   ├── machine/            # machine.go · status.go · errors.go · *_test.go
+│   │   │   ├── project/            # project.go · *_test.go
+│   │   │   ├── session/            # session.go (metadata + running/exited/lost state) · *_test.go
+│   │   │   └── audit/              # event.go (audit value types)
+│   │   ├── app/                    # use cases — one package each; ports.go = SPI it needs
+│   │   │   ├── registry/           # register/heartbeat/list/mark-offline   (usecase.go·ports.go·_test)
+│   │   │   ├── attach/             # broker browser ↔ agent session         (ports: AgentGateway, SessionStore, AuditSink)
+│   │   │   ├── sessions/           # create/list/close session metadata
+│   │   │   ├── overview/           # [M4] fan snapshots out to viewers
+│   │   │   ├── enroll/             # [M5] enrollment tokens + credentials
+│   │   │   └── auth/               # [M5] operator login + sessions
+│   │   └── adapter/
+│   │       ├── primary/            # driving — things that call the hub
+│   │       │   ├── httpapi/        # server·router·machines·sessions·projects·dto·errors·middleware (auth.go [M5])
+│   │       │   ├── wsbrowser/      # terminal.go (/ws/term) · overview.go (/ws/overview [M4])
+│   │       │   └── wsagent/        # endpoint.go (/ws/agent, yamux server) · inbound.go (frames→use cases)
+│   │       └── secondary/          # driven — things the hub calls
+│   │           ├── agentlink/      # registry.go (machineID→conn) · gateway.go (AgentGateway impl)
+│   │           ├── sqlite/         # db.go · *_store.go · migrations/ (0001_init.sql · embed.go)
+│   │           ├── memory/         # in-memory stores for tests / M0
+│   │           └── webauthn/       # [M5] passkey + TOTP credential store
+│   │
+│   ├── agent/                      # ───── AGENT bounded context (per machine) ─────
+│   │   ├── domain/
+│   │   │   └── terminal/           # session.go · scrollback.go (ring buffer) · screen.go [M4] · *_test.go
+│   │   ├── app/
+│   │   │   ├── session/            # open/attach/detach/resize/close PTYs  (ports: PTYFactory, Clock)
+│   │   │   └── snapshot/           # [M4] produce throttled screen snapshots
+│   │   └── adapter/
+│   │       ├── primary/
+│   │       │   └── hubclient/      # client.go (dial-home, reconnect/backoff, yamux client)
+│   │       │                       #   control.go (hub frames→use cases) · streams.go (data streams↔PTYs)
+│   │       └── secondary/
+│   │           ├── pty/            # pty.go · factory.go (creack/pty wrapper)
+│   │           └── vt/             # [M4] parser.go · screen.go (ANSI→grid)
+│   │
+│   ├── transport/                  # ───── SHARED wire protocol (hub + agent import) ─────
+│   │   ├── frame.go                # control-frame envelope + type tags
+│   │   ├── messages.go             # Hello·Heartbeat·OpenSession·Resize·Close·Snapshot…
+│   │   ├── codec.go                # NDJSON now; swappable for msgpack/proto
+│   │   ├── attach.go               # data-stream AttachHeader
+│   │   └── mux.go                  # yamux server/client over a net.Conn
+│   │
+│   └── platform/                   # ───── SHARED cross-cutting infra ─────
+│       ├── log/log.go              # slog setup (level/format from env)
+│       ├── id/id.go                # ULID generation
+│       ├── config/                 # hub.go · agent.go (typed YAML loaders)
+│       └── version/version.go      # per-binary version + commit + proto (via -ldflags)
+│
+├── web/                            # ───── React + xterm.js (Vite + TS) ─────
+│   ├── index.html · package.json · tsconfig.json · vite.config.ts · tailwind.config.ts · .eslintrc.cjs
+│   ├── public/favicon.svg
+│   └── src/
+│       ├── main.tsx · App.tsx
+│       ├── api/                    # rest.ts (typed client) · ws.ts (terminal + overview)
+│       ├── features/
+│       │   ├── overview/           # [M4] OverviewGrid.tsx · SessionTile.tsx · useSnapshots.ts
+│       │   ├── terminal/           # TerminalView.tsx (xterm) · useTerminal.ts
+│       │   ├── sidebar/            # MachineList.tsx · ProjectTree.tsx
+│       │   └── dashboard/          # [M6] Dashboard.tsx
+│       ├── store/index.ts          # zustand client state
+│       ├── types/api.ts            # mirrors hub DTOs
+│       └── styles/globals.css
+│
+├── deploy/                         # production deployment
+│   ├── hub.Dockerfile              # multi-stage → distroless (RELEASE image; reused by tests)
+│   ├── compose.yaml                # prod hub: container + Caddy (TLS)
+│   ├── systemd/                    # constellate-agent.service (agent = host binary)
+│   └── caddy/Caddyfile             # TLS reverse proxy in front of the hub
+│
+├── scripts/                        # dev-hub.sh · dev-agent.sh · gen-dev-certs.sh
+│
+├── docs/                           # deep-dives (DESIGN.md stays canonical)
+│   ├── protocol.md · security.md   # wire-protocol spec · threat model
+│   └── adr/                        # 0001-dial-home · 0002-ws-yamux · 0003-in-process-pty
+│
+├── .github/workflows/              # ci.yaml · e2e.yaml · release.yaml
+│
+└── test/
+    ├── integration/                # in-process E2E (no real network)
+    │   └── topology_test.go
+    ├── e2e/                        # single-machine: real localhost processes + Playwright
+    │   ├── e2e_test.go
+    │   └── browser/                # Playwright specs
+    └── docker/                     # multi-"machine": containers on a Docker network
+        ├── compose.test.yaml       # 1 hub + 2–3 agents + test-runner
+        ├── agent.test.Dockerfile   # agent binary + a real shell (alpine)
+        └── scenarios/              # topology · NAT isolation · restart-loses-sessions · reconnect
+```
+
+**What M0 actually creates** (a small subset): `go.mod`, `Makefile`, `cmd/{hub,agent}/main.go`,
+`internal/hub/{domain/machine, app/registry, adapter/primary/{httpapi,wsagent},
+adapter/secondary/{agentlink,sqlite,memory}}`, `internal/agent/adapter/primary/hubclient`,
+`internal/transport`, `internal/platform/*`, plus an embedded status page. No `vt`, `pty`, `web/`,
+`webauthn`, `overview`, or auth yet — those arrive at the milestones tagged above.
+
+---
+
+### Binaries & CLI commands
+
+Two binaries; both take subcommands. The agent defaults to `connect`, the hub to `serve`.
+`[M]` = the milestone the command lands in. Global flags on every subcommand: `--log-level`,
+`--config <file>`; `--version` short-circuits to the version string.
+
+**`constellate-agent`** — built from `cmd/agent`, deployed on every machine:
+
+| Command | M | Description |
+|---------|---|-------------|
+| `agent connect` | M0 | Dial home and serve — the long-running daemon mode. **Default.** Hub URL + auth from env/flags (dev token M0–M4, stored credential M5). |
+| `agent status` | M0 | Print local state: enrolled?, connected?, live session count. |
+| `agent version` | M0 | Print version + git commit. |
+| `agent enroll --hub <url> --token <tok>` | M5 | One-time enrollment: register, store machine id + long-lived credential, then exit. |
+| `agent reset` | M5 | Remove the local id/credential — de-enrolls this machine. |
+
+**`constellate-hub`** — built from `cmd/hub`, runs on the VPS:
+
+| Command | M | Description |
+|---------|---|-------------|
+| `hub serve` | M0 | Start the HTTP/WS servers (auto-runs migrations). **Default.** |
+| `hub migrate` | M0 | Apply DB migrations and exit (idempotent). |
+| `hub version` | M0 | Print version + git commit. |
+| `hub enroll-token [--ttl 15m]` | M5 | Mint a one-time agent enrollment token and print it. |
+| `hub machines` | M5 | List enrolled machines with online status + last-seen. |
+| `hub revoke <machineID>` | M5 | Revoke a machine's credential (it can no longer dial home). |
+| `hub operator add` | M5 | First-run setup: register the operator passkey / TOTP. |
+
+CLI plumbing stays light — stdlib `flag` with a small subcommand dispatcher (Cobra only if the
+command set grows). Long-running modes (`connect`, `serve`) trap `SIGINT`/`SIGTERM` for graceful
+shutdown.
+
+## 13. Technology stack
+
+**Go 1.25+** (`go.mod` → `go 1.25`, with a `toolchain` directive). Hub and agent share the module.
+
+| Concern | Choice | Notes |
+|---------|--------|-------|
+| WebSocket | `github.com/coder/websocket` | context-aware; `NetConn()` adapts a socket to `net.Conn` for yamux |
+| Multiplexing | `github.com/hashicorp/yamux` | many streams over one conn, built-in keepalive/backpressure |
+| PTY | `github.com/creack/pty` | spawn/resize/reap PTYs |
+| SQLite | `modernc.org/sqlite` | **pure Go**, no cgo → static binaries |
+| Migrations | embedded SQL + tiny migrator (or `pressly/goose`) | `//go:embed` |
+| IDs | `github.com/oklog/ulid/v2` | time-sortable session/machine ids |
+| Config | `gopkg.in/yaml.v3` | typed YAML config files via `--config` |
+| Logging | stdlib `log/slog` | structured, leveled |
+| WebAuthn (M5) | `github.com/go-webauthn/webauthn` | passkeys |
+| TOTP (M5) | `github.com/pquerna/otp` | fallback |
+| Lint | `golangci-lint` | `go vet` + staticcheck + more |
+
+**Frontend:** Vite + React + TypeScript · `@xterm/xterm` + `@xterm/addon-fit` +
+`@xterm/addon-webgl` · `zustand` (client state) + TanStack Query (server state) · React Router ·
+Tailwind CSS. Built to `web/dist` and embedded into the hub binary via `go:embed`.
+
+**Build & test infra:** Docker + Compose (hub release image + the Dockerized topology tests) ·
+GitHub Actions (CI + release) · Playwright (browser E2E) · `gcr.io/distroless/static` base for the
+hub image.
+
+---
+
+### Versioning & compatibility
+
+Two axes, deliberately separate:
+
+- **Per-binary release version.** `cmd/hub/VERSION` and `cmd/agent/VERSION` each hold a semver,
+  bumped independently. The Makefile reads the relevant file and stamps that binary via
+  `-ldflags "-X …/platform/version.Version=…"` together with the git short-commit and build time;
+  `hub version` / `agent version` print their own. Release tags are component-scoped —
+  `hub/vX.Y.Z`, `agent/vX.Y.Z`.
+- **Protocol version — the real compatibility gate.** `transport.ProtocolVersion` (an int, bumped
+  only on a breaking wire change) is sent in `Hello`. The hub enforces a minimum supported protocol
+  plus a compat window, accepting or rejecting with a clear message. This is *why* independent
+  binary versions are safe: interop depends only on the negotiated protocol, never on the release
+  labels — so hub `1.4.0` and agent `0.9.2` talk fine as long as their protocols are in range.
+
+Both `version` commands print all three for skew debugging, e.g.
+`constellate-agent 0.9.2 (commit a1b2c3d, proto 3)`.
+
+## 14. Configuration
+
+Configuration is **YAML**. Each binary loads one file via `--config <path>` (defaults: `./hub.yaml`
+then `/etc/constellate/hub.yaml` for the hub; `~/.constellate/agent.yaml` for the agent). Sample
+files live in `configs/`. Individual secrets may still be overridden by `CONSTELLATE_*` env vars for
+containerized deploys.
+
+**Hub** — `hub.yaml`:
+```yaml
+addr: "127.0.0.1:8080"                          # listen address
+public_url: "https://constellate.example.com"   # external URL (cookies, WebAuthn RP)
+db_path: "./constellate.db"
+dev_token: "change-me"                          # shared agent token — M0–M4 only
+enroll_token_ttl: "15m"                         # M5
+tls:                                            # optional direct TLS (else terminate at Caddy) — M5
+  cert: ""
+  key: ""
+log:
+  level: "info"                                 # debug | info | warn
+  format: "text"                                # text | json
+```
+
+**Agent** — `agent.yaml`:
+```yaml
+hub_url: "wss://constellate.example.com/ws/agent"
+name: "workstation"                             # default: hostname
+id_file: "~/.constellate/agent-id"
+cred_file: "~/.constellate/cred"                # M5
+dev_token: "change-me"                          # M0–M4
+default_shell: ""                               # default: $SHELL
+scrollback_bytes: 262144                        # ring buffer cap per session
+log:
+  level: "info"                                 # debug | info | warn
+```
+
+---
+
+## 15. Observability
+
+- **Structured logging** (`slog`) on both binaries; one log line per lifecycle transition
+  (dial/online/retry, open/attach/detach/close) with `machineID`/`sessionID` fields. No secrets,
+  no terminal contents at info level.
+- **Correlation**: a `sessionID` threads from the browser WS through the hub to the agent PTY,
+  so a single session is greppable end to end.
+- **Hub metrics** (later, optional): connected agents, live sessions, attach latency, snapshot
+  fps/bandwidth — exposable on a private `/metrics`.
+
+---
+
+## 16. Testing & environments
+
+Stability *is* the product — a terminal you can't trust is worse than none. Tests are designed in
+from M0, run on every change, and scale from microsecond unit tests up to a Dockerized replica of
+the real multi-machine topology. Three things must always hold: the domain is proven in isolation,
+the full vertical works on one machine, and dial-home works across real network/process boundaries.
+
+### Test pyramid
+
+| Tier | Scope | Where | Runs |
+|------|-------|-------|------|
+| **Unit** | domain entities; app use-cases with hand-written fakes | `internal/**/*_test.go` | every save / push |
+| **Integration** | secondary adapters vs the real thing — SQLite file, real PTY, WS loopback | `internal/**/adapter/**/*_test.go` | every push |
+| **In-process E2E** | hub+agent wired in one process, no real network; a harness stands in for the browser | `test/integration/` | every push |
+| **Single-machine E2E** | hub + agent(s) as real OS processes on localhost; real WS + PTYs; Playwright drives a real browser | `test/e2e/` | pre-merge |
+| **Dockerized topology E2E** | hub container + N agent containers on a Docker net — each agent a "separate machine" | `test/docker/` | pre-merge + nightly |
+
+Core principles (from the hexagon): **no mocks in the domain**; **hand-written in-memory fakes** for
+use-cases (the `secondary/memory` stores double as fakes); **adapters tested against the real thing**
+(a SQL adapter tested against a mocked `*sql.DB` has tested nothing). Mock only ports we own — never
+`*sql.DB` or sockets.
+
+### Single-machine E2E — the dev-loop E2E
+`test/e2e/` boots the hub and one or more agents as real processes on `127.0.0.1`, lets the agents
+dial home over real loopback WebSockets, then drives the system two ways: a Go WS/HTTP client for
+fast assertions and **Playwright** against a real browser for the UI (open a shell, type, read,
+resize, reconnect, view the overview, click a tile). Proves real process + socket + PTY behavior
+without Docker overhead — fast enough for the tight loop.
+
+### Dockerized topology E2E — the "separate machines" E2E
+`test/docker/compose.test.yaml` brings up the **hub** (release image), **2–3 agent** containers —
+each a small image with a real shell, standing in for a separate machine with its own hostname/id —
+and a **test-runner** (Playwright + Go client). Agents sit on an **internal Docker network that can
+reach only the hub, not each other**, mimicking machines behind NAT and proving the dial-home model
+(no inbound ports; the hub never connects in). Scenarios assert: enrollment/dial-home, a live shell
+through the container boundary, scrollback replay on re-attach, the overview across all "machines",
+and **kill an agent container → its sessions go `lost` → restart → it reconnects** (validating the
+D6 in-process-PTY trade-off). This tier is the executable form of the M0 acceptance check and grows
+with every milestone.
+
+### CI — GitHub Actions
+- `ci.yaml` — lint + unit + integration + in-process E2E on every push/PR (fast gate).
+- `e2e.yaml` — single-machine + Dockerized topology E2E on PRs and nightly (heavier).
+- `release.yaml` — on a `hub/vX.Y.Z` or `agent/vX.Y.Z` tag, build and publish the artifacts in §17.
+
+---
+
+## 17. Build, release & deployment
+
+Two binaries, two shapes — because they live in different places.
+
+### Hub — released as a Docker image
+Multi-stage build: compile the static Go hub with the embedded React app, then copy into a minimal
+runtime (`gcr.io/distroless/static`, or `scratch`) for a tiny, dependency-free image. Published to
+GHCR as `ghcr.io/rizquuula/constellate-hub:vX.Y.Z` (+ `:latest`), tag-driven from `cmd/hub/VERSION`.
+Runs on the VPS via `deploy/compose.yaml` (hub container + Caddy for TLS). `deploy/hub.Dockerfile`
+is the single source for both the release image and the Dockerized tests.
+
+### Agent — released as a static binary (containerized only for tests)
+The agent spawns shells on the **host** it manages, so in production it runs as a host process,
+**not** a container — a containerized agent would only reach the container's own shell. It ships as
+a static, cross-compiled binary per OS/arch, attached to an `agent/vX.Y.Z` GitHub Release, installed
+on each machine and supervised by `deploy/systemd/constellate-agent.service` (launchd / Windows
+service later). The agent **is** containerized for the Dockerized topology tests — a test fixture,
+never a release artifact.
+
+### Make targets
+`make test` (unit + integration + in-proc) · `make test-e2e` (single-machine) · `make test-docker`
+(topology) · `make lint` · `make build` (both binaries, version-stamped) · `make image-hub` ·
+`make release` (cross-compile agent binaries + push the hub image).
+
+---
+
+## 18. Milestone roadmap
+
+Each milestone is one tracked task, lands in its own commit, and is "done" only when its
+acceptance check passes.
+
+### M0 — Scaffold + prove dial-home topology
+- Monorepo + hexagonal skeleton; `go.mod` (go 1.25); Makefile.
+- Hub: serves an embedded status page + `GET /api/machines`; `/ws/agent` accepts agents over yamux;
+  agentlink registry; SQLite `machines` table wired.
+- Agent: dials home, `Hello` + `Heartbeat` on the control stream, reconnect w/ backoff.
+- **Test harness established here:** unit + the in-process E2E harness, *and* `test/docker` (hub +
+  2 agent containers on a Docker network) — so dial-home is proven both in-process and across real
+  container boundaries from day one.
+- **Done when:** the online → offline → online check passes on localhost **and** via
+  `make test-docker`; `go build ./... && go vet ./...` clean.
+
+### M1 — First live terminal
+- Agent spawns a PTY per session; data-stream attach; hub relays browser WS ↔ data stream.
+- React + xterm.js: pick a machine, open a shell, type and see output.
+- **Done when:** a real interactive shell works in the browser, incl. resize.
+
+### M2 — Session persistence
+- Scrollback ring buffer; replay-on-attach; PTYs survive detach.
+- **Done when:** close the tab mid-`top`, reopen → same session, history intact, still live.
+
+### M3 — Multi-session + projects
+- Many sessions per machine; create/rename/close; group by project; persist projects.
+- **Done when:** sessions are organized by project across machines, not a flat host list.
+
+### M4 — Mission-control overview
+- vt parser → screen state; throttled snapshot stream; `/ws/overview` fan-out; tile grid;
+  click-to-dive.
+- **Done when:** one page shows every live terminal as a live-ish tile; clicking opens the full
+  session; bandwidth stays bounded with all machines visible.
+
+### M5 — Auth + audit hardening *(gate before public exposure)*
+- Passkey + TOTP login; agent enrollment + revocable credentials; TLS; audit log; remove dev token.
+- **Done when:** the hub can safely face the public internet; every sensitive action is audited.
+
+### M6 — Progress dashboard
+- Activity/status rollups across machines and projects.
+- **Done when:** the operator can see, at a glance, what's running/idle/needs attention fleet-wide.
+
+### M7 — AI-session awareness
+- Track per-session **activity** (active / idle / awaiting-input) from output heuristics plus an
+  opt-in shell hook, surfaced on overview tiles and the dashboard. The `sessions.activity` field is
+  designed in from M1, so this is additive — not a rewrite.
+- **Done when:** you can see at a glance which Claude Code / agent sessions across the fleet need
+  your attention.
+
+---
+
+## 19. Glossary
+
+- **Hub** — the single public Go service brokering everything.
+- **Agent** — the per-machine Go binary that owns PTYs and dials home.
+- **Session** — one terminal (one PTY on the agent; metadata row on the hub).
+- **Project** — a named grouping of sessions bound to a machine + working dir.
+- **Dial-home** — the agent's outbound connection to the hub (no inbound ports on machines).
+- **agentlink** — the hub's live `machineID → connection` registry + outbound `AgentGateway`.
+- **Snapshot** — a compact, rate-capped copy of a session's visible screen, for the overview.
+- **Scrollback** — the bounded ring buffer of recent output, replayed on re-attach.
+```
