@@ -1,0 +1,87 @@
+package agentlink_test
+
+import (
+	"sync"
+	"testing"
+
+	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
+)
+
+func TestRegistry_AddGetRemove(t *testing.T) {
+	r := agentlink.NewRegistry()
+
+	c := &agentlink.Conn{MachineID: "m1", ConnectedAt: 100}
+	r.Add("m1", c)
+
+	got, ok := r.Get("m1")
+	if !ok {
+		t.Fatal("Get: expected to find m1")
+	}
+	if got.MachineID != "m1" {
+		t.Errorf("Get MachineID: got %q", got.MachineID)
+	}
+
+	r.Remove("m1")
+	_, ok = r.Get("m1")
+	if ok {
+		t.Error("Get after Remove: expected not found")
+	}
+}
+
+func TestRegistry_IsOnline(t *testing.T) {
+	r := agentlink.NewRegistry()
+
+	if r.IsOnline("m1") {
+		t.Error("IsOnline: should be false before Add")
+	}
+
+	r.Add("m1", &agentlink.Conn{MachineID: "m1"})
+	if !r.IsOnline("m1") {
+		t.Error("IsOnline: should be true after Add")
+	}
+
+	r.Remove("m1")
+	if r.IsOnline("m1") {
+		t.Error("IsOnline: should be false after Remove")
+	}
+}
+
+func TestRegistry_OnlineIDs(t *testing.T) {
+	r := agentlink.NewRegistry()
+
+	r.Add("m1", &agentlink.Conn{MachineID: "m1"})
+	r.Add("m2", &agentlink.Conn{MachineID: "m2"})
+
+	ids := r.OnlineIDs()
+	if len(ids) != 2 {
+		t.Fatalf("OnlineIDs: got %d, want 2", len(ids))
+	}
+
+	r.Remove("m1")
+	ids = r.OnlineIDs()
+	if len(ids) != 1 {
+		t.Fatalf("OnlineIDs after Remove: got %d, want 1", len(ids))
+	}
+	if ids[0] != "m2" {
+		t.Errorf("OnlineIDs: got %q, want m2", ids[0])
+	}
+}
+
+func TestRegistry_Concurrent(t *testing.T) {
+	r := agentlink.NewRegistry()
+	const n = 100
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := "m" + string(rune('0'+i%10))
+			r.Add(id, &agentlink.Conn{MachineID: id})
+			r.IsOnline(id)
+			r.OnlineIDs()
+			r.Remove(id)
+		}(i)
+	}
+	wg.Wait()
+}

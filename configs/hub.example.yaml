@@ -1,0 +1,18 @@
+# Constellate Hub — example configuration (M0)
+# Copy to hub.yaml and edit as needed.
+# All fields can be overridden with environment variables:
+#   CONSTELLATE_ADDR, CONSTELLATE_DB_PATH, CONSTELLATE_DEV_TOKEN, CONSTELLATE_PUBLIC_URL
+
+addr: "127.0.0.1:8080"
+public_url: "http://localhost:8080"
+db_path: "./constellate.db"
+dev_token: ""
+
+log:
+  level: "info"    # debug | info | warn | error
+  format: "text"   # text | json
+
+# M5 fields (TLS / auth — not yet active):
+# tls_cert: "/etc/constellate/cert.pem"
+# tls_key: "/etc/constellate/key.pem"
+# passkey_origin: "https://example.com"

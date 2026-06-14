@@ -1,0 +1,124 @@
+package transport
+
+// MessageType identifies the kind of wire message.
+type MessageType string
+
+const (
+	TypeHello         MessageType = "Hello"
+	TypeHeartbeat     MessageType = "Heartbeat"
+	TypeError         MessageType = "Error"
+	TypeSessionOpened MessageType = "SessionOpened"
+	TypeSessionExited MessageType = "SessionExited"
+	TypeOpenSession   MessageType = "OpenSession"
+	TypeResize        MessageType = "Resize"
+	TypeCloseSession  MessageType = "CloseSession"
+)
+
+// --- agent → hub ---
+
+// Hello is the first message sent by an agent after connecting.
+type Hello struct {
+	Type            MessageType `json:"type"`
+	MachineID       string      `json:"machineID"`
+	Name            string      `json:"name"`
+	OS              string      `json:"os"`
+	Arch            string      `json:"arch"`
+	AgentVersion    string      `json:"agentVersion"`
+	ProtocolVersion int         `json:"protocolVersion"`
+}
+
+// SessionStat carries per-session status within a Heartbeat.
+type SessionStat struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	BytesOut int64  `json:"bytesOut"`
+}
+
+// Heartbeat is sent periodically by the agent to confirm liveness.
+type Heartbeat struct {
+	Type     MessageType   `json:"type"`
+	TS       int64         `json:"ts"`
+	Sessions []SessionStat `json:"sessions"`
+}
+
+// SessionOpened is sent by the agent when a requested session is ready.
+type SessionOpened struct {
+	Type      MessageType `json:"type"`
+	SessionID string      `json:"sessionID"`
+	PID       int         `json:"pid"`
+}
+
+// SessionExited is sent by the agent when a session's process exits.
+type SessionExited struct {
+	Type      MessageType `json:"type"`
+	SessionID string      `json:"sessionID"`
+	ExitCode  int         `json:"exitCode"`
+}
+
+// Error is sent by the agent to report a problem.
+type Error struct {
+	Type      MessageType `json:"type"`
+	SessionID string      `json:"sessionID,omitempty"`
+	Code      string      `json:"code"`
+	Message   string      `json:"message"`
+}
+
+// --- hub → agent ---
+
+// OpenSession instructs the agent to start a new terminal session.
+type OpenSession struct {
+	Type      MessageType `json:"type"`
+	SessionID string      `json:"sessionID"`
+	Cwd       string      `json:"cwd"`
+	Shell     string      `json:"shell"`
+	Cols      int         `json:"cols"`
+	Rows      int         `json:"rows"`
+}
+
+// Resize instructs the agent to resize an existing session's PTY.
+type Resize struct {
+	Type      MessageType `json:"type"`
+	SessionID string      `json:"sessionID"`
+	Cols      int         `json:"cols"`
+	Rows      int         `json:"rows"`
+}
+
+// CloseSession instructs the agent to terminate a session.
+type CloseSession struct {
+	Type      MessageType `json:"type"`
+	SessionID string      `json:"sessionID"`
+}
+
+// --- constructors ---
+
+// NewHello constructs a Hello message with the Type field pre-set.
+func NewHello(machineID, name, os, arch, agentVersion string, protocolVersion int) Hello {
+	return Hello{
+		Type:            TypeHello,
+		MachineID:       machineID,
+		Name:            name,
+		OS:              os,
+		Arch:            arch,
+		AgentVersion:    agentVersion,
+		ProtocolVersion: protocolVersion,
+	}
+}
+
+// NewHeartbeat constructs a Heartbeat message with the Type field pre-set.
+func NewHeartbeat(ts int64, sessions []SessionStat) Heartbeat {
+	return Heartbeat{
+		Type:     TypeHeartbeat,
+		TS:       ts,
+		Sessions: sessions,
+	}
+}
+
+// NewError constructs an Error message with the Type field pre-set.
+func NewError(sessionID, code, message string) Error {
+	return Error{
+		Type:      TypeError,
+		SessionID: sessionID,
+		Code:      code,
+		Message:   message,
+	}
+}

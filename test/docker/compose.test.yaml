@@ -1,0 +1,49 @@
+# Constellate M0 topology test: 1 hub + 2 agents on a bridge network.
+# Agents only ever dial the hub (modelling dial-home behind NAT).
+# Strict per-pair L3 isolation between agents is not required for the M0 check.
+
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: deploy/hub.Dockerfile
+    environment:
+      CONSTELLATE_ADDR: "0.0.0.0:8080"
+      CONSTELLATE_DEV_TOKEN: "devtoken"
+      CONSTELLATE_DB_PATH: "/data/constellate.db"
+    tmpfs:
+      - /data
+    ports:
+      - "127.0.0.1:18080:8080"
+    networks:
+      - constellate
+
+  agent1:
+    build:
+      context: ../..
+      dockerfile: test/docker/agent.test.Dockerfile
+    environment:
+      CONSTELLATE_HUB_URL: "ws://hub:8080/ws/agent"
+      CONSTELLATE_DEV_TOKEN: "devtoken"
+      CONSTELLATE_NAME: "agent-1"
+    depends_on:
+      - hub
+    networks:
+      - constellate
+
+  agent2:
+    build:
+      context: ../..
+      dockerfile: test/docker/agent.test.Dockerfile
+    environment:
+      CONSTELLATE_HUB_URL: "ws://hub:8080/ws/agent"
+      CONSTELLATE_DEV_TOKEN: "devtoken"
+      CONSTELLATE_NAME: "agent-2"
+    depends_on:
+      - hub
+    networks:
+      - constellate
+
+networks:
+  constellate:
+    driver: bridge
