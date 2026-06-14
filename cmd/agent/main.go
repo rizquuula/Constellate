@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/rizquuula/Constellate/internal/agent/adapter/primary/hubclient"
+	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/pty"
+	"github.com/rizquuula/Constellate/internal/agent/app/session"
 	platconfig "github.com/rizquuula/Constellate/internal/platform/config"
 	"github.com/rizquuula/Constellate/internal/platform/id"
 	platlog "github.com/rizquuula/Constellate/internal/platform/log"
@@ -113,6 +115,8 @@ func cmdConnect(args []string) {
 		os.Exit(1)
 	}
 
+	mgr := session.NewManager(pty.Factory{}, log)
+
 	client := hubclient.New(hubclient.Config{
 		HubURL:            cfg.HubURL,
 		DevToken:          cfg.DevToken,
@@ -120,7 +124,9 @@ func cmdConnect(args []string) {
 		Name:              cfg.Name,
 		HeartbeatInterval: 5 * time.Second,
 		Log:               log,
+		Sessions:          mgr,
 	})
+	mgr.SetNotifier(client)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -131,6 +137,8 @@ func cmdConnect(args []string) {
 		log.Error("connect: run error", "err", err)
 		os.Exit(1)
 	}
+
+	mgr.Shutdown()
 }
 
 // ensureMachineID reads the machine ID from path if the file exists; otherwise

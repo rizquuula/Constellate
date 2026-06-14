@@ -37,3 +37,25 @@ jobs:
 
       - name: Test (unit + integration + in-process E2E, race-enabled)
         run: go test ./... -race -count=1
+
+  frontend:
+    name: frontend typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: cd web && npm ci
+
+      - name: Typecheck
+        run: cd web && npx tsc --noEmit
+
+      - name: Build
+        run: cd web && npm run build

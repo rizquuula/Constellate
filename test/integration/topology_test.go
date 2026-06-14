@@ -15,11 +15,32 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/memory"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
+	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
+	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 	"github.com/rizquuula/Constellate/internal/platform/id"
 	"github.com/rizquuula/Constellate/internal/platform/log"
 )
 
 const devToken = "test-token"
+
+// noopEvents satisfies wsagent.SessionEvents for tests that don't exercise session lifecycle.
+type noopEvents struct{}
+
+func (noopEvents) MarkExited(_ context.Context, _ string, _ int) error { return nil }
+
+// stubSessionService satisfies httpapi.SessionService for tests that don't exercise sessions.
+type stubSessionService struct{}
+
+func (stubSessionService) Open(_ context.Context, _ sessions.OpenInput) (session.Session, error) {
+	return session.Session{}, nil
+}
+func (stubSessionService) List(_ context.Context) ([]session.Session, error) {
+	return []session.Session{}, nil
+}
+func (stubSessionService) ListByMachine(_ context.Context, _ string) ([]session.Session, error) {
+	return []session.Session{}, nil
+}
+func (stubSessionService) Close(_ context.Context, _ string) error { return nil }
 
 func TestDialHomeTopology(t *testing.T) {
 	testLogger := log.New("error", "text")
@@ -28,8 +49,8 @@ func TestDialHomeTopology(t *testing.T) {
 	store := memory.NewMachineStore()
 	links := agentlink.NewRegistry()
 	reg := registry.New(store, links, registry.SystemClock{}, testLogger)
-	endpoint := wsagent.NewEndpoint(reg, links, devToken, testLogger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, endpoint, testLogger)
+	endpoint := wsagent.NewEndpoint(reg, links, noopEvents{}, devToken, testLogger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, endpoint, nil, testLogger)
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -47,7 +68,7 @@ func TestDialHomeTopology(t *testing.T) {
 		HeartbeatInterval: 100 * time.Millisecond,
 		Log:               testLogger,
 	})
-	go client1.Run(ctx1) //nolint:errcheck
+	go func() { _ = client1.Run(ctx1) }()
 
 	// Assert ONLINE
 	waitFor(t, 5*time.Second, "machine should come online after first connect", func() bool {
@@ -77,7 +98,7 @@ func TestDialHomeTopology(t *testing.T) {
 		HeartbeatInterval: 100 * time.Millisecond,
 		Log:               testLogger,
 	})
-	go client2.Run(ctx2) //nolint:errcheck
+	go func() { _ = client2.Run(ctx2) }()
 
 	// Assert ONLINE again
 	waitFor(t, 5*time.Second, "machine should come back online after reconnect", func() bool {
@@ -97,7 +118,7 @@ func machineStatus(t *testing.T, apiURL, machineID string) (found bool, online b
 	if err != nil {
 		return false, false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var machines []struct {
 		ID     string `json:"id"`

@@ -2,15 +2,48 @@ package hubclient
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/hashicorp/yamux"
+	"github.com/rizquuula/Constellate/internal/agent/app/session"
 	"github.com/rizquuula/Constellate/internal/transport"
 )
+
+// SessionManager is the consumer-side interface the client uses to manage PTY
+// sessions. *session.Manager satisfies this interface structurally.
+type SessionManager interface {
+	Open(sessionID string, spec session.PTYSpec) (pid int, err error)
+	Attach(sessionID string, stream io.ReadWriteCloser, in io.Reader) error
+	Resize(sessionID string, cols, rows int) error
+	Close(sessionID string) error
+}
+
+// errNotConnected is returned by sendControl when no encoder is set.
+var errNotConnected = errors.New("hubclient: not connected")
+
+// stubSessions is used when Config.Sessions is nil to avoid panics.
+type stubSessions struct{}
+
+func (stubSessions) Open(_ string, _ session.PTYSpec) (int, error) {
+	return 0, errors.New("hubclient: no session manager configured")
+}
+func (stubSessions) Attach(_ string, _ io.ReadWriteCloser, _ io.Reader) error {
+	return errors.New("hubclient: no session manager configured")
+}
+func (stubSessions) Resize(_ string, _, _ int) error {
+	return errors.New("hubclient: no session manager configured")
+}
+func (stubSessions) Close(_ string) error {
+	return errors.New("hubclient: no session manager configured")
+}
 
 // Config holds all parameters needed to create a Client.
 type Config struct {
@@ -20,6 +53,7 @@ type Config struct {
 	Name              string
 	HeartbeatInterval time.Duration
 	Log               *slog.Logger
+	Sessions          SessionManager
 }
 
 // Client manages a persistent, auto-reconnecting connection to the hub.
@@ -30,16 +64,24 @@ type Client struct {
 	name              string
 	heartbeatInterval time.Duration
 	log               *slog.Logger
+	sessions          SessionManager
+
+	mu      sync.Mutex
+	ctrlEnc *transport.Encoder
 }
 
 // New creates a Client from cfg. Zero HeartbeatInterval defaults to 5s; nil
-// Log defaults to a discard logger.
+// Log defaults to a discard logger; nil Sessions defaults to a stub that
+// returns errors (graceful degradation rather than panic).
 func New(cfg Config) *Client {
 	if cfg.HeartbeatInterval == 0 {
 		cfg.HeartbeatInterval = 5 * time.Second
 	}
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	if cfg.Sessions == nil {
+		cfg.Sessions = stubSessions{}
 	}
 	return &Client{
 		hubURL:            cfg.HubURL,
@@ -48,6 +90,47 @@ func New(cfg Config) *Client {
 		name:              cfg.Name,
 		heartbeatInterval: cfg.HeartbeatInterval,
 		log:               cfg.Log,
+		sessions:          cfg.Sessions,
+	}
+}
+
+// setCtrlEnc stores the current control encoder under the mutex.
+func (c *Client) setCtrlEnc(enc *transport.Encoder) {
+	c.mu.Lock()
+	c.ctrlEnc = enc
+	c.mu.Unlock()
+}
+
+// clearCtrlEnc clears the current control encoder under the mutex.
+func (c *Client) clearCtrlEnc() {
+	c.mu.Lock()
+	c.ctrlEnc = nil
+	c.mu.Unlock()
+}
+
+// sendControl encodes msg on the current control encoder. Returns
+// errNotConnected when not connected.
+func (c *Client) sendControl(msg any) error {
+	c.mu.Lock()
+	enc := c.ctrlEnc
+	c.mu.Unlock()
+	if enc == nil {
+		return errNotConnected
+	}
+	return enc.Encode(msg)
+}
+
+// SessionExited implements session.Notifier. It sends a SessionExited frame to
+// the hub. If the client is not connected, it logs at debug level — the hub
+// will reconcile on reconnect.
+func (c *Client) SessionExited(sessionID string, exitCode int) {
+	if err := c.sendControl(transport.NewSessionExited(sessionID, exitCode)); err != nil {
+		if errors.Is(err, errNotConnected) {
+			c.log.Debug("SessionExited: not connected, hub will reconcile on reconnect",
+				"sessionID", sessionID, "exitCode", exitCode)
+			return
+		}
+		c.log.Warn("SessionExited: send failed", "sessionID", sessionID, "err", err)
 	}
 }
 
@@ -105,7 +188,7 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 // connectOnce dials the hub, completes the handshake, then drives the
-// heartbeat/read loops until the connection breaks or ctx is canceled.
+// heartbeat/read/accept loops until the connection breaks or ctx is canceled.
 // connected is true when Hello was sent successfully.
 func (c *Client) connectOnce(ctx context.Context) (connected bool, err error) {
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -118,7 +201,7 @@ func (c *Client) connectOnce(ctx context.Context) (connected bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	connCtx, connCancel := context.WithCancel(ctx)
 	defer connCancel()
@@ -129,22 +212,33 @@ func (c *Client) connectOnce(ctx context.Context) (connected bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	ctrl, err := sess.OpenStream()
 	if err != nil {
 		return false, err
 	}
 
-	enc := transport.NewEncoder(ctrl)
-	if err := sendHello(enc, c.machineID, c.name); err != nil {
+	// Create the single encoder for the control stream; reused by serve.
+	ctrlEnc := transport.NewEncoder(ctrl)
+	if err := sendHello(ctrlEnc, c.machineID, c.name); err != nil {
 		return false, err
 	}
 
 	// From here the handshake succeeded.
 	c.log.Info("connected to hub", "machineID", c.machineID, "hub", c.hubURL)
 
-	errc := make(chan error, 2)
+	return true, c.serve(connCtx, sess, ctrl, ctrlEnc)
+}
+
+// serve drives the heartbeat, control-read, and accept-stream loops after the
+// handshake is complete. enc is the already-constructed encoder for ctrl and
+// must be the only encoder writing to ctrl. It returns the first error from any loop.
+func (c *Client) serve(ctx context.Context, sess *yamux.Session, ctrl net.Conn, enc *transport.Encoder) error {
+	c.setCtrlEnc(enc)
+	defer c.clearCtrlEnc()
+
+	errc := make(chan error, 3)
 
 	// Heartbeat goroutine.
 	go func() {
@@ -152,7 +246,8 @@ func (c *Client) connectOnce(ctx context.Context) (connected bool, err error) {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-connCtx.Done():
+			case <-ctx.Done():
+				errc <- ctx.Err()
 				return
 			case <-ticker.C:
 				if err := enc.Encode(transport.NewHeartbeat(time.Now().Unix(), nil)); err != nil {
@@ -163,7 +258,7 @@ func (c *Client) connectOnce(ctx context.Context) (connected bool, err error) {
 		}
 	}()
 
-	// Read goroutine.
+	// Control-read goroutine.
 	go func() {
 		dec := transport.NewDecoder(ctrl)
 		for {
@@ -172,11 +267,25 @@ func (c *Client) connectOnce(ctx context.Context) (connected bool, err error) {
 				errc <- err
 				return
 			}
-			handleFrame(frame, c.machineID, c.log)
+			c.handleControlFrame(enc, frame)
 		}
 	}()
 
-	err = <-errc
-	connCancel()
-	return true, err
+	// Accept-stream goroutine (hub-opened data streams).
+	go func() {
+		for {
+			stream, err := sess.AcceptStream()
+			if err != nil {
+				errc <- err
+				return
+			}
+			go c.handleDataStream(stream)
+		}
+	}()
+
+	err := <-errc
+	// Close ctrl and sess so the other goroutines unblock and exit cleanly.
+	_ = ctrl.Close()
+	_ = sess.Close()
+	return err
 }

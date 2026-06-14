@@ -67,7 +67,7 @@ func (s *MachineStore) List(ctx context.Context) ([]machine.Machine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list machines: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []machine.Machine
 	for rows.Next() {

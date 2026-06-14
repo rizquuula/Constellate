@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
+	"github.com/rizquuula/Constellate/web"
 )
 
 // MachineService is the consumer-side port for machine listing.
@@ -25,26 +26,32 @@ type Server struct {
 	addr     string
 	mux      *http.ServeMux
 	machines MachineService
+	sessions SessionService
 	log      *slog.Logger
 }
 
 // NewServer wires up the mux and returns a ready-to-start Server.
-func NewServer(addr string, machines MachineService, agentWS http.Handler, log *slog.Logger) *Server {
+func NewServer(addr string, machines MachineService, sessions SessionService, agentWS http.Handler, termWS http.Handler, log *slog.Logger) *Server {
 	s := &Server{
 		addr:     addr,
 		machines: machines,
+		sessions: sessions,
 		log:      log,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/machines", s.handleListMachines)
+	mux.HandleFunc("POST /api/sessions", s.handleOpenSession)
+	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
+	mux.HandleFunc("GET /api/machines/{id}/sessions", s.handleListSessionsByMachine)
+	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleCloseSession)
 	mux.Handle("/ws/agent", agentWS)
-
-	staticRoot, err := fs.Sub(staticFS, "static")
-	if err != nil {
-		panic(fmt.Sprintf("httpapi: sub static fs: %v", err))
+	if termWS != nil {
+		mux.Handle("/ws/term", termWS)
 	}
-	mux.Handle("GET /{$}", http.FileServer(http.FS(staticRoot)))
+
+	distFS := web.Dist()
+	mux.Handle("/{path...}", spaHandler(distFS))
 
 	s.mux = mux
 	s.http = &http.Server{
@@ -52,6 +59,42 @@ func NewServer(addr string, machines MachineService, agentWS http.Handler, log *
 		Handler: loggingMiddleware(log, mux),
 	}
 	return s
+}
+
+// spaHandler serves static files from the embedded FS. If the requested file
+// does not exist, it falls back to index.html (SPA client-side routing).
+// If index.html itself is absent (frontend not yet built), it returns a plain
+// notice so development before running `make web` stays graceful.
+func spaHandler(fsys fs.FS) http.Handler {
+	fileServer := http.FileServerFS(fsys)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == "/" {
+			path = "index.html"
+		}
+		// Strip leading slash for fs.Stat (fs.FS paths are relative).
+		rel := path
+		if len(rel) > 0 && rel[0] == '/' {
+			rel = rel[1:]
+		}
+
+		if _, err := fs.Stat(fsys, rel); err == nil {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// File not found — try index.html (SPA fallback).
+		if _, err := fs.Stat(fsys, "index.html"); err != nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("frontend not built — run `make web`\n"))
+			return
+		}
+
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/"
+		fileServer.ServeHTTP(w, r2)
+	})
 }
 
 // Start begins listening. Blocks until the server stops.

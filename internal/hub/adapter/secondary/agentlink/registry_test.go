@@ -10,7 +10,7 @@ import (
 func TestRegistry_AddGetRemove(t *testing.T) {
 	r := agentlink.NewRegistry()
 
-	c := &agentlink.Conn{MachineID: "m1", ConnectedAt: 100}
+	c := agentlink.NewConn("m1", nil, nil, 100)
 	r.Add("m1", c)
 
 	got, ok := r.Get("m1")
@@ -35,7 +35,7 @@ func TestRegistry_IsOnline(t *testing.T) {
 		t.Error("IsOnline: should be false before Add")
 	}
 
-	r.Add("m1", &agentlink.Conn{MachineID: "m1"})
+	r.Add("m1", agentlink.NewConn("m1", nil, nil, 0))
 	if !r.IsOnline("m1") {
 		t.Error("IsOnline: should be true after Add")
 	}
@@ -49,8 +49,8 @@ func TestRegistry_IsOnline(t *testing.T) {
 func TestRegistry_OnlineIDs(t *testing.T) {
 	r := agentlink.NewRegistry()
 
-	r.Add("m1", &agentlink.Conn{MachineID: "m1"})
-	r.Add("m2", &agentlink.Conn{MachineID: "m2"})
+	r.Add("m1", agentlink.NewConn("m1", nil, nil, 0))
+	r.Add("m2", agentlink.NewConn("m2", nil, nil, 0))
 
 	ids := r.OnlineIDs()
 	if len(ids) != 2 {
@@ -77,7 +77,7 @@ func TestRegistry_Concurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			id := "m" + string(rune('0'+i%10))
-			r.Add(id, &agentlink.Conn{MachineID: id})
+			r.Add(id, agentlink.NewConn(id, nil, nil, 0))
 			r.IsOnline(id)
 			r.OnlineIDs()
 			r.Remove(id)

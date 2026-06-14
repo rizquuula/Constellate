@@ -14,9 +14,17 @@ LDFLAGS_AGENT := -ldflags "-X $(VERSION_PKG).Version=$(AGENT_VERSION) \
 	-X $(VERSION_PKG).Commit=$(COMMIT) \
 	-X $(VERSION_PKG).BuildTime=$(BUILDTIME)"
 
-.PHONY: build build-hub build-agent test test-docker lint image-hub
+.PHONY: build build-hub build-agent web test test-docker test-e2e lint image-hub
 
-build: build-hub build-agent
+build: web build-hub build-agent
+
+web:
+	@if [ ! -f web/package-lock.json ]; then \
+		cd web && npm install; \
+	else \
+		cd web && npm ci; \
+	fi
+	cd web && npm run build
 
 build-hub:
 	go build $(LDFLAGS_HUB) -o bin/constellate-hub ./cmd/hub
@@ -29,6 +37,9 @@ test:
 
 test-docker:
 	./test/docker/run.sh
+
+test-e2e:
+	./test/e2e/run.sh
 
 lint:
 	golangci-lint run

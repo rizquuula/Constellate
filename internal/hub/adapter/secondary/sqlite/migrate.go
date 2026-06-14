@@ -57,7 +57,7 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		}
 
 		if _, err := tx.ExecContext(ctx, string(body)); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("sqlite: exec migration %s: %w", version, err)
 		}
 
@@ -65,7 +65,7 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, strftime('%s','now'))`,
 			version,
 		); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("sqlite: record migration %s: %w", version, err)
 		}
 

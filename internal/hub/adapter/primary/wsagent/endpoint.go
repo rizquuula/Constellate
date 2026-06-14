@@ -12,19 +12,26 @@ import (
 	"github.com/rizquuula/Constellate/internal/transport"
 )
 
+// SessionEvents is a consumer-side port for async session lifecycle events.
+type SessionEvents interface {
+	MarkExited(ctx context.Context, sessionID string, exitCode int) error
+}
+
 // Endpoint handles WebSocket dial-home connections from agents.
 type Endpoint struct {
 	reg      *registry.UseCase
 	links    *agentlink.Registry
+	events   SessionEvents
 	devToken string
 	log      *slog.Logger
 }
 
 // NewEndpoint creates a ready Endpoint.
-func NewEndpoint(reg *registry.UseCase, links *agentlink.Registry, devToken string, log *slog.Logger) *Endpoint {
+func NewEndpoint(reg *registry.UseCase, links *agentlink.Registry, events SessionEvents, devToken string, log *slog.Logger) *Endpoint {
 	return &Endpoint{
 		reg:      reg,
 		links:    links,
+		events:   events,
 		devToken: devToken,
 		log:      log,
 	}
@@ -59,10 +66,10 @@ func (e *Endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sess, err := transport.Server(netConn)
 	if err != nil {
 		e.log.Error("wsagent: yamux server failed", "err", err)
-		c.Close(websocket.StatusInternalError, "mux error")
+		_ = c.Close(websocket.StatusInternalError, "mux error")
 		return
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	ctrl, err := sess.AcceptStream()
 	if err != nil {
@@ -71,7 +78,7 @@ func (e *Endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	e.handleControl(ctx, sess, ctrl)
-	c.Close(websocket.StatusNormalClosure, "")
+	_ = c.Close(websocket.StatusNormalClosure, "")
 }
 
 // extractBearer returns the token from an "Authorization: Bearer <token>" header.

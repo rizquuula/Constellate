@@ -12,15 +12,23 @@ import (
 	"time"
 
 	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/httpapi"
+	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/wsbrowser"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/wsagent"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/sqlite"
+	"github.com/rizquuula/Constellate/internal/hub/app/attach"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
+	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
 	platconfig "github.com/rizquuula/Constellate/internal/platform/config"
 	platlog "github.com/rizquuula/Constellate/internal/platform/log"
+	"github.com/rizquuula/Constellate/internal/platform/id"
 	"github.com/rizquuula/Constellate/internal/platform/version"
 	"github.com/rizquuula/Constellate/internal/transport"
 )
+
+// Compile-time interface assertions.
+var _ sessions.AgentGateway = (*agentlink.Gateway)(nil)
+var _ attach.AgentGateway = (*agentlink.Gateway)(nil)
 
 func main() {
 	args := os.Args[1:]
@@ -66,7 +74,7 @@ func cmdMigrate(args []string) {
 		fmt.Fprintf(os.Stderr, "migrate: open db: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	if err := sqlite.Migrate(ctx, db); err != nil {
@@ -99,7 +107,7 @@ func cmdServe(args []string) {
 		log.Error("serve: open db", "err", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	if err := sqlite.Migrate(ctx, db); err != nil {
@@ -107,11 +115,17 @@ func cmdServe(args []string) {
 		os.Exit(1)
 	}
 
-	store := sqlite.NewMachineStore(db)
+	machineStore := sqlite.NewMachineStore(db)
+	sessStore := sqlite.NewSessionStore(db)
 	links := agentlink.NewRegistry()
-	reg := registry.New(store, links, registry.SystemClock{}, log)
-	endpoint := wsagent.NewEndpoint(reg, links, cfg.DevToken, log)
-	srv := httpapi.NewServer(cfg.Addr, reg, endpoint, log)
+	gateway := agentlink.NewGateway(links)
+	reg := registry.New(machineStore, links, registry.SystemClock{}, log)
+	sessionsUC := sessions.New(sessStore, gateway, sessions.SystemClock{}, id.New, log)
+	attachUC := attach.New(sessStore, gateway, log)
+
+	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, cfg.DevToken, log)
+	termHandler := wsbrowser.NewTerminalHandler(attachUC, log)
+	srv := httpapi.NewServer(cfg.Addr, reg, sessionsUC, endpoint, termHandler, log)
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

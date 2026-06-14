@@ -1,0 +1,175 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0f0f13;
+  color: #e0e0e0;
+  font-size: 14px;
+}
+
+.layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: #13131a;
+  border-right: 1px solid #2a2a3a;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-section {
+  padding: 12px 0;
+  border-bottom: 1px solid #2a2a3a;
+}
+
+.sidebar-heading {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #666;
+  padding: 0 12px 8px;
+}
+
+.sidebar-empty {
+  color: #555;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.machine-item {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.machine-item:hover {
+  background: #1a1a26;
+}
+
+.machine-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-online {
+  background: #4dbb4d;
+}
+
+.dot-offline {
+  background: #bb4d4d;
+}
+
+.machine-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.machine-meta {
+  color: #666;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.btn-shell {
+  align-self: flex-start;
+  background: #1e2a4a;
+  color: #8ab4f8;
+  border: 1px solid #2a3a6a;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn-shell:hover {
+  background: #263660;
+}
+
+.session-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-item:hover {
+  background: #1a1a26;
+}
+
+.session-active {
+  background: #1a2540;
+}
+
+.session-id {
+  font-family: monospace;
+  font-size: 11px;
+  color: #aaa;
+}
+
+.session-status {
+  font-size: 11px;
+  color: #777;
+}
+
+/* Terminal area */
+.terminal-area {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background: #0f0f13;
+}
+
+.terminal-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #444;
+  font-size: 14px;
+}
+
+.terminal-container {
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+}
+
+.terminal-container .xterm {
+  height: 100%;
+}
+
+.terminal-container .xterm-viewport {
+  overflow-y: auto;
+}

@@ -21,5 +21,13 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 - Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
 
 ## Status
-M0 done (scaffold + dial-home: online→offline→online proven in-proc and across containers). Next: M1
-(first live terminal). Milestone roadmap in `DESIGN.md` §18.
+M1 done (first live terminal: browser ↔ hub data-stream ↔ agent PTY; React + xterm.js embedded in the
+hub; create/attach/resize/detach/close; PTYs survive detach). No scrollback **replay** yet — that's M2.
+Next: M2 (session persistence / scrollback). Milestone roadmap in `DESIGN.md` §18.
+
+## M1 conventions worth knowing
+- Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is
+  `transport.AttachHeader{sessionID}`, then raw PTY bytes. `/ws/term` uses **binary** frames for terminal
+  I/O and **text** frames (`{"type":"resize",...}`) for resize.
+- Frontend builds to `web/dist` (gitignored except `.gitkeep`) and embeds via `web/embed.go`
+  (`//go:embed all:dist`). `make build` runs `make web` first; the hub Docker image has a node stage.

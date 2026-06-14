@@ -1,16 +1,87 @@
 package agentlink
 
 import (
+	"net"
 	"sync"
 
 	"github.com/hashicorp/yamux"
+	"github.com/rizquuula/Constellate/internal/transport"
 )
 
+type openResult struct {
+	pid int
+	err error
+}
+
 // Conn holds the live connection state for one enrolled agent.
+// session and ctrlEnc are unexported; gateway.go (same package) accesses them directly.
 type Conn struct {
 	MachineID   string
-	Session     *yamux.Session
 	ConnectedAt int64
+	session     *yamux.Session
+	ctrlEnc     *transport.Encoder
+	mu          sync.Mutex
+	pending     map[string]chan openResult
+}
+
+// NewConn constructs a Conn for machineID backed by sess and ctrlEnc.
+func NewConn(machineID string, sess *yamux.Session, ctrlEnc *transport.Encoder, connectedAt int64) *Conn {
+	return &Conn{
+		MachineID:   machineID,
+		ConnectedAt: connectedAt,
+		session:     sess,
+		ctrlEnc:     ctrlEnc,
+		pending:     make(map[string]chan openResult),
+	}
+}
+
+// sendControl encodes msg onto the control stream.
+func (c *Conn) sendControl(msg any) error {
+	return c.ctrlEnc.Encode(msg)
+}
+
+// awaitOpen registers a pending channel for sessionID and returns it.
+func (c *Conn) awaitOpen(sessionID string) chan openResult {
+	ch := make(chan openResult, 1)
+	c.mu.Lock()
+	c.pending[sessionID] = ch
+	c.mu.Unlock()
+	return ch
+}
+
+// cancelOpen removes a pending channel for sessionID.
+func (c *Conn) cancelOpen(sessionID string) {
+	c.mu.Lock()
+	delete(c.pending, sessionID)
+	c.mu.Unlock()
+}
+
+// ResolveOpen resolves a pending OpenSession by sessionID.
+// It is exported so that wsagent (different package) can call it from the inbound loop.
+func (c *Conn) ResolveOpen(sessionID string, pid int, err error) {
+	c.mu.Lock()
+	ch, ok := c.pending[sessionID]
+	if ok {
+		delete(c.pending, sessionID)
+	}
+	c.mu.Unlock()
+	if ok {
+		ch <- openResult{pid: pid, err: err}
+	}
+}
+
+// openDataStream opens a new yamux stream to the agent, sends the attach header,
+// and returns it as a net.Conn.
+func (c *Conn) openDataStream(sessionID string) (net.Conn, error) {
+	stream, err := c.session.OpenStream()
+	if err != nil {
+		return nil, err
+	}
+	if err := transport.NewEncoder(stream).Encode(transport.NewAttachHeader(sessionID)); err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	return stream, nil
 }
 
 // Registry is the live machineID → connection map shared between

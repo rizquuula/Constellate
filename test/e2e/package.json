@@ -1,0 +1,11 @@
+{
+  "name": "constellate-e2e",
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  }
+}

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	"github.com/rizquuula/Constellate/internal/hub/domain/machine"
+	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 )
 
 type errorBody struct {
@@ -30,6 +32,12 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 func statusFor(err error) int {
 	if errors.Is(err, machine.ErrNotFound) {
 		return http.StatusNotFound
+	}
+	if errors.Is(err, session.ErrNotFound) {
+		return http.StatusNotFound
+	}
+	if errors.Is(err, agentlink.ErrAgentOffline) {
+		return http.StatusServiceUnavailable
 	}
 	return http.StatusInternalServerError
 }

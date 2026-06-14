@@ -1,0 +1,6 @@
+web/node_modules
+bin
+.git
+**/*.db
+**/*.db-shm
+**/*.db-wal

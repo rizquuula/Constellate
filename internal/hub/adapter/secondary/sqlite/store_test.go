@@ -17,7 +17,7 @@ func openTestDB(t *testing.T) *sqlite.MachineStore {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -135,7 +135,7 @@ func TestMachineStore_MigrateIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	if err := sqlite.Migrate(ctx, db); err != nil {

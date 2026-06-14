@@ -3,6 +3,7 @@ package wsagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -14,8 +15,8 @@ import (
 )
 
 func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl net.Conn) {
-	dec := transport.NewDecoder(ctrl)
 	enc := transport.NewEncoder(ctrl)
+	dec := transport.NewDecoder(ctrl)
 
 	frame, err := dec.Next()
 	if err != nil {
@@ -44,11 +45,8 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 		return
 	}
 
-	e.links.Add(hello.MachineID, &agentlink.Conn{
-		MachineID:   hello.MachineID,
-		Session:     sess,
-		ConnectedAt: time.Now().Unix(),
-	})
+	conn := agentlink.NewConn(hello.MachineID, sess, enc, time.Now().Unix())
+	e.links.Add(hello.MachineID, conn)
 	defer e.links.Remove(hello.MachineID)
 
 	_, err = e.reg.Register(ctx, registry.RegisterInput{
@@ -82,6 +80,39 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 			} else {
 				e.log.Debug("wsagent: heartbeat", "machineID", hello.MachineID)
 			}
+
+		case transport.TypeSessionOpened:
+			msg, err := transport.Unmarshal[transport.SessionOpened](frame)
+			if err != nil {
+				e.log.Warn("wsagent: unmarshal SessionOpened failed", "err", err)
+				continue
+			}
+			conn.ResolveOpen(msg.SessionID, msg.PID, nil)
+
+		case transport.TypeError:
+			msg, err := transport.Unmarshal[transport.Error](frame)
+			if err != nil {
+				e.log.Warn("wsagent: unmarshal Error failed", "err", err)
+				continue
+			}
+			if msg.SessionID != "" {
+				conn.ResolveOpen(msg.SessionID, 0, fmt.Errorf("agent error %s: %s", msg.Code, msg.Message))
+			} else {
+				e.log.Warn("wsagent: agent error", "code", msg.Code, "message", msg.Message, "machineID", hello.MachineID)
+			}
+
+		case transport.TypeSessionExited:
+			msg, err := transport.Unmarshal[transport.SessionExited](frame)
+			if err != nil {
+				e.log.Warn("wsagent: unmarshal SessionExited failed", "err", err)
+				continue
+			}
+			if e.events != nil {
+				if err := e.events.MarkExited(ctx, msg.SessionID, msg.ExitCode); err != nil {
+					e.log.Error("wsagent: MarkExited failed", "sessionID", msg.SessionID, "err", err)
+				}
+			}
+
 		default:
 			e.log.Debug("wsagent: ignoring unknown frame type", "type", frame.Type, "machineID", hello.MachineID)
 		}

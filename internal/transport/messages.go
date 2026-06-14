@@ -12,6 +12,7 @@ const (
 	TypeOpenSession   MessageType = "OpenSession"
 	TypeResize        MessageType = "Resize"
 	TypeCloseSession  MessageType = "CloseSession"
+	TypeAttach        MessageType = "Attach"
 )
 
 // --- agent → hub ---
@@ -120,5 +121,53 @@ func NewError(sessionID, code, message string) Error {
 		SessionID: sessionID,
 		Code:      code,
 		Message:   message,
+	}
+}
+
+// NewSessionOpened constructs a SessionOpened message with the Type field pre-set.
+func NewSessionOpened(sessionID string, pid int) SessionOpened {
+	return SessionOpened{
+		Type:      TypeSessionOpened,
+		SessionID: sessionID,
+		PID:       pid,
+	}
+}
+
+// NewSessionExited constructs a SessionExited message with the Type field pre-set.
+func NewSessionExited(sessionID string, exitCode int) SessionExited {
+	return SessionExited{
+		Type:      TypeSessionExited,
+		SessionID: sessionID,
+		ExitCode:  exitCode,
+	}
+}
+
+// NewOpenSession constructs an OpenSession message with the Type field pre-set.
+func NewOpenSession(sessionID, cwd, shell string, cols, rows int) OpenSession {
+	return OpenSession{
+		Type:      TypeOpenSession,
+		SessionID: sessionID,
+		Cwd:       cwd,
+		Shell:     shell,
+		Cols:      cols,
+		Rows:      rows,
+	}
+}
+
+// NewResize constructs a Resize message with the Type field pre-set.
+func NewResize(sessionID string, cols, rows int) Resize {
+	return Resize{
+		Type:      TypeResize,
+		SessionID: sessionID,
+		Cols:      cols,
+		Rows:      rows,
+	}
+}
+
+// NewCloseSession constructs a CloseSession message with the Type field pre-set.
+func NewCloseSession(sessionID string) CloseSession {
+	return CloseSession{
+		Type:      TypeCloseSession,
+		SessionID: sessionID,
 	}
 }

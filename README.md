@@ -5,25 +5,30 @@
 > project, persistent across reconnects, with a mission-control overview of every running terminal at
 > a glance.
 
-**Status:** M0 (scaffold + dial-home topology) · **Module:** `github.com/rizquuula/Constellate` ·
+**Status:** M1 (first live terminal) · **Module:** `github.com/rizquuula/Constellate` ·
 **Go:** 1.25+
 
 See [`DESIGN.md`](DESIGN.md) for the canonical architecture and the full milestone roadmap.
 
 ---
 
-## What works today (M0)
+## What works today (through M1)
 
-M0 stands up the monorepo + hexagonal skeleton and **proves the dial-home topology end to end**:
+A **live interactive shell in the browser**, end to end:
 
 - **Agents dial home** (outbound only) to the hub over a WebSocket, run **yamux** over it, and send
   `Hello` + periodic `Heartbeat` on a control stream — reconnecting automatically with backoff.
-- The **hub** authenticates agents (shared dev token, M0), registers them in a live
-  `machineID → connection` registry, persists machine metadata to **SQLite**, and serves
-  `GET /api/machines` plus an embedded status page.
-- A machine shows **online** while its connection is live and flips **offline** the moment it drops.
+- The **hub** registers agents in a live `machineID → connection` registry, persists machine + session
+  metadata to **SQLite**, and brokers a browser WebSocket ↔ a yamux **data stream** ↔ a PTY on the agent.
+- The **agent** spawns a real PTY per session, pipes raw bytes both ways, and applies resizes.
+- A **React + xterm.js** app (embedded in the hub binary) lets you pick an online machine, open a shell,
+  type, see output, and resize. PTYs **survive a tab close** — re-attach resumes the live session.
 
-No PTYs, terminals, web app, or auth hardening yet — those arrive in M1–M5 (see `DESIGN.md` §18).
+> **M1 limitation:** there is no scrollback **replay** yet, so re-attaching (or output printed before you
+> attach) won't repaint history — the prompt may appear blank until your first keystroke. Full scrollback
+> persistence lands in **M2**.
+
+No mission-control overview, projects, or auth hardening yet — those arrive in M3–M5 (see `DESIGN.md` §18).
 
 > **Security note:** M0 runs on `localhost` / a private network only, over plain `ws://`. The hub does
 > **not** face the public internet until the auth milestone (M5). The `CONSTELLATE_DEV_TOKEN` path is
@@ -35,6 +40,7 @@ No PTYs, terminals, web app, or auth hardening yet — those arrive in M1–M5 (
 
 - **Go 1.25+.** If your system Go is older, set `GOTOOLCHAIN=auto` (the `Makefile` already does) so the
   toolchain is fetched automatically.
+- **Node 18+ / npm** — to build the web app (`make web`, run automatically by `make build`).
 - **Docker + Compose v2** — only for the Dockerized topology test (`make test-docker`).
 
 ## Quickstart (two terminals)
@@ -53,14 +59,11 @@ CONSTELLATE_NAME=my-laptop \
   ./bin/constellate-agent connect
 ```
 
-Then open <http://127.0.0.1:8080> to watch the machine appear **online**, or:
+Then open <http://127.0.0.1:8080>: the machine appears **online** in the sidebar. Click **New shell**
+to open a live terminal — type, run `ls`/`top`, resize the window. Close the tab and re-open the
+session; the shell is still running (no scrollback replay until M2).
 
-```bash
-curl -s 127.0.0.1:8080/api/machines    # → [{"id":"...","name":"my-laptop","online":true,...}]
-```
-
-Stop the agent (Ctrl-C) and the machine flips to `"online":false`; restart it and it comes back online
-with the same id.
+Stop the agent (Ctrl-C) and the machine flips offline; restart it and it comes back with the same id.
 
 Configuration can also come from a YAML file (`--config`); see [`configs/`](configs/) for samples.
 Per-secret `CONSTELLATE_*` env vars override file values.
@@ -77,13 +80,19 @@ Both `version` commands print the binary version, git commit, and wire protocol 
 ## Testing
 
 ```bash
-make test          # unit + integration + in-process E2E (online→offline→online over loopback)
+make test          # unit + integration + in-process E2E (dial-home + the full terminal lifecycle)
+make test-e2e      # Playwright: a real browser opens a shell on an agent, types, reads, resizes
 make test-docker   # hub + 2 agent containers on a Docker network — dial-home across real boundaries
 make lint          # golangci-lint
 ```
 
-The M0 acceptance check — **online → offline → online** — runs both in-process
-(`test/integration/topology_test.go`) and across containers (`test/docker/`).
+Acceptance checks: **online → offline → online** (`test/integration/topology_test.go`, `test/docker/`)
+and the **terminal lifecycle** — create → attach → type → read → resize → detach → re-attach → close —
+both in-process (`test/integration/terminal_test.go`) and in a real browser (`test/e2e/`).
+
+**CI:** the cheap checks (lint, vet, race tests, frontend typecheck/build) run automatically on push/PR
+(`.github/workflows/ci.yaml`). The heavy tiers (Playwright browser + Docker topology) are
+**manual-trigger only** (`e2e.yaml`, run from the Actions tab) to conserve Actions minutes.
 
 ## Layout
 

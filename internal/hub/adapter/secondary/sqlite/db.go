@@ -21,7 +21,7 @@ func Open(path string) (*sql.DB, error) {
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("sqlite: apply pragma %q: %w", p, err)
 		}
 	}
