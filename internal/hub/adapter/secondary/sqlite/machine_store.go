@@ -62,7 +62,7 @@ func (s *MachineStore) UpdateLastSeen(ctx context.Context, id string, ts int64) 
 // List returns all machine records.
 func (s *MachineStore) List(ctx context.Context) ([]machine.Machine, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, instance_id, name, os, arch, agent_version, enrolled_at, last_seen_at
+		SELECT id, instance_id, name, os, arch, agent_version, enrolled_at, last_seen_at, revoked_at
 		FROM machines
 	`)
 	if err != nil {
@@ -88,7 +88,7 @@ func (s *MachineStore) List(ctx context.Context) ([]machine.Machine, error) {
 // Returns machine.ErrNotFound (wrapped) if no row matches.
 func (s *MachineStore) ByID(ctx context.Context, id string) (machine.Machine, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, instance_id, name, os, arch, agent_version, enrolled_at, last_seen_at
+		SELECT id, instance_id, name, os, arch, agent_version, enrolled_at, last_seen_at, revoked_at
 		FROM machines WHERE id = ?
 	`, id)
 	m, err := scanMachine(row)
@@ -99,6 +99,25 @@ func (s *MachineStore) ByID(ctx context.Context, id string) (machine.Machine, er
 		return machine.Machine{}, fmt.Errorf("sqlite: by id %q: %w", id, err)
 	}
 	return m, nil
+}
+
+// MarkRevoked sets revoked_at for the given machine id.
+// Returns machine.ErrNotFound (wrapped) if no row matches.
+func (s *MachineStore) MarkRevoked(ctx context.Context, id string, ts int64) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE machines SET revoked_at = ? WHERE id = ?`, ts, id,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: mark revoked %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: mark revoked %q: %w", id, machine.ErrNotFound)
+	}
+	return nil
 }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
@@ -113,15 +132,16 @@ func scanMachine(s scanner) (machine.Machine, error) {
 		arch, agentVersion sql.NullString
 		enrolledAt         int64
 		lastSeenAt         sql.NullInt64
+		revokedAt          sql.NullInt64
 	)
-	if err := s.Scan(&id, &instanceID, &name, &osName, &arch, &agentVersion, &enrolledAt, &lastSeenAt); err != nil {
+	if err := s.Scan(&id, &instanceID, &name, &osName, &arch, &agentVersion, &enrolledAt, &lastSeenAt, &revokedAt); err != nil {
 		return machine.Machine{}, err
 	}
 	ls := enrolledAt
 	if lastSeenAt.Valid {
 		ls = lastSeenAt.Int64
 	}
-	return machine.Rehydrate(
+	m := machine.Rehydrate(
 		id,
 		instanceID.String,
 		name,
@@ -129,5 +149,9 @@ func scanMachine(s scanner) (machine.Machine, error) {
 		arch.String,
 		agentVersion.String,
 		enrolledAt, ls,
-	), nil
+	)
+	if revokedAt.Valid {
+		m = m.MarkRevoked(revokedAt.Int64)
+	}
+	return m, nil
 }

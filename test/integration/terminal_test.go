@@ -25,6 +25,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/sqlite"
 	"github.com/rizquuula/Constellate/internal/hub/app/attach"
 	auditapp "github.com/rizquuula/Constellate/internal/hub/app/audit"
+	"github.com/rizquuula/Constellate/internal/hub/app/enroll"
 	"github.com/rizquuula/Constellate/internal/hub/app/overview"
 	"github.com/rizquuula/Constellate/internal/hub/app/projects"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
@@ -34,9 +35,10 @@ import (
 )
 
 // newInProcessHub wires up a complete hub (SQLite + all use cases) backed by a
-// temporary database and returns the test server, the sessions use case, and a
-// wsURL helper. The caller is responsible for closing the returned *httptest.Server.
-func newInProcessHub(t *testing.T) (ts *httptest.Server, sessionsUC *sessions.UseCase, wsURL func(string) string) {
+// temporary database and returns the test server, the sessions use case, the
+// enroll use case (for agent enrollment), and a wsURL helper.
+// The caller is responsible for closing the returned *httptest.Server.
+func newInProcessHub(t *testing.T) (ts *httptest.Server, sessionsUC *sessions.UseCase, enrollUC *enroll.UseCase, wsURL func(string) string) {
 	t.Helper()
 	logger := log.New("error", "text")
 
@@ -56,6 +58,8 @@ func newInProcessHub(t *testing.T) (ts *httptest.Server, sessionsUC *sessions.Us
 	machineStore := sqlite.NewMachineStore(db)
 	sessStore := sqlite.NewSessionStore(db)
 	projStore := sqlite.NewProjectStore(db)
+	tokenStore := memory.NewEnrollTokenStore()
+	credStore := memory.NewCredentialStore()
 	links := agentlink.NewRegistry()
 	gateway := agentlink.NewGateway(links)
 	reg := registry.New(machineStore, links, registry.SystemClock{}, logger)
@@ -64,36 +68,35 @@ func newInProcessHub(t *testing.T) (ts *httptest.Server, sessionsUC *sessions.Us
 	projectsUC := projects.New(projStore, projects.SystemClock{}, id.New, logger)
 	attachUC := attach.New(sessStore, gateway, logger, auditUC)
 	overviewUC := overview.New(gateway, logger)
-	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, overviewUC, nil, e2eToken, logger)
+	enrollUC = enroll.New(tokenStore, credStore, machineStore, auditUC, enroll.SystemClock{}, id.New, 15*time.Minute, logger)
+	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, overviewUC, enrollUC, logger)
 	termHandler := wsbrowser.NewTerminalHandler(attachUC, logger)
 	overviewHandler := wsbrowser.NewOverviewHandler(overviewUC, logger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, sessionsUC, projectsUC, nil, endpoint, termHandler, overviewHandler, nil, false, logger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, sessionsUC, projectsUC, enrollUC, endpoint, termHandler, overviewHandler, nil, false, logger)
 
 	ts = httptest.NewServer(srv.Handler())
 	wsURL = func(path string) string {
 		return "ws" + strings.TrimPrefix(ts.URL, "http") + path
 	}
-	return ts, sessionsUC, wsURL
+	return ts, sessionsUC, enrollUC, wsURL
 }
-
-const e2eToken = "e2e-token"
 
 func TestTerminalLifecycle(t *testing.T) {
 	logger := log.New("error", "text")
 
-	ts, _, wsURL := newInProcessHub(t)
+	ts, _, enrollUC, wsURL := newInProcessHub(t)
 	defer ts.Close()
 
 	// --- Wire agent: real PTY manager + hub client ---
 	mgr := session.NewManager(agentpty.Factory{}, 256*1024, logger)
-	machineID := id.New()
+	machineID, agentKey := enrollAgent(t, enrollUC, "e2e-term")
 
 	agentCtx, cancelAgent := context.WithCancel(context.Background())
 	defer cancelAgent()
 
 	client := hubclient.New(hubclient.Config{
 		HubURL:            wsURL("/ws/agent"),
-		DevToken:          e2eToken,
+		AgentKey:          agentKey,
 		MachineID:         machineID,
 		Name:              "e2e-term",
 		HeartbeatInterval: 150 * time.Millisecond,
@@ -268,10 +271,11 @@ func readUntil(t *testing.T, ctx context.Context, c *websocket.Conn, marker stri
 func TestSessionLostOnAgentRestart(t *testing.T) {
 	logger := log.New("error", "text")
 
-	ts, _, wsURL := newInProcessHub(t)
+	ts, _, enrollUC, wsURL := newInProcessHub(t)
 	defer ts.Close()
 
-	machineID := id.New()
+	// Enroll once — both instances reuse the same credential (same machineID).
+	machineID, agentKey := enrollAgent(t, enrollUC, "lost-test")
 
 	// --- Start first agent instance ("inst-A") ---
 	mgrA := session.NewManager(agentpty.Factory{}, 256*1024, logger)
@@ -279,7 +283,7 @@ func TestSessionLostOnAgentRestart(t *testing.T) {
 
 	clientA := hubclient.New(hubclient.Config{
 		HubURL:            wsURL("/ws/agent"),
-		DevToken:          e2eToken,
+		AgentKey:          agentKey,
 		MachineID:         machineID,
 		InstanceID:        "inst-A",
 		Name:              "lost-test",
@@ -340,7 +344,7 @@ func TestSessionLostOnAgentRestart(t *testing.T) {
 
 	clientB := hubclient.New(hubclient.Config{
 		HubURL:            wsURL("/ws/agent"),
-		DevToken:          e2eToken,
+		AgentKey:          agentKey,
 		MachineID:         machineID,
 		InstanceID:        "inst-B",
 		Name:              "lost-test",

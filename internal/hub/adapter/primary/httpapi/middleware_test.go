@@ -28,6 +28,12 @@ func (fakeTOTPMW) Generate(issuer, account string) (string, string, error) {
 func (fakeTOTPMW) Verify(secret, code string, now int64) bool {
 	return code == "000000"
 }
+func (fakeTOTPMW) Matches(secret, code string, now int64) (step int64, ok bool) {
+	if code == "000000" {
+		return now / 30, true
+	}
+	return 0, false
+}
 
 // fakeAuditMW discards records.
 type fakeAuditMW struct{}
@@ -70,7 +76,7 @@ func buildMiddlewareTestServer(t *testing.T) (*httptest.Server, string) {
 
 	ops := memory.NewOperatorStore()
 	sess := memory.NewOperatorSessionStore()
-	uc := appauth.New(ops, sess, fakeTOTPMW{}, fakeAuditMW{}, appauth.SystemClock{}, func() string { return "tok" }, 24*time.Hour, nil)
+	uc := appauth.New(ops, sess, fakeTOTPMW{}, fakeAuditMW{}, appauth.SystemClock{}, func() string { return "tok" }, 24*time.Hour, nil, nil, nil)
 	_, _, _, err := uc.BootstrapTOTP(context.Background(), "Constellate", "operator")
 	if err != nil {
 		t.Fatalf("BootstrapTOTP: %v", err)
@@ -105,7 +111,7 @@ func TestMiddleware_NoCookie_Returns401(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/machines: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", resp.StatusCode)
 	}
@@ -119,7 +125,7 @@ func TestMiddleware_NoCookie_WS_Returns401(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /ws/term: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", resp.StatusCode)
 	}
@@ -136,7 +142,7 @@ func TestMiddleware_ValidCookie_Passes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/machines: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusUnauthorized {
 		t.Errorf("expected non-401 with valid session, got %d", resp.StatusCode)
 	}
@@ -150,7 +156,7 @@ func TestMiddleware_AuthStatus_AllowedWithoutCookie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/auth/status: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d", resp.StatusCode)
 	}
@@ -164,10 +170,39 @@ func TestMiddleware_Enroll_AllowedWithoutCookie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /api/enroll: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// Enroll handler exists but we have no token — may 400/401 from enroll logic
 	// but NOT 401 from auth middleware.
 	if resp.StatusCode == http.StatusUnauthorized {
 		t.Errorf("expected enroll to bypass auth gate, got 401")
+	}
+}
+
+func TestMiddleware_WebAuthnLoginBegin_AllowedWithoutCookie(t *testing.T) {
+	ts, _ := buildMiddlewareTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/auth/webauthn/login/begin", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /api/auth/webauthn/login/begin: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// Handler will return 501 (WebAuthn unavailable) or another handler error — not 401 from auth middleware.
+	if resp.StatusCode == http.StatusUnauthorized {
+		t.Errorf("expected webauthn/login/begin to bypass auth gate, got 401")
+	}
+}
+
+func TestMiddleware_WebAuthnRegisterBegin_RequiresCookie(t *testing.T) {
+	ts, _ := buildMiddlewareTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/auth/webauthn/register/begin", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /api/auth/webauthn/register/begin: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected register/begin to require session, got %d", resp.StatusCode)
 	}
 }

@@ -2,6 +2,8 @@ package integration
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,8 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/wsagent"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/memory"
+	auditapp "github.com/rizquuula/Constellate/internal/hub/app/audit"
+	"github.com/rizquuula/Constellate/internal/hub/app/enroll"
 	"github.com/rizquuula/Constellate/internal/hub/app/projects"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
@@ -23,13 +27,11 @@ import (
 	"github.com/rizquuula/Constellate/internal/platform/log"
 )
 
-const devToken = "test-token"
-
 // noopEvents satisfies wsagent.SessionEvents for tests that don't exercise session lifecycle.
 type noopEvents struct{}
 
-func (noopEvents) MarkExited(_ context.Context, _ string, _ int) error            { return nil }
-func (noopEvents) MarkMachineSessionsLost(_ context.Context, _ string) error      { return nil }
+func (noopEvents) MarkExited(_ context.Context, _ string, _ int) error       { return nil }
+func (noopEvents) MarkMachineSessionsLost(_ context.Context, _ string) error { return nil }
 
 // stubSessionService satisfies httpapi.SessionService for tests that don't exercise sessions.
 type stubSessionService struct{}
@@ -43,8 +45,8 @@ func (stubSessionService) List(_ context.Context) ([]session.Session, error) {
 func (stubSessionService) ListByMachine(_ context.Context, _ string) ([]session.Session, error) {
 	return []session.Session{}, nil
 }
-func (stubSessionService) Close(_ context.Context, _ string) error       { return nil }
-func (stubSessionService) Rename(_ context.Context, _, _ string) error   { return nil }
+func (stubSessionService) Close(_ context.Context, _ string) error     { return nil }
+func (stubSessionService) Rename(_ context.Context, _, _ string) error { return nil }
 
 // stubProjectService satisfies httpapi.ProjectService for tests that don't exercise projects.
 type stubProjectService struct{}
@@ -54,27 +56,74 @@ func (stubProjectService) Create(_ context.Context, _ projects.CreateInput) (pro
 }
 func (stubProjectService) List(_ context.Context) ([]project.Project, error) { return nil, nil }
 
+// enrollAgent mints a token, generates an Ed25519 keypair, enrolls it, and
+// returns the assigned machineID and the private key. The credential persists in
+// the UseCase's in-memory store for the lifetime of the test.
+func enrollAgent(t *testing.T, enrollUC *enroll.UseCase, name string) (machineID string, key ed25519.PrivateKey) {
+	t.Helper()
+	ctx := context.Background()
+
+	plaintext, err := enrollUC.MintToken(ctx)
+	if err != nil {
+		t.Fatalf("enrollAgent(%s): MintToken: %v", name, err)
+	}
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("enrollAgent(%s): GenerateKey: %v", name, err)
+	}
+
+	machineID, err = enrollUC.Enroll(ctx, enroll.EnrollInput{
+		Token:     []byte(plaintext),
+		PublicKey: pub,
+		Name:      name,
+		OS:        "linux",
+		Arch:      "amd64",
+	})
+	if err != nil {
+		t.Fatalf("enrollAgent(%s): Enroll: %v", name, err)
+	}
+	return machineID, priv
+}
+
+// newTopologyHub wires a minimal hub for topology tests (memory stores, no sessions/projects).
+func newTopologyHub(t *testing.T) (ts *httptest.Server, enrollUC *enroll.UseCase, wsAgentURL string) {
+	t.Helper()
+	logger := log.New("error", "text")
+
+	machineStore := memory.NewMachineStore()
+	tokenStore := memory.NewEnrollTokenStore()
+	credStore := memory.NewCredentialStore()
+	auditUC := auditapp.New(memory.NewAuditStore(), auditapp.SystemClock{}, logger)
+	links := agentlink.NewRegistry()
+	reg := registry.New(machineStore, links, registry.SystemClock{}, logger)
+
+	enrollUC = enroll.New(
+		tokenStore, credStore, machineStore, auditUC,
+		enroll.SystemClock{}, id.New, 15*time.Minute, logger,
+	)
+
+	endpoint := wsagent.NewEndpoint(reg, links, noopEvents{}, nil, enrollUC, logger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, stubProjectService{}, enrollUC, endpoint, nil, nil, nil, false, logger)
+
+	ts = httptest.NewServer(srv.Handler())
+	wsAgentURL = "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/agent"
+	return ts, enrollUC, wsAgentURL
+}
+
 func TestDialHomeTopology(t *testing.T) {
 	testLogger := log.New("error", "text")
 
-	// --- Wire up the hub in-process ---
-	store := memory.NewMachineStore()
-	links := agentlink.NewRegistry()
-	reg := registry.New(store, links, registry.SystemClock{}, testLogger)
-	endpoint := wsagent.NewEndpoint(reg, links, noopEvents{}, nil, nil, devToken, testLogger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, stubProjectService{}, nil, endpoint, nil, nil, nil, false, testLogger)
-
-	ts := httptest.NewServer(srv.Handler())
+	ts, enrollUC, hubURL := newTopologyHub(t)
 	defer ts.Close()
 
-	hubURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/agent"
-	machineID := id.New()
+	machineID, agentKey := enrollAgent(t, enrollUC, "test-machine")
 
 	// --- Run #1: agent connects ---
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	client1 := hubclient.New(hubclient.Config{
 		HubURL:            hubURL,
-		DevToken:          devToken,
+		AgentKey:          agentKey,
 		MachineID:         machineID,
 		Name:              "test-machine",
 		HeartbeatInterval: 100 * time.Millisecond,
@@ -99,12 +148,12 @@ func TestDialHomeTopology(t *testing.T) {
 	})
 	t.Log("machine is OFFLINE after disconnect")
 
-	// --- Run #2: agent reconnects with same machineID ---
+	// --- Run #2: same enrolled key reconnects (credential persists in memory store) ---
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 	client2 := hubclient.New(hubclient.Config{
 		HubURL:            hubURL,
-		DevToken:          devToken,
+		AgentKey:          agentKey,
 		MachineID:         machineID,
 		Name:              "test-machine",
 		HeartbeatInterval: 100 * time.Millisecond,

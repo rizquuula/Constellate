@@ -9,7 +9,9 @@ type OperatorStore struct {
 	mu            sync.Mutex
 	totpSecret    string
 	hasTOTP       bool
+	totpLastStep  int64
 	recoveryCodes map[string]struct{}
+	webauthnCreds [][]byte
 }
 
 func NewOperatorStore() *OperatorStore {
@@ -56,4 +58,32 @@ func (s *OperatorStore) ConsumeRecoveryCode(ctx context.Context, hash string) (b
 	}
 	delete(s.recoveryCodes, hash)
 	return true, nil
+}
+
+func (s *OperatorStore) WebAuthnCredentials(_ context.Context) ([][]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([][]byte, len(s.webauthnCreds))
+	copy(out, s.webauthnCreds)
+	return out, nil
+}
+
+func (s *OperatorStore) SaveWebAuthnCredential(_ context.Context, _ string, cred []byte, _ int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.webauthnCreds = append(s.webauthnCreds, cred)
+	return nil
+}
+
+func (s *OperatorStore) LastTOTPStep(_ context.Context) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.totpLastStep, nil
+}
+
+func (s *OperatorStore) SetTOTPStep(_ context.Context, step int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.totpLastStep = step
+	return nil
 }

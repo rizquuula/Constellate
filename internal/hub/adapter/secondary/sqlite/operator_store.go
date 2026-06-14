@@ -85,3 +85,69 @@ func (s *OperatorStore) ConsumeRecoveryCode(ctx context.Context, hash string) (b
 	}
 	return n > 0, nil
 }
+
+// WebAuthnCredentials returns all stored WebAuthn credential blobs (JSON).
+func (s *OperatorStore) WebAuthnCredentials(ctx context.Context) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT data FROM operator_credentials WHERE kind = 'webauthn'`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: webauthn credentials: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var creds [][]byte
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("sqlite: webauthn credentials scan: %w", err)
+		}
+		creds = append(creds, data)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlite: webauthn credentials rows: %w", err)
+	}
+	return creds, nil
+}
+
+// SaveWebAuthnCredential inserts a new WebAuthn credential blob.
+func (s *OperatorStore) SaveWebAuthnCredential(ctx context.Context, id string, cred []byte, createdAt int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO operator_credentials (id, kind, data, created_at) VALUES (?, 'webauthn', ?, ?)`,
+		id, cred, createdAt,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: save webauthn credential: %w", err)
+	}
+	return nil
+}
+
+// LastTOTPStep returns the last accepted TOTP step stored in last_used_at.
+// Returns 0 if the TOTP row has never been used (NULL last_used_at).
+func (s *OperatorStore) LastTOTPStep(ctx context.Context) (int64, error) {
+	var step sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT last_used_at FROM operator_credentials WHERE kind = 'totp' LIMIT 1`,
+	).Scan(&step)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: last totp step: %w", err)
+	}
+	if !step.Valid {
+		return 0, nil
+	}
+	return step.Int64, nil
+}
+
+// SetTOTPStep records step as the last accepted TOTP step in last_used_at.
+func (s *OperatorStore) SetTOTPStep(ctx context.Context, step int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE operator_credentials SET last_used_at = ? WHERE kind = 'totp'`,
+		step,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: set totp step: %w", err)
+	}
+	return nil
+}

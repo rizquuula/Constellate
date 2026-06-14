@@ -5,7 +5,7 @@
 > organized by project, persistent across reconnects, with a mission-control overview of every
 > running terminal at a glance.
 
-**Status:** design under review · **Module:** `github.com/rizquuula/Constellate` · **Go:** 1.25+
+**Status:** M5 complete (auth + audit hardening) · **Module:** `github.com/rizquuula/Constellate` · **Go:** 1.25+
 
 ---
 
@@ -164,13 +164,17 @@ reconnect — while still giving every terminal its own independent, back-pressu
 ## 5. Connection & session lifecycle
 
 ### 5.1 Agent enrollment (M5)
-1. Operator generates a one-time **enrollment token** in the hub UI (short TTL).
-2. Agent is started once with the token; it generates a keypair, calls the hub, and registers.
-3. Hub stores the agent's public key, assigns a `machineID` (ULID), and returns a **long-lived
-   credential** (signed token / client cert). Token is now spent.
-4. Every later dial-home authenticates with that credential. Revocable from the hub.
-
-*Before M5*, M0–M4 use a shared `CONSTELLATE_DEV_TOKEN` on a private network only.
+1. Operator runs `constellate-hub enroll-token [--ttl]`; the hub mints a one-time token (stores
+   only its SHA-256 in `enroll_tokens`, migration 0003) and prints it.
+2. Operator runs `constellate-agent enroll --hub <url> --token <tok>` on the target machine.
+   The agent generates an **Ed25519 keypair**, POSTs the public key to `POST /api/enroll`
+   (unauthenticated, protected solely by the single-use token). Token is now spent.
+3. Hub stores the Ed25519 **public key** in `machine_credentials`, assigns a `machineID` (ULID),
+   audits `enroll`, and returns the machineID. The agent writes the machineID to `id_file` and
+   the PKCS8 PEM private key to `cred_file`.
+4. Every later dial-home presents an **agent-signed bearer assertion** (see §6). Revocable from
+   the hub with `constellate-hub revoke <machineID>` (soft: sets `machines.revoked_at`;
+   `Authenticate` rejects revoked machines).
 
 ### 5.2 Dial-home
 1. Agent opens `wss://hub/ws/agent`, presenting its credential.
@@ -226,6 +230,13 @@ EnableSnaps   { enabled }                 // M4
 
 **Data stream** — first line is `AttachHeader{ sessionID }` (NDJSON); everything after is raw,
 unframed PTY bytes in both directions (it is a byte pipe — xterm speaks straight to the shell).
+
+**Agent dial-home credential (M5)** — rides the `Authorization: Bearer` header on the WebSocket
+upgrade (works behind any TLS-terminating proxy; no wire-protocol change; protocol stays **2**).
+Format: `v1.<machineID>.<unixTs>.<base64url-sig>` where the agent signs the canonical string
+`v1:<machineID>:<unixTs>` with its Ed25519 private key. The hub verifies with the stored public
+key (±120 s skew). **The hub holds no signing secret** — only public keys — strengthening §10's
+"the hub stores no long-lived shell credentials."
 
 **Snapshot stream (M4)** — **NDJSON**, agent → hub. The stream is **agent-opened/hub-accepted**
 (the mirror of data streams, which are hub-opened/agent-accepted). Its first line is a
@@ -315,11 +326,19 @@ CREATE TABLE machines (
     revoked_at    INTEGER                  -- soft revoke (M5)
 );
 
--- long-lived agent credential (M5)
+-- long-lived agent credential (M5): stores the agent's Ed25519 public key
 CREATE TABLE machine_credentials (
     machine_id TEXT PRIMARY KEY REFERENCES machines(id),
-    public_key BLOB NOT NULL,
+    public_key BLOB NOT NULL,             -- Ed25519 public key (raw bytes)
     created_at INTEGER NOT NULL
+);
+
+-- single-use enrollment tokens (M5, migration 0003): hub stores only the SHA-256
+CREATE TABLE enroll_tokens (
+    id         TEXT PRIMARY KEY,          -- ULID
+    token_hash TEXT NOT NULL UNIQUE,      -- SHA-256 of the one-time token
+    expires_at INTEGER NOT NULL,
+    used_at    INTEGER                    -- set when spent; NULL = still valid
 );
 
 -- logical grouping of sessions, bound to a machine + working dir
@@ -367,11 +386,20 @@ CREATE TABLE operator_credentials (
     kind         TEXT NOT NULL,            -- webauthn | totp | recovery
     data         BLOB NOT NULL,
     created_at   INTEGER NOT NULL,
-    last_used_at INTEGER
+    last_used_at INTEGER                   -- TOTP: last matched step (prevents replay)
+);
+
+-- server-side operator sessions (M5, migration 0004)
+CREATE TABLE operator_sessions (
+    id         TEXT PRIMARY KEY,           -- opaque random cookie value
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
 );
 ```
 
 Migrations are embedded SQL (`//go:embed`) applied at hub startup.
+`machines.revoked_at` (designed in from M0) is now written by `hub revoke <machineID>` (M5);
+`Authenticate` rejects any machine with a non-NULL `revoked_at`.
 
 ---
 
@@ -421,20 +449,39 @@ owns the fleet. The model is built around that fact.
   enrolled agents.
 - Agent ↔ shell: full local privilege of the agent's user (by design — it *is* your shell).
 
-**Controls**
-- **TLS end to end** — browser↔hub and agent↔hub. In production the hub sits behind Caddy/nginx for
-  certs; agents pin/verify the hub cert.
-- **Operator auth** — passkey (WebAuthn) primary, TOTP fallback, recovery codes. No plain password.
-  Every terminal attach re-checks the session.
-- **Agent enrollment** — one-time token → long-lived, **revocable** per-machine credential. The hub
-  stores no long-lived shell credentials; it brokers trust.
-- **Audit log** — login, enroll, attach, open/close, revoke — every security-relevant action.
+**Controls** *(items marked **[M5]** are implemented)*
+- **TLS end to end** **[M5]** — hub serves HTTPS directly when `tls.cert`/`tls.key` are set
+  (`Server.StartTLS`); otherwise plain HTTP behind a TLS-terminating **Caddy** in production
+  (`deploy/caddy/Caddyfile` + `deploy/compose.yaml`). Agents verify the hub cert via `hub_ca`
+  PEM (defaults to system roots).
+- **Operator auth** **[M5]** — **TOTP** (`pquerna/otp`) primary with **recovery codes**
+  (single-use, SHA-256-hashed in `operator_credentials`); **WebAuthn passkeys** (`go-webauthn`)
+  additive (registration requires an existing session). Bootstrap: `hub operator add` prints the
+  `otpauth://` URI + one-time recovery codes. Server-side sessions (`operator_sessions` table,
+  migration 0004) with an opaque random cookie `constellate_session` (HttpOnly, SameSite=Lax,
+  Secure derived from `https` `public_url`, 24 h). Every terminal attach (`/ws/term`,
+  `/ws/overview`) re-checks the session via the auth middleware. **Brute-force hardening:**
+  per-IP (~5/min) + global (~15/min) in-memory rate limiting with HTTP 429 + `Retry-After` on
+  TOTP/recovery endpoints; TOTP single-use (matched 30 s step recorded in `last_used_at`;
+  same-or-earlier step replay rejected).
+- **Agent enrollment** **[M5]** — one-time token → **Ed25519 keypair** per machine; hub stores
+  only the public key; credential is an **agent-signed bearer assertion** (§6). The hub holds no
+  signing secret. Revocation is soft: `revoked_at` set on the machine row; `Authenticate` rejects
+  revoked machines. `constellate-agent reset` removes local id/cred.
+- **Auth middleware** **[M5]** — gates all `/api/*` and `/ws/*` routes behind a valid session
+  cookie; explicit allowlist: `POST /api/enroll`, `POST /api/auth/{totp,recovery,logout}`,
+  `GET /api/auth/status`, `POST /api/auth/webauthn/login/{begin,finish}`. A nil auth service
+  disables gating (test-only affordance; `cmd/hub` always wires a real one).
+- **Audit log** **[M5]** — login, enroll, attach, open/close, revoke wired via `AuditSink`
+  consumer port in the `attach`, `sessions`, `enroll`, and `auth` use cases; stored in
+  `audit_log` (sqlite + memory stores).
 - **Least exposure** — only the hub is public; agents open **no** inbound ports.
-- **Process discipline** — dev-token path (`CONSTELLATE_DEV_TOKEN`) is compiled behind a clear flag
-  and removed/disabled once M5 lands.
+- **Dev token removed** **[M5]** — `CONSTELLATE_DEV_TOKEN` / `dev_token` config removed from hub,
+  agent, `cmd/*`, and all compose/e2e files. Tests authenticate via real enrollment (in-proc/
+  integration: mint + enroll a keypair, dial with a signed token).
 
-**Hard rule:** the hub does **not** face the public internet until M5 is complete. M0–M4 run on
-localhost or a private network (Tailscale/WireGuard/LAN) only.
+M0–M4 ran on localhost or a private network only. **M5 is complete** — the hub can now safely face
+the public internet.
 
 ---
 
@@ -639,8 +686,9 @@ shutdown.
 | IDs | `github.com/oklog/ulid/v2` | time-sortable session/machine ids |
 | Config | `gopkg.in/yaml.v3` | typed YAML config files via `--config` |
 | Logging | stdlib `log/slog` | structured, leveled |
-| WebAuthn (M5) | `github.com/go-webauthn/webauthn` | passkeys |
-| TOTP (M5) | `github.com/pquerna/otp` | fallback |
+| WebAuthn | `github.com/go-webauthn/webauthn` | passkeys (implemented M5; pure Go, CGO_ENABLED=0 verified) |
+| TOTP + recovery | `github.com/pquerna/otp` | TOTP + single-use recovery codes (implemented M5) |
+| Agent credential | stdlib `crypto/ed25519` | Ed25519 keypair; hub stores only the public key |
 | Lint | `golangci-lint` | `go vet` + staticcheck + more |
 
 > **VT/ANSI emulator (M4)** is **in-repo**, not a dependency: a pure-Go terminal emulator under
@@ -693,27 +741,31 @@ containerized deploys.
 addr: "127.0.0.1:8080"                          # listen address
 public_url: "https://constellate.example.com"   # external URL (cookies, WebAuthn RP)
 db_path: "./constellate.db"
-dev_token: "change-me"                          # shared agent token — M0–M4 only
-enroll_token_ttl: "15m"                         # M5
-tls:                                            # optional direct TLS (else terminate at Caddy) — M5
-  cert: ""
-  key: ""
+enroll_token_ttl: "15m"                         # one-time agent enrollment token lifetime
+tls:                                            # optional direct TLS (else terminate at Caddy)
+  cert: ""                                      # PEM cert path; leave empty to run behind proxy
+  key:  ""
+# webauthn:                                     # derived from public_url by default
+#   rp_id: "example.com"
+#   origins:
+#     - "https://example.com"
 log:
-  level: "info"                                 # debug | info | warn
+  level: "info"                                 # debug | info | warn | error
   format: "text"                                # text | json
 ```
 
 **Agent** — `agent.yaml`:
 ```yaml
-hub_url: "wss://constellate.example.com/ws/agent"
-name: "workstation"                             # default: hostname
+hub_url: "ws://127.0.0.1:8080/ws/agent"
+name: ""                                        # default: hostname
 id_file: "~/.constellate/agent-id"
-cred_file: "~/.constellate/cred"                # M5
-dev_token: "change-me"                          # M0–M4
-default_shell: ""                               # default: $SHELL
+# cred_file: "~/.constellate/cred"             # enrolled Ed25519 credential (default shown)
+# hub_ca: ""                                   # PEM CA/cert to verify hub; empty = system roots
+default_shell: "/bin/bash"
 scrollback_bytes: 262144                        # ring buffer cap per session
 log:
-  level: "info"                                 # debug | info | warn
+  level: "info"                                 # debug | info | warn | error
+  format: "text"                                # text | json
 ```
 
 ---
@@ -847,9 +899,25 @@ acceptance check passes.
 - **Done when:** one page shows every live terminal as a live-ish tile; clicking opens the full
   session; bandwidth stays bounded with all machines visible.
 
-### M5 — Auth + audit hardening *(gate before public exposure)*
-- Passkey + TOTP login; agent enrollment + revocable credentials; TLS; audit log; remove dev token.
-- **Done when:** the hub can safely face the public internet; every sensitive action is audited.
+### M5 — Auth + audit hardening *(done)*
+- **Agent enrollment:** `hub enroll-token` mints a one-time token (SHA-256 stored); `agent enroll`
+  generates an Ed25519 keypair, POSTs the public key to `POST /api/enroll`, receives a machineID.
+  Dial-home credential is an **agent-signed bearer assertion** (`v1.<machineID>.<ts>.<sig>`) — hub
+  holds no signing secret, only public keys. Revocation is soft (`machines.revoked_at`); `hub
+  machines` / `hub revoke <machineID>` / `agent reset` wired. **Protocol stays at 2** (credential
+  rides the `Authorization` header, not `Hello`).
+- **Operator auth:** TOTP (`pquerna/otp`) + single-use recovery codes (SHA-256-hashed) + WebAuthn
+  passkeys (`go-webauthn`, registration requires an existing session). Server-side sessions in
+  `operator_sessions` (migration 0004); opaque random cookie `constellate_session` (HttpOnly,
+  SameSite=Lax, Secure from `https` `public_url`, 24 h). Rate limiting (per-IP + global) + TOTP
+  single-use anti-replay. Bootstrap: `hub operator add`.
+- **Auth middleware** gates all `/api/*` + `/ws/*` with an explicit allowlist for unauthenticated
+  paths; terminal attach re-checks the session on every WS upgrade.
+- **Audit log** wired via `AuditSink` port in `attach`, `sessions`, `enroll`, and `auth` use cases.
+- **TLS:** hub serves direct HTTPS when `tls.{cert,key}` set; otherwise behind Caddy
+  (`deploy/caddy/Caddyfile` + `deploy/compose.yaml`). Agent verifies hub cert via `hub_ca`.
+- **Dev token removed** everywhere. Tests authenticate via real enrollment.
+- Decisions folded into `DESIGN.md` §5.1/§6/§8/§10/§13/§14.
 
 ### M6 — Progress dashboard
 - Activity/status rollups across machines and projects.

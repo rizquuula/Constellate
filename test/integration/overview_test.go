@@ -16,7 +16,6 @@ import (
 	"github.com/rizquuula/Constellate/internal/agent/adapter/primary/hubclient"
 	"github.com/rizquuula/Constellate/internal/agent/app/session"
 	"github.com/rizquuula/Constellate/internal/agent/app/snapshot"
-	"github.com/rizquuula/Constellate/internal/platform/id"
 	platlog "github.com/rizquuula/Constellate/internal/platform/log"
 	"github.com/rizquuula/Constellate/internal/transport"
 )
@@ -33,10 +32,8 @@ func TestOverviewSnapshotPipeline(t *testing.T) {
 	logger := platlog.New("error", "text")
 
 	// --- Step 1: wire in-process hub with real overview pieces ---
-	ts, _, wsURL := newInProcessHub(t)
+	ts, _, enrollUC, wsURL := newInProcessHub(t)
 	defer ts.Close()
-
-	machineID := id.New()
 
 	// Wire the agent with a vt screen factory and snapshot producer (mirrors cmd/agent/main.go).
 	mgr := session.NewManager(agentpty.Factory{}, 256*1024, logger)
@@ -45,9 +42,11 @@ func TestOverviewSnapshotPipeline(t *testing.T) {
 	agentCtx, cancelAgent := context.WithCancel(context.Background())
 	defer cancelAgent()
 
+	machineID, agentKey := enrollAgent(t, enrollUC, "overview-e2e")
+
 	client := hubclient.New(hubclient.Config{
 		HubURL:            wsURL("/ws/agent"),
-		DevToken:          e2eToken,
+		AgentKey:          agentKey,
 		MachineID:         machineID,
 		Name:              "overview-e2e",
 		HeartbeatInterval: 150 * time.Millisecond,

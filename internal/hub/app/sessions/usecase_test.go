@@ -7,10 +7,26 @@ import (
 	"testing"
 
 	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
+	"github.com/rizquuula/Constellate/internal/hub/domain/audit"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 )
 
 // --- fakes ---
+
+type fakeAuditSink struct {
+	calls []auditCall
+}
+
+type auditCall struct {
+	action    audit.Action
+	machineID string
+	sessionID string
+}
+
+func (a *fakeAuditSink) Record(_ context.Context, action audit.Action, machineID, sessionID, _ string) error {
+	a.calls = append(a.calls, auditCall{action, machineID, sessionID})
+	return nil
+}
 
 type fakeSessionStore struct {
 	data    map[string]session.Session
@@ -125,7 +141,7 @@ func TestOpen_SpawnsThenPersists(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 42}
 	clk := &fixedClock{ts: 1000}
-	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
 	s, err := uc.Open(context.Background(), sessions.OpenInput{
 		MachineID: "m1",
@@ -157,7 +173,7 @@ func TestOpen_DefaultsDimensions(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 1}
 	clk := &fixedClock{ts: 1000}
-	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
 	_, err := uc.Open(context.Background(), sessions.OpenInput{
 		MachineID: "m1",
@@ -173,7 +189,7 @@ func TestOpen_GatewayError_DoesNotPersist(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{openErr: errors.New("agent refused")}
 	clk := &fixedClock{ts: 1000}
-	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
 	_, err := uc.Open(context.Background(), sessions.OpenInput{MachineID: "m1"})
 	if err == nil {
@@ -188,7 +204,7 @@ func TestMarkExited_SetsExited(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 1}
 	clk := &fixedClock{ts: 1000}
-	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
 	s, err := uc.Open(context.Background(), sessions.OpenInput{MachineID: "m1"})
 	if err != nil {
@@ -216,7 +232,7 @@ func TestClose_CallsGateway(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 1}
 	clk := &fixedClock{ts: 1000}
-	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
 	s, err := uc.Open(context.Background(), sessions.OpenInput{MachineID: "m1"})
 	if err != nil {
@@ -239,7 +255,7 @@ func TestClose_NotFound(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{}
 	clk := &fixedClock{ts: 1000}
-	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
 	err := uc.Close(context.Background(), "no-such-id")
 	if !errors.Is(err, session.ErrNotFound) {
@@ -251,7 +267,7 @@ func TestRename_Found(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 1}
 	clk := &fixedClock{ts: 1000}
-	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
 	s, err := uc.Open(context.Background(), sessions.OpenInput{MachineID: "m1"})
 	if err != nil {
@@ -275,7 +291,7 @@ func TestRename_NotFound(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{}
 	clk := &fixedClock{ts: 1000}
-	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
 	err := uc.Rename(context.Background(), "no-such-id", "title")
 	if !errors.Is(err, session.ErrNotFound) {
@@ -287,7 +303,7 @@ func TestMarkMachineSessionsLost(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 1}
 	clk := &fixedClock{ts: 1000}
-	uc := sessions.New(store, gw, clk, nextID(), discardLogger())
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 	ctx := context.Background()
 
 	// Open a running session.
@@ -321,5 +337,60 @@ func TestMarkMachineSessionsLost(t *testing.T) {
 	}
 	if gotExit.Status() != session.StatusExited {
 		t.Errorf("exited session: must remain exited, got %q", gotExit.Status())
+	}
+}
+
+func TestOpen_AuditsOpenEvent(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	sink := &fakeAuditSink{}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), sink)
+
+	s, err := uc.Open(context.Background(), sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if len(sink.calls) != 1 {
+		t.Fatalf("audit calls after Open: got %d, want 1", len(sink.calls))
+	}
+	if sink.calls[0].action != audit.ActionOpen {
+		t.Errorf("audit action: got %q, want open", sink.calls[0].action)
+	}
+	if sink.calls[0].machineID != "m1" {
+		t.Errorf("audit machineID: got %q, want m1", sink.calls[0].machineID)
+	}
+	if sink.calls[0].sessionID != s.ID() {
+		t.Errorf("audit sessionID: got %q, want %q", sink.calls[0].sessionID, s.ID())
+	}
+}
+
+func TestClose_AuditsCloseEvent(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	sink := &fakeAuditSink{}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), sink)
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	sink.calls = nil // reset after Open
+
+	if err := uc.Close(ctx, s.ID()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if len(sink.calls) != 1 {
+		t.Fatalf("audit calls after Close: got %d, want 1", len(sink.calls))
+	}
+	if sink.calls[0].action != audit.ActionClose {
+		t.Errorf("audit action: got %q, want close", sink.calls[0].action)
+	}
+	if sink.calls[0].sessionID != s.ID() {
+		t.Errorf("audit sessionID: got %q, want %q", sink.calls[0].sessionID, s.ID())
 	}
 }

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,8 +18,10 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/wsbrowser"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/wsagent"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
+	memstore "github.com/rizquuula/Constellate/internal/hub/adapter/secondary/memory"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/sqlite"
 	totpadapter "github.com/rizquuula/Constellate/internal/hub/adapter/secondary/totp"
+	waadapter "github.com/rizquuula/Constellate/internal/hub/adapter/secondary/webauthn"
 	"github.com/rizquuula/Constellate/internal/hub/app/attach"
 	auditapp "github.com/rizquuula/Constellate/internal/hub/app/audit"
 	authapp "github.com/rizquuula/Constellate/internal/hub/app/auth"
@@ -46,6 +50,7 @@ var _ sessions.AuditSink = (*auditapp.UseCase)(nil)
 var _ wsagent.AgentAuthenticator = (*enroll.UseCase)(nil)
 var _ httpapi.EnrollService = (*enroll.UseCase)(nil)
 var _ httpapi.AuthService = (*authapp.UseCase)(nil)
+var _ authapp.WebAuthn = (*waadapter.Provider)(nil)
 
 func main() {
 	args := os.Args[1:]
@@ -109,6 +114,22 @@ func cmdMigrate(args []string) {
 	fmt.Println("migrations applied")
 }
 
+// resolveWebAuthnConfig derives RPID and Origins for the WebAuthn provider.
+// Priority: explicit config block > derived from PublicURL > localhost dev defaults.
+func resolveWebAuthnConfig(cfg platconfig.Hub, log *slog.Logger) (rpID string, origins []string) {
+	if cfg.WebAuthn.RPID != "" {
+		return cfg.WebAuthn.RPID, cfg.WebAuthn.Origins
+	}
+	if cfg.PublicURL != "" {
+		u, err := url.Parse(cfg.PublicURL)
+		if err == nil && u.Hostname() != "" {
+			return u.Hostname(), []string{cfg.PublicURL}
+		}
+		log.Warn("webauthn: could not parse public_url, falling back to localhost", "url", cfg.PublicURL)
+	}
+	return "localhost", []string{"http://localhost:8080", "http://localhost:5173"}
+}
+
 func cmdServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to config file")
@@ -165,10 +186,22 @@ func cmdServe(args []string) {
 	operatorStore := sqlite.NewOperatorStore(db, id.New)
 	sessionStore := sqlite.NewOperatorSessionStore(db)
 	totpVerifier := totpadapter.New()
-	authUC := authapp.New(operatorStore, sessionStore, totpVerifier, auditUC, authapp.SystemClock{}, id.New, 24*time.Hour, log)
 	secureCookies := strings.HasPrefix(cfg.PublicURL, "https")
 
-	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, overviewUC, enrollUC, cfg.DevToken, log)
+	// Resolve WebAuthn RPID and origins.
+	waRPID, waOrigins := resolveWebAuthnConfig(cfg, log)
+	var waProvider authapp.WebAuthn
+	var waChallenge authapp.ChallengeStore
+	if p, err := waadapter.New(waRPID, waOrigins); err != nil {
+		log.Warn("webauthn: init failed, passkey login unavailable", "err", err)
+	} else {
+		waProvider = p
+		waChallenge = memstore.NewChallengeStore()
+	}
+
+	authUC := authapp.New(operatorStore, sessionStore, totpVerifier, auditUC, authapp.SystemClock{}, id.New, 24*time.Hour, log, waProvider, waChallenge)
+
+	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, overviewUC, enrollUC, log)
 	termHandler := wsbrowser.NewTerminalHandler(attachUC, log)
 	overviewHandler := wsbrowser.NewOverviewHandler(overviewUC, log)
 	srv := httpapi.NewServer(cfg.Addr, reg, sessionsUC, projectsUC, enrollUC, endpoint, termHandler, overviewHandler, authUC, secureCookies, log)
@@ -177,10 +210,18 @@ func cmdServe(args []string) {
 	defer stop()
 
 	go func() {
-		log.Info("hub listening", "addr", srv.Addr())
-		if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("serve: server error", "err", err)
-			stop()
+		if cfg.TLS.Cert != "" && cfg.TLS.Key != "" {
+			log.Info("hub listening (TLS)", "addr", srv.Addr())
+			if err := srv.StartTLS(cfg.TLS.Cert, cfg.TLS.Key); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("serve: server error (TLS)", "err", err)
+				stop()
+			}
+		} else {
+			log.Info("hub listening", "addr", srv.Addr())
+			if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("serve: server error", "err", err)
+				stop()
+			}
 		}
 	}()
 
@@ -400,7 +441,7 @@ func cmdOperatorAdd(args []string) {
 	operatorStore := sqlite.NewOperatorStore(db, id.New)
 	sessionStore := sqlite.NewOperatorSessionStore(db)
 	totpVerifier := totpadapter.New()
-	authUC := authapp.New(operatorStore, sessionStore, totpVerifier, auditUC, authapp.SystemClock{}, id.New, 24*time.Hour, log)
+	authUC := authapp.New(operatorStore, sessionStore, totpVerifier, auditUC, authapp.SystemClock{}, id.New, 24*time.Hour, log, nil, nil)
 
 	secret, uri, codes, err := authUC.BootstrapTOTP(ctx, *issuer, *account)
 	if err != nil {

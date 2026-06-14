@@ -15,7 +15,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/transport"
 )
 
-func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl net.Conn) {
+func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl net.Conn, authMachineID string) {
 	enc := transport.NewEncoder(ctrl)
 	dec := transport.NewDecoder(ctrl)
 
@@ -43,6 +43,16 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 			"version", hello.ProtocolVersion,
 			"machineID", hello.MachineID,
 		)
+		return
+	}
+
+	// If credential-based auth was used, validate that Hello.MachineID matches
+	// the ID bound to the credential. Dev-token path (authMachineID=="") skips this.
+	if authMachineID != "" && authMachineID != hello.MachineID {
+		_ = enc.Encode(transport.NewError("", "machine_id_mismatch",
+			"Hello machineID does not match credential"))
+		e.log.Warn("wsagent: machineID mismatch",
+			"auth", authMachineID, "hello", hello.MachineID)
 		return
 	}
 

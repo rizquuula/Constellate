@@ -28,5 +28,9 @@ ENV PATH="/root/.opencode/bin:${PATH}" \
     SHELL=/bin/bash
 
 COPY --from=build /out/constellate-agent /usr/local/bin/constellate-agent
+# Entrypoint wrapper: enrolls the agent on first start, then runs connect.
+# Used by docker-compose.dev.yaml (overrides CMD). Running the image directly
+# without the entrypoint override still runs `connect` as before.
+COPY deploy/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/constellate-agent"]
 CMD ["connect"]

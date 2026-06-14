@@ -7,19 +7,35 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// TLSConfig holds TLS certificate paths for the hub.
+type TLSConfig struct {
+	Cert string `yaml:"cert"`
+	Key  string `yaml:"key"`
+}
+
+// WebAuthnConfig holds optional WebAuthn relying-party overrides.
+// When unset, values are derived from PublicURL (or defaulted to localhost in dev).
+type WebAuthnConfig struct {
+	RPID    string   `yaml:"rp_id"`
+	Origins []string `yaml:"origins"`
+}
+
 // Hub holds the hub's configuration.
 type Hub struct {
-	Addr      string    `yaml:"addr"`
-	PublicURL string    `yaml:"public_url"`
-	DBPath    string    `yaml:"db_path"`
-	DevToken  string    `yaml:"dev_token"`
-	Log       LogConfig `yaml:"log"`
+	Addr           string         `yaml:"addr"`
+	PublicURL      string         `yaml:"public_url"`
+	DBPath         string         `yaml:"db_path"`
+	EnrollTokenTTL string         `yaml:"enroll_token_ttl"`
+	TLS            TLSConfig      `yaml:"tls"`
+	Log            LogConfig      `yaml:"log"`
+	WebAuthn       WebAuthnConfig `yaml:"webauthn"`
 }
 
 func defaultHub() Hub {
 	return Hub{
-		Addr:   "127.0.0.1:8080",
-		DBPath: "./constellate.db",
+		Addr:           "127.0.0.1:8080",
+		DBPath:         "./constellate.db",
+		EnrollTokenTTL: "15m",
 		Log: LogConfig{
 			Level:  "info",
 			Format: "text",
@@ -54,10 +70,10 @@ func applyHubEnv(cfg *Hub) {
 	if v := os.Getenv("CONSTELLATE_DB_PATH"); v != "" {
 		cfg.DBPath = v
 	}
-	if v := os.Getenv("CONSTELLATE_DEV_TOKEN"); v != "" {
-		cfg.DevToken = v
-	}
 	if v := os.Getenv("CONSTELLATE_PUBLIC_URL"); v != "" {
 		cfg.PublicURL = v
+	}
+	if v := os.Getenv("CONSTELLATE_ENROLL_TOKEN_TTL"); v != "" {
+		cfg.EnrollTokenTTL = v
 	}
 }

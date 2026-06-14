@@ -62,3 +62,45 @@ func TestTouch(t *testing.T) {
 		t.Errorf("Touch must not change EnrolledAt: got %d", m.EnrolledAt())
 	}
 }
+
+func TestRevocation(t *testing.T) {
+	m := machine.New("id4", "", "box4", "linux", "amd64", "0.1.0", 100)
+
+	if m.Revoked() {
+		t.Error("new machine must not be revoked")
+	}
+	if m.RevokedAt() != 0 {
+		t.Errorf("RevokedAt: got %d, want 0", m.RevokedAt())
+	}
+
+	revoked := m.MarkRevoked(9999)
+
+	if !revoked.Revoked() {
+		t.Error("MarkRevoked: should be revoked")
+	}
+	if revoked.RevokedAt() != 9999 {
+		t.Errorf("RevokedAt: got %d, want 9999", revoked.RevokedAt())
+	}
+
+	// Original must be unchanged (value receiver).
+	if m.Revoked() {
+		t.Error("MarkRevoked must return a copy; original should remain unrevoked")
+	}
+}
+
+func TestRehydrateFull(t *testing.T) {
+	m := machine.RehydrateFull("id5", "inst5", "box5", "linux", "amd64", "0.2.0", 500, 600, 700)
+
+	if m.EnrolledAt() != 500 {
+		t.Errorf("EnrolledAt: got %d, want 500", m.EnrolledAt())
+	}
+	if m.LastSeenAt() != 600 {
+		t.Errorf("LastSeenAt: got %d, want 600", m.LastSeenAt())
+	}
+	if m.RevokedAt() != 700 {
+		t.Errorf("RevokedAt: got %d, want 700", m.RevokedAt())
+	}
+	if !m.Revoked() {
+		t.Error("RehydrateFull with revokedAt=700 should be revoked")
+	}
+}

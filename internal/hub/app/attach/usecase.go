@@ -4,20 +4,24 @@ import (
 	"context"
 	"io"
 	"log/slog"
+
+	"github.com/rizquuula/Constellate/internal/hub/domain/audit"
 )
 
 // UseCase orchestrates browser attachment to an existing PTY session.
 type UseCase struct {
 	store   SessionStore
 	gateway AgentGateway
+	audit   AuditSink
 	log     *slog.Logger
 }
 
 // New constructs a UseCase with the provided adapters.
-func New(store SessionStore, gateway AgentGateway, log *slog.Logger) *UseCase {
+func New(store SessionStore, gateway AgentGateway, log *slog.Logger, auditSink AuditSink) *UseCase {
 	return &UseCase{
 		store:   store,
 		gateway: gateway,
+		audit:   auditSink,
 		log:     log,
 	}
 }
@@ -32,6 +36,7 @@ func (u *UseCase) OpenStream(ctx context.Context, sessionID string) (machineID s
 	if err != nil {
 		return "", nil, err
 	}
+	_ = u.audit.Record(ctx, audit.ActionAttach, s.MachineID(), sessionID, "")
 	return s.MachineID(), stream, nil
 }
 

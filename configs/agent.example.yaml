@@ -1,18 +1,23 @@
-# Constellate Agent — example configuration (M0)
+# Constellate Agent — example configuration
 # Copy to agent.yaml and edit as needed.
 # All fields can be overridden with environment variables:
-#   CONSTELLATE_HUB_URL, CONSTELLATE_DEV_TOKEN, CONSTELLATE_NAME, CONSTELLATE_ID_FILE
+#   CONSTELLATE_HUB_URL, CONSTELLATE_NAME, CONSTELLATE_ID_FILE
+#   CONSTELLATE_CRED_FILE, CONSTELLATE_HUB_CA
+#
+# Before running `constellate-agent connect`, enroll this machine:
+#   constellate-agent enroll --hub http://<hub>:8080 --token <one-time-token>
+# The enroll command writes the machine ID and credential to id_file and cred_file.
 
 hub_url: "ws://127.0.0.1:8080/ws/agent"
 name: ""                              # defaults to hostname
 id_file: "~/.constellate/agent-id"
-dev_token: ""
 default_shell: "/bin/bash"
 scrollback_bytes: 262144              # 256 KiB per session
+
+# M5 fields — long-lived agent credential and hub CA verification.
+# cred_file: "~/.constellate/cred"   # path to the agent's enrolled credential (default shown)
+# hub_ca: ""                         # path to a PEM CA/cert to verify the hub; empty = system roots
 
 log:
   level: "info"    # debug | info | warn | error
   format: "text"   # text | json
-
-# M5 fields (TLS — not yet active):
-# tls_ca: "/etc/constellate/ca.pem"

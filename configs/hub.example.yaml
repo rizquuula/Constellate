@@ -1,18 +1,39 @@
-# Constellate Hub — example configuration (M0)
+# Constellate Hub — example configuration
 # Copy to hub.yaml and edit as needed.
 # All fields can be overridden with environment variables:
-#   CONSTELLATE_ADDR, CONSTELLATE_DB_PATH, CONSTELLATE_DEV_TOKEN, CONSTELLATE_PUBLIC_URL
+#   CONSTELLATE_ADDR, CONSTELLATE_DB_PATH, CONSTELLATE_PUBLIC_URL
+#   CONSTELLATE_ENROLL_TOKEN_TTL
+#
+# Agent enrollment: run `constellate-hub enroll-token` to mint a one-time token,
+# then on each agent machine run:
+#   constellate-agent enroll --hub http://<hub>:8080 --token <token>
 
 addr: "127.0.0.1:8080"
 public_url: "http://localhost:8080"
 db_path: "./constellate.db"
-dev_token: ""
+
+# M5 fields — enrollment token lifetime (parsed as Go duration, e.g. "15m", "1h").
+enroll_token_ttl: "15m"
 
 log:
   level: "info"    # debug | info | warn | error
   format: "text"   # text | json
 
-# M5 fields (TLS / auth — not yet active):
-# tls_cert: "/etc/constellate/cert.pem"
-# tls_key: "/etc/constellate/key.pem"
-# passkey_origin: "https://example.com"
+# M5 TLS — paths to a PEM certificate and key for the hub's HTTPS listener.
+# Leave empty to run plain HTTP behind a TLS-terminating reverse proxy (e.g. Caddy).
+# tls:
+#   cert: "/etc/constellate/cert.pem"
+#   key:  "/etc/constellate/key.pem"
+
+# M5 WebAuthn — optional passkey / FIDO2 login settings.
+# By default these values are derived from public_url:
+#   rp_id  = host of public_url (e.g. "example.com")
+#   origins = [public_url] (e.g. ["https://example.com"])
+# In dev mode (no public_url set) defaults to rp_id=localhost,
+# origins=["http://localhost:8080","http://localhost:5173"].
+# Set explicitly only if you need non-standard RP ID or multiple origins.
+# webauthn:
+#   rp_id: "example.com"
+#   origins:
+#     - "https://example.com"
+#     - "https://app.example.com"

@@ -9,7 +9,20 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/domain/audit"
 )
 
-// authMiddleware gates /api/* and /ws/* except /api/auth/* and /api/enroll.
+// unauthenticatedPaths lists exact paths (or prefixes ending in a slash) that
+// bypass the session gate. The WebAuthn register/* routes are intentionally NOT
+// here — they require an active operator session.
+var unauthenticatedPaths = []string{
+	"/api/enroll",
+	"/api/auth/totp",
+	"/api/auth/recovery",
+	"/api/auth/status",
+	"/api/auth/logout",
+	"/api/auth/webauthn/login/begin",
+	"/api/auth/webauthn/login/finish",
+}
+
+// authMiddleware gates /api/* and /ws/* except the explicit allowlist above.
 // When authSvc is nil, all requests pass through (dev/test mode) with a one-time warning.
 func authMiddleware(authSvc AuthService, secureCookies bool, log *slog.Logger, next http.Handler) http.Handler {
 	var warnOnce sync.Once
@@ -32,9 +45,11 @@ func authMiddleware(authSvc AuthService, secureCookies bool, log *slog.Logger, n
 		}
 
 		// Allowlisted paths that bypass auth.
-		if strings.HasPrefix(path, "/api/auth/") || path == "/api/enroll" {
-			next.ServeHTTP(w, r)
-			return
+		for _, allowed := range unauthenticatedPaths {
+			if path == allowed {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 
 		// Check session cookie.

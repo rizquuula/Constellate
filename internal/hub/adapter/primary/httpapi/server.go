@@ -22,30 +22,34 @@ type MachineService interface {
 
 // Server wraps an *http.Server and exposes Start/Shutdown.
 type Server struct {
-	http          *http.Server
-	addr          string
-	mux           *http.ServeMux
-	handler       http.Handler
-	machines      MachineService
-	sessions      SessionService
-	projects      ProjectService
-	enroll        EnrollService
-	auth          AuthService
-	secureCookies bool
-	log           *slog.Logger
+	http               *http.Server
+	addr               string
+	mux                *http.ServeMux
+	handler            http.Handler
+	machines           MachineService
+	sessions           SessionService
+	projects           ProjectService
+	enroll             EnrollService
+	auth               AuthService
+	secureCookies      bool
+	log                *slog.Logger
+	loginIPLimiter     *rateLimiter
+	loginGlobalLimiter *rateLimiter
 }
 
 // NewServer wires up the mux and returns a ready-to-start Server.
 func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, enrollSvc EnrollService, agentWS http.Handler, termWS http.Handler, overviewWS http.Handler, authSvc AuthService, secureCookies bool, log *slog.Logger) *Server {
 	s := &Server{
-		addr:          addr,
-		machines:      machines,
-		sessions:      sessions,
-		projects:      projects,
-		enroll:        enrollSvc,
-		auth:          authSvc,
-		secureCookies: secureCookies,
-		log:           log,
+		addr:               addr,
+		machines:           machines,
+		sessions:           sessions,
+		projects:           projects,
+		enroll:             enrollSvc,
+		auth:               authSvc,
+		secureCookies:      secureCookies,
+		log:                log,
+		loginIPLimiter:     newRateLimiter(loginIPMax, loginWindow),
+		loginGlobalLimiter: newRateLimiter(loginGlobalMax, loginWindow),
 	}
 
 	mux := http.NewServeMux()
@@ -65,6 +69,12 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 	mux.HandleFunc("POST /api/auth/recovery", s.handleLoginRecovery)
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	// WebAuthn login ceremony — unauthenticated (begin/finish are open).
+	mux.HandleFunc("POST /api/auth/webauthn/login/begin", s.handleWebAuthnLoginBegin)
+	mux.HandleFunc("POST /api/auth/webauthn/login/finish", s.handleWebAuthnLoginFinish)
+	// WebAuthn registration ceremony — requires an active operator session.
+	mux.HandleFunc("POST /api/auth/webauthn/register/begin", s.handleWebAuthnRegisterBegin)
+	mux.HandleFunc("POST /api/auth/webauthn/register/finish", s.handleWebAuthnRegisterFinish)
 	if agentWS != nil {
 		mux.Handle("/ws/agent", agentWS)
 	}
@@ -126,6 +136,12 @@ func spaHandler(fsys fs.FS) http.Handler {
 // Start begins listening. Blocks until the server stops.
 func (s *Server) Start() error {
 	return s.http.ListenAndServe()
+}
+
+// StartTLS begins listening with TLS using the provided certificate and key
+// files. Blocks until the server stops.
+func (s *Server) StartTLS(certFile, keyFile string) error {
+	return s.http.ListenAndServeTLS(certFile, keyFile)
 }
 
 // Shutdown gracefully stops the server.

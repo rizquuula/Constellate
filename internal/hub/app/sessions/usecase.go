@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/rizquuula/Constellate/internal/hub/domain/audit"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 )
 
@@ -28,16 +29,18 @@ type OpenInput struct {
 type UseCase struct {
 	store   SessionStore
 	gateway AgentGateway
+	audit   AuditSink
 	clock   Clock
 	newID   func() string
 	log     *slog.Logger
 }
 
 // New constructs a UseCase with the provided adapters.
-func New(store SessionStore, gateway AgentGateway, clock Clock, newID func() string, log *slog.Logger) *UseCase {
+func New(store SessionStore, gateway AgentGateway, clock Clock, newID func() string, log *slog.Logger, auditSink AuditSink) *UseCase {
 	return &UseCase{
 		store:   store,
 		gateway: gateway,
+		audit:   auditSink,
 		clock:   clock,
 		newID:   newID,
 		log:     log,
@@ -68,6 +71,7 @@ func (u *UseCase) Open(ctx context.Context, in OpenInput) (session.Session, erro
 		return session.Session{}, err
 	}
 
+	_ = u.audit.Record(ctx, audit.ActionOpen, in.MachineID, id, "")
 	u.log.Info("session opened", "sessionID", id, "machineID", in.MachineID, "pid", pid)
 	return s, nil
 }
@@ -94,7 +98,11 @@ func (u *UseCase) Close(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return u.gateway.CloseSession(ctx, s.MachineID(), id)
+	if err := u.gateway.CloseSession(ctx, s.MachineID(), id); err != nil {
+		return err
+	}
+	_ = u.audit.Record(ctx, audit.ActionClose, s.MachineID(), id, "")
+	return nil
 }
 
 // MarkExited records that a session has exited. Satisfies wsagent.SessionEvents.

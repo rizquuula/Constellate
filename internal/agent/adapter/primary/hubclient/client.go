@@ -2,6 +2,7 @@ package hubclient
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io"
@@ -50,11 +51,12 @@ func (stubSessions) Close(_ string) error {
 // Config holds all parameters needed to create a Client.
 type Config struct {
 	HubURL            string
-	DevToken          string
+	AgentKey          ed25519.PrivateKey
 	MachineID         string
 	InstanceID        string
 	Name              string
 	HeartbeatInterval time.Duration
+	HTTPClient        *http.Client
 	Log               *slog.Logger
 	Sessions          SessionManager
 }
@@ -68,7 +70,8 @@ type snapshotToggle interface {
 // Client manages a persistent, auto-reconnecting connection to the hub.
 type Client struct {
 	hubURL            string
-	devToken          string
+	agentKey          ed25519.PrivateKey
+	httpClient        *http.Client
 	machineID         string
 	instanceID        string
 	name              string
@@ -107,7 +110,8 @@ func New(cfg Config) *Client {
 	}
 	return &Client{
 		hubURL:            cfg.HubURL,
-		devToken:          cfg.DevToken,
+		agentKey:          cfg.AgentKey,
+		httpClient:        cfg.HTTPClient,
 		machineID:         cfg.MachineID,
 		instanceID:        cfg.InstanceID,
 		name:              cfg.Name,
@@ -293,10 +297,16 @@ func (c *Client) Run(ctx context.Context) error {
 // heartbeat/read/accept loops until the connection breaks or ctx is canceled.
 // connected is true when Hello was sent successfully.
 func (c *Client) connectOnce(ctx context.Context) (connected bool, err error) {
+	if c.agentKey == nil {
+		return false, fmt.Errorf("hubclient: no agent key — not enrolled")
+	}
+	bearerToken := transport.BuildAgentToken(c.machineID, c.agentKey, time.Now().Unix())
+
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	conn, _, err := websocket.Dial(dialCtx, c.hubURL, &websocket.DialOptions{
+		HTTPClient: c.httpClient,
 		HTTPHeader: http.Header{
-			"Authorization": {"Bearer " + c.devToken},
+			"Authorization": {"Bearer " + bearerToken},
 		},
 	})
 	cancel()

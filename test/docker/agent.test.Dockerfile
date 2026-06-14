@@ -9,5 +9,8 @@ RUN go build -trimpath -ldflags "-s -w" -o /out/constellate-agent ./cmd/agent
 FROM alpine:3
 RUN apk add --no-cache ca-certificates bash
 COPY --from=build /out/constellate-agent /usr/local/bin/constellate-agent
+# Entrypoint wrapper: enrolls on first start, then runs connect.
+COPY deploy/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
+RUN chmod +x /usr/local/bin/agent-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/constellate-agent"]
 CMD ["connect"]

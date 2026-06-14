@@ -1,0 +1,61 @@
+# Constellate — production deploy stack (M5)
+#
+# Usage:
+#   export CONSTELLATE_DOMAIN=example.com
+#   docker compose -f deploy/compose.yaml up -d
+#
+# Prerequisites:
+#   1. DNS for $CONSTELLATE_DOMAIN must point to this host before starting.
+#   2. Enroll each agent after first boot:
+#        docker exec constellate-hub constellate-hub enroll-token
+#      Copy the printed token to the agent machine and run:
+#        constellate-agent enroll --hub https://$CONSTELLATE_DOMAIN --token <token>
+#      Then start the agent: constellate-agent connect
+#   3. Add the operator account once:
+#        docker exec -it constellate-hub constellate-hub operator add
+#
+# Topology:
+#   Caddy (ports 80/443) → hub:8080 (internal only)
+#   Agents dial wss://$CONSTELLATE_DOMAIN/ws/agent (through Caddy TLS).
+
+services:
+  hub:
+    build:
+      context: ..
+      dockerfile: deploy/hub.Dockerfile
+    environment:
+      CONSTELLATE_ADDR: "0.0.0.0:8080"
+      CONSTELLATE_DB_PATH: "/data/constellate.db"
+      CONSTELLATE_PUBLIC_URL: "https://${CONSTELLATE_DOMAIN}"
+      # No CONSTELLATE_DEV_TOKEN — agents must enroll via `constellate-hub enroll-token`.
+      # No TLS cert/key — Caddy terminates TLS in front of the hub.
+    volumes:
+      - hub-data:/data
+    # Hub is NOT published directly; only Caddy reaches it via the internal network.
+    networks: [constellate]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"     # HTTP → HTTPS redirect (Caddy automatic)
+      - "443:443"   # HTTPS (Caddy manages TLS certificates automatically)
+      - "443:443/udp"  # HTTP/3 (QUIC)
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data    # ACME certs + Caddy state
+      - caddy-config:/config
+    environment:
+      CONSTELLATE_DOMAIN: "${CONSTELLATE_DOMAIN}"
+    networks: [constellate]
+    depends_on: [hub]
+    restart: unless-stopped
+
+networks:
+  constellate:
+    driver: bridge
+
+volumes:
+  hub-data:      # hub SQLite database
+  caddy-data:    # Caddy ACME certificates and state
+  caddy-config:  # Caddy runtime config

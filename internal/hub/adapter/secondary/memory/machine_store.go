@@ -20,17 +20,17 @@ func NewMachineStore() *MachineStore {
 	return &MachineStore{machines: make(map[string]machine.Machine)}
 }
 
-// Upsert inserts a machine or updates its mutable fields. enrolled_at is preserved
-// on an existing record.
+// Upsert inserts a machine or updates its mutable fields. enrolled_at and
+// revoked_at are preserved on an existing record.
 func (s *MachineStore) Upsert(_ context.Context, m machine.Machine) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	existing, ok := s.machines[m.ID()]
 	if ok {
-		updated := machine.Rehydrate(
+		updated := machine.RehydrateFull(
 			m.ID(), m.InstanceID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
-			existing.EnrolledAt(), m.LastSeenAt(),
+			existing.EnrolledAt(), m.LastSeenAt(), existing.RevokedAt(),
 		)
 		s.machines[m.ID()] = updated
 		return nil
@@ -49,9 +49,23 @@ func (s *MachineStore) UpdateLastSeen(_ context.Context, id string, ts int64) er
 	if !ok {
 		return fmt.Errorf("memory: update last_seen_at %q: %w", id, machine.ErrNotFound)
 	}
-	updated := machine.Rehydrate(m.ID(), m.InstanceID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
-		m.EnrolledAt(), ts)
+	updated := machine.RehydrateFull(m.ID(), m.InstanceID(), m.Name(), m.OS(), m.Arch(), m.AgentVersion(),
+		m.EnrolledAt(), ts, m.RevokedAt())
 	s.machines[id] = updated
+	return nil
+}
+
+// MarkRevoked sets revoked_at for the given id.
+// Returns machine.ErrNotFound (wrapped) if not present.
+func (s *MachineStore) MarkRevoked(_ context.Context, id string, ts int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.machines[id]
+	if !ok {
+		return fmt.Errorf("memory: mark revoked %q: %w", id, machine.ErrNotFound)
+	}
+	s.machines[id] = m.MarkRevoked(ts)
 	return nil
 }
 
@@ -66,6 +80,7 @@ func (s *MachineStore) List(_ context.Context) ([]machine.Machine, error) {
 	}
 	return out, nil
 }
+
 
 // ByID returns the machine with the given id.
 // Returns machine.ErrNotFound (wrapped) if not present.

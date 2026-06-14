@@ -13,7 +13,11 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 - Layering: `domain/` is pure stdlib; `app/<usecase>` is glue and declares the SPI it needs in its own
   `ports.go`; adapters split `primary/` (driving) and `secondary/` (driven) and translate DTOs at the
   boundary. `cmd/*/main.go` is the only wiring.
-- M0 is **localhost/private net, plain `ws://`, shared dev token** — no TLS/auth until M5.
+- M5 landed **auth + TLS**: dev token is gone. Agents enroll via `agent enroll --hub … --token …`
+  (Ed25519 keypair; hub stores only the public key; dial-home is a signed bearer assertion). Operator
+  logs in via TOTP + recovery codes + WebAuthn passkey (`hub operator add` for bootstrap). Hub serves
+  behind Caddy or direct HTTPS; agent verifies hub cert via `hub_ca`. The `constellate_session` cookie
+  gates all `/api/*` + `/ws/*` routes.
 
 ## Commands
 - `make build` · `make test` (unit + integration + in-proc E2E) · `make test-docker` (hub + 2 agent
@@ -21,6 +25,21 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 - Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
 
 ## Status
+M5 done (auth + audit hardening): **agent enrollment** — `hub enroll-token` + `agent enroll`
+generates an Ed25519 keypair; hub stores only the public key; dial-home presents a
+**agent-signed bearer assertion** (`v1.<machineID>.<ts>.<sig>`) — hub holds no signing secret.
+Revocation is soft (`machines.revoked_at`); `hub machines` / `hub revoke` / `agent reset` wired.
+**Protocol stays at 2** (credential rides `Authorization` header, not `Hello`). **Operator auth** —
+TOTP (`pquerna/otp`) + single-use recovery codes + WebAuthn passkeys (`go-webauthn`); server-side
+sessions in `operator_sessions` (migration 0004); opaque cookie `constellate_session` (HttpOnly,
+SameSite=Lax, Secure, 24 h). Rate limiting (per-IP + global) + TOTP single-use anti-replay.
+**Auth middleware** gates all `/api/*` + `/ws/*`; explicit allowlist for unauthenticated paths.
+**Audit log** wired via `AuditSink` port in `attach`, `sessions`, `enroll`, `auth` use cases.
+**TLS** via Caddy (`deploy/caddy/Caddyfile` + `deploy/compose.yaml`) or optional in-app
+(`tls.{cert,key}`). Dev token removed everywhere. New tables: `enroll_tokens` (0003),
+`operator_sessions` (0004), `machine_credentials` (stores Ed25519 public key). Decisions folded
+into `DESIGN.md` §5.1/§6/§8/§10/§13/§14.
+
 M4 done (mission-control overview): agent runs an **in-repo pure-Go VT emulator**
 (`adapter/secondary/vt`, Williams parser + ECMA-48/VT100) producing a full-color cell grid; a
 throttled, change-gated **snapshot producer** (`app/snapshot`) ships **RLE full-color** `Snapshot`
@@ -41,8 +60,7 @@ M2 (persistent terminals): agent keeps a per-session **scrollback ring buffer** 
 attach**; session manager is broadcast-buffer + per-attach drain. Agent **process restart** → its
 `running` sessions marked `lost`, detected via a per-process `instanceID` in `Hello`.
 
-Next: M5 (auth + audit hardening — passkey/TOTP login, agent enrollment + revocable credentials, TLS,
-audit log, remove dev token; the gate before public exposure). Milestone roadmap in `DESIGN.md` §18.
+Next: M6 (progress dashboard — activity/status rollups across machines and projects). Milestone roadmap in `DESIGN.md` §18.
 
 ## M1 conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is

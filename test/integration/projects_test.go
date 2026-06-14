@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/rizquuula/Constellate/internal/agent/adapter/primary/hubclient"
-	"github.com/rizquuula/Constellate/internal/platform/id"
 	platlog "github.com/rizquuula/Constellate/internal/platform/log"
 )
 
@@ -26,16 +25,16 @@ import (
 //  5. PATCH /api/sessions/{id} non-existent → 404 (proves endpoint + error mapping).
 func TestProjectsLifecycle(t *testing.T) {
 	logger := platlog.New("error", "text")
-	ts, _, wsURL := newInProcessHub(t)
+	ts, _, enrollUC, wsURL := newInProcessHub(t)
 	defer ts.Close()
 
-	machineID := id.New()
+	machineID, agentKey := enrollAgent(t, enrollUC, "projects-test-machine")
 	agentCtx, cancelAgent := context.WithCancel(context.Background())
 	defer cancelAgent()
 
 	client := hubclient.New(hubclient.Config{
 		HubURL:            wsURL("/ws/agent"),
-		DevToken:          e2eToken,
+		AgentKey:          agentKey,
 		MachineID:         machineID,
 		Name:              "projects-test-machine",
 		HeartbeatInterval: 100 * time.Millisecond,

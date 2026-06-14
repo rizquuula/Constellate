@@ -4,7 +4,9 @@ import { TerminalView } from './features/terminal/TerminalView'
 import { OverviewGrid } from './features/overview/OverviewGrid'
 import { Login } from './features/auth/Login'
 import { useStore } from './store'
-import { authStatus, logout } from './api/rest'
+import { authStatus, logout, passkeyRegister } from './api/rest'
+
+const hasPasskeySupport = typeof window !== 'undefined' && !!window.PublicKeyCredential
 
 type AuthState = 'loading' | 'setup' | 'login' | 'authed'
 
@@ -49,16 +51,34 @@ export function App() {
     return () => clearInterval(id)
   }, [authState, refreshMachines, refreshProjects, refreshSessions])
 
+  const [registerMsg, setRegisterMsg] = useState('')
+  const [registerErr, setRegisterErr] = useState(false)
+
   async function handleLogout() {
     await logout().catch(console.error)
     setAuthState('login')
+  }
+
+  async function handleAddPasskey() {
+    setRegisterMsg('')
+    setRegisterErr(false)
+    try {
+      await passkeyRegister()
+      setRegisterMsg('Passkey added.')
+      setRegisterErr(false)
+      setTimeout(() => setRegisterMsg(''), 3000)
+    } catch (err) {
+      setRegisterMsg(err instanceof Error ? err.message : 'Registration failed')
+      setRegisterErr(true)
+      setTimeout(() => { setRegisterMsg(''); setRegisterErr(false) }, 5000)
+    }
   }
 
   if (authState === 'loading') {
     return (
       <div className="login-overlay">
         <div className="login-card">
-          <p className="login-title">Connecting…</p>
+          <h2 className="login-title">Connecting…</h2>
         </div>
       </div>
     )
@@ -103,6 +123,16 @@ export function App() {
             Overview
           </button>
         </div>
+        {hasPasskeySupport && (
+          <button className="logout-btn" onClick={handleAddPasskey} title="Register a passkey for this device">
+            Add passkey
+          </button>
+        )}
+        <span
+          className={`header-msg${registerErr ? ' header-msg-error' : ''}`}
+          role="status"
+          aria-live="polite"
+        >{registerMsg}</span>
         <button className="logout-btn" onClick={handleLogout} title="Sign out">
           Sign out
         </button>

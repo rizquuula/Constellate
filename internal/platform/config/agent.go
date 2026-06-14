@@ -12,7 +12,8 @@ type Agent struct {
 	HubURL          string    `yaml:"hub_url"`
 	Name            string    `yaml:"name"`
 	IDFile          string    `yaml:"id_file"`
-	DevToken        string    `yaml:"dev_token"`
+	CredFile        string    `yaml:"cred_file"`
+	HubCA           string    `yaml:"hub_ca"`
 	DefaultShell    string    `yaml:"default_shell"`
 	ScrollbackBytes int       `yaml:"scrollback_bytes"`
 	Log             LogConfig `yaml:"log"`
@@ -23,6 +24,7 @@ func defaultAgent() Agent {
 	return Agent{
 		Name:            name,
 		IDFile:          expandHome("~/.constellate/agent-id"),
+		CredFile:        expandHome("~/.constellate/cred"),
 		ScrollbackBytes: 262144,
 		Log: LogConfig{
 			Level:  "info",
@@ -49,6 +51,10 @@ func LoadAgent(path string) (Agent, error) {
 
 	applyAgentEnv(&cfg)
 	cfg.IDFile = expandHome(cfg.IDFile)
+	cfg.CredFile = expandHome(cfg.CredFile)
+	if cfg.HubCA != "" {
+		cfg.HubCA = expandHome(cfg.HubCA)
+	}
 	return cfg, nil
 }
 
@@ -56,13 +62,16 @@ func applyAgentEnv(cfg *Agent) {
 	if v := os.Getenv("CONSTELLATE_HUB_URL"); v != "" {
 		cfg.HubURL = v
 	}
-	if v := os.Getenv("CONSTELLATE_DEV_TOKEN"); v != "" {
-		cfg.DevToken = v
-	}
 	if v := os.Getenv("CONSTELLATE_NAME"); v != "" {
 		cfg.Name = v
 	}
 	if v := os.Getenv("CONSTELLATE_ID_FILE"); v != "" {
 		cfg.IDFile = v
+	}
+	if v := os.Getenv("CONSTELLATE_CRED_FILE"); v != "" {
+		cfg.CredFile = v
+	}
+	if v := os.Getenv("CONSTELLATE_HUB_CA"); v != "" {
+		cfg.HubCA = v
 	}
 }

@@ -1,4 +1,4 @@
-# docker-compose.dev.yaml — local dev / demo stack for trying Constellate (M1).
+# docker-compose.dev.yaml — local dev / demo stack for trying Constellate (M5).
 #
 # Brings up the hub (with the embedded web UI) + two agent "machines" you can
 # open a live shell into from the browser.
@@ -12,8 +12,9 @@
 # those Alpine containers — not your host. To get a terminal on your actual
 # machine, run the agent as a host binary instead (see the README quickstart).
 #
-# Dev only: plain ws://, a shared dev token, bound to localhost. Not for the
-# public internet (auth/TLS land in M5).
+# M5: dev-token removed. Agents enroll automatically on first start via the
+# agent-entrypoint.sh wrapper (enroll-then-connect, token shared via a volume).
+# Plain ws://, bound to localhost — not for the public internet (use deploy/compose.yaml).
 
 services:
   hub:
@@ -21,15 +22,40 @@ services:
       context: .
       dockerfile: deploy/hub.Dockerfile
     environment:
-      CONSTELLATE_ADDR: "0.0.0.0:8080"        # listen on all interfaces inside the container
-      CONSTELLATE_DEV_TOKEN: "devtoken"
+      CONSTELLATE_ADDR: "0.0.0.0:8080"
       CONSTELLATE_DB_PATH: "/data/constellate.db"
     volumes:
       - hub-data:/data                        # session/machine metadata survives restarts
+      - token-share:/run/enroll               # shared enrollment token (written by hub init)
     ports:
       - "127.0.0.1:8080:8080"                 # reach the UI at http://localhost:8080
     networks: [constellate]
     restart: unless-stopped
+
+  # hub-init mints an enrollment token once and writes it to the shared volume.
+  # It exits immediately after writing the token; the hub continues running.
+  # On subsequent restarts the token file already exists (and the credentials
+  # are persisted in hub-data), so re-enrollment is a no-op for already-enrolled agents.
+  hub-init:
+    build:
+      context: .
+      dockerfile: deploy/hub.Dockerfile
+    environment:
+      CONSTELLATE_DB_PATH: "/data/constellate.db"
+    volumes:
+      - hub-data:/data
+      - token-share:/run/enroll
+    networks: [constellate]
+    depends_on: [hub]
+    # Write token to shared volume. Uses --ttl=24h so agents can enroll over the day.
+    command: >
+      sh -c "
+        sleep 2 &&
+        TOKEN=$$(constellate-hub enroll-token --ttl=24h) &&
+        echo \"$$TOKEN\" > /run/enroll/token &&
+        echo \"Enrollment token written: $$TOKEN\"
+      "
+    restart: "no"
 
   agent-alpha:
     build:
@@ -37,11 +63,13 @@ services:
       dockerfile: deploy/agent.dev.Dockerfile
     environment:
       CONSTELLATE_HUB_URL: "ws://hub:8080/ws/agent"
-      CONSTELLATE_DEV_TOKEN: "devtoken"
       CONSTELLATE_NAME: "agent-alpha"
+      CONSTELLATE_HUB_BASE: "http://hub:8080"
     volumes:
-      - agent-alpha-id:/root/.constellate     # stable machine id across restarts
-    depends_on: [hub]
+      - agent-alpha-id:/root/.constellate     # stable machine id + cred across restarts
+      - token-share:/run/enroll:ro            # read-only access to the enrollment token
+    entrypoint: ["/usr/local/bin/agent-entrypoint.sh"]
+    depends_on: [hub-init]
     networks: [constellate]
     restart: unless-stopped
 
@@ -51,11 +79,13 @@ services:
       dockerfile: deploy/agent.dev.Dockerfile
     environment:
       CONSTELLATE_HUB_URL: "ws://hub:8080/ws/agent"
-      CONSTELLATE_DEV_TOKEN: "devtoken"
       CONSTELLATE_NAME: "agent-beta"
+      CONSTELLATE_HUB_BASE: "http://hub:8080"
     volumes:
       - agent-beta-id:/root/.constellate
-    depends_on: [hub]
+      - token-share:/run/enroll:ro
+    entrypoint: ["/usr/local/bin/agent-entrypoint.sh"]
+    depends_on: [hub-init]
     networks: [constellate]
     restart: unless-stopped
 
@@ -65,5 +95,6 @@ networks:
 
 volumes:
   hub-data:
+  token-share:      # transient enrollment token shared between hub-init and agents
   agent-alpha-id:
   agent-beta-id:

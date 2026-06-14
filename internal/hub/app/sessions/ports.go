@@ -3,6 +3,7 @@ package sessions
 import (
 	"context"
 
+	"github.com/rizquuula/Constellate/internal/hub/domain/audit"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 )
 
@@ -26,4 +27,9 @@ type AgentGateway interface {
 // Clock returns the current unix-second timestamp.
 type Clock interface {
 	Now() int64
+}
+
+// AuditSink is the consumer-side port for recording security-relevant actions.
+type AuditSink interface {
+	Record(ctx context.Context, action audit.Action, machineID, sessionID, detail string) error
 }

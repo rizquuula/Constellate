@@ -22,7 +22,12 @@ type UseCase struct {
 	newID      IDGen
 	sessionTTL time.Duration
 	log        *slog.Logger
+	webauthn   WebAuthn       // may be nil when WebAuthn is unconfigured
+	challenges ChallengeStore // may be nil when WebAuthn is unconfigured
 }
+
+// challengeTTL is how long a WebAuthn challenge session survives (seconds).
+const challengeTTL = 5 * 60
 
 func New(
 	ops OperatorStore,
@@ -33,6 +38,8 @@ func New(
 	newID IDGen,
 	sessionTTL time.Duration,
 	log *slog.Logger,
+	webauthnSvc WebAuthn,
+	challenges ChallengeStore,
 ) *UseCase {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -46,6 +53,8 @@ func New(
 		newID:      newID,
 		sessionTTL: sessionTTL,
 		log:        log,
+		webauthn:   webauthnSvc,
+		challenges: challenges,
 	}
 }
 
@@ -102,8 +111,20 @@ func (u *UseCase) LoginTOTP(ctx context.Context, code string) (sessionID string,
 	if !ok {
 		return "", ErrNoOperator
 	}
-	if !u.totp.Verify(secret, code, u.clock.Now()) {
+	step, matched := u.totp.Matches(secret, code, u.clock.Now())
+	if !matched {
 		return "", ErrInvalidCredential
+	}
+	lastStep, err := u.ops.LastTOTPStep(ctx)
+	if err != nil {
+		return "", fmt.Errorf("auth: load last totp step: %w", err)
+	}
+	if step <= lastStep {
+		// Code already used in this or an earlier window — replay attack.
+		return "", ErrInvalidCredential
+	}
+	if err := u.ops.SetTOTPStep(ctx, step); err != nil {
+		return "", fmt.Errorf("auth: record totp step: %w", err)
 	}
 	sid, err := u.newSession(ctx)
 	if err != nil {
@@ -152,6 +173,120 @@ func (u *UseCase) newSession(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("auth: create session: %w", err)
 	}
 	return id, nil
+}
+
+// BeginPasskeyRegistration starts a WebAuthn credential-creation ceremony.
+// The caller must already be authenticated (this is an authed endpoint).
+// Returns the options JSON to forward to the browser and a challenge key to
+// correlate the Finish call.
+func (u *UseCase) BeginPasskeyRegistration(ctx context.Context) (optionsJSON []byte, challengeKey string, err error) {
+	if u.webauthn == nil || u.challenges == nil {
+		return nil, "", ErrWebAuthnUnavailable
+	}
+	creds, err := u.ops.WebAuthnCredentials(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("auth: load webauthn credentials: %w", err)
+	}
+	options, session, err := u.webauthn.BeginRegistration(creds)
+	if err != nil {
+		return nil, "", fmt.Errorf("auth: begin passkey registration: %w", err)
+	}
+	key, err := randToken()
+	if err != nil {
+		return nil, "", fmt.Errorf("auth: generate challenge key: %w", err)
+	}
+	now := u.clock.Now()
+	if err := u.challenges.Put(ctx, key, session, now+challengeTTL); err != nil {
+		return nil, "", fmt.Errorf("auth: store challenge: %w", err)
+	}
+	return options, key, nil
+}
+
+// FinishPasskeyRegistration completes the credential-creation ceremony.
+func (u *UseCase) FinishPasskeyRegistration(ctx context.Context, challengeKey string, body io.Reader) error {
+	if u.webauthn == nil || u.challenges == nil {
+		return ErrWebAuthnUnavailable
+	}
+	session, ok, err := u.challenges.Take(ctx, challengeKey, u.clock.Now())
+	if err != nil {
+		return fmt.Errorf("auth: take challenge: %w", err)
+	}
+	if !ok {
+		return ErrChallengeNotFound
+	}
+	creds, err := u.ops.WebAuthnCredentials(ctx)
+	if err != nil {
+		return fmt.Errorf("auth: load webauthn credentials: %w", err)
+	}
+	newCred, err := u.webauthn.FinishRegistration(creds, session, body)
+	if err != nil {
+		return fmt.Errorf("auth: finish passkey registration: %w", err)
+	}
+	credID, err := randToken()
+	if err != nil {
+		return fmt.Errorf("auth: generate credential id: %w", err)
+	}
+	if err := u.ops.SaveWebAuthnCredential(ctx, credID, newCred, u.clock.Now()); err != nil {
+		return fmt.Errorf("auth: save webauthn credential: %w", err)
+	}
+	u.log.Info("passkey registered")
+	return nil
+}
+
+// BeginPasskeyLogin starts a WebAuthn assertion (login) ceremony.
+func (u *UseCase) BeginPasskeyLogin(ctx context.Context) (optionsJSON []byte, challengeKey string, err error) {
+	if u.webauthn == nil || u.challenges == nil {
+		return nil, "", ErrWebAuthnUnavailable
+	}
+	creds, err := u.ops.WebAuthnCredentials(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("auth: load webauthn credentials: %w", err)
+	}
+	if len(creds) == 0 {
+		return nil, "", ErrNoOperator
+	}
+	options, session, err := u.webauthn.BeginLogin(creds)
+	if err != nil {
+		return nil, "", fmt.Errorf("auth: begin passkey login: %w", err)
+	}
+	key, err := randToken()
+	if err != nil {
+		return nil, "", fmt.Errorf("auth: generate challenge key: %w", err)
+	}
+	now := u.clock.Now()
+	if err := u.challenges.Put(ctx, key, session, now+challengeTTL); err != nil {
+		return nil, "", fmt.Errorf("auth: store challenge: %w", err)
+	}
+	return options, key, nil
+}
+
+// FinishPasskeyLogin completes the WebAuthn assertion and, on success, creates
+// an operator session.
+func (u *UseCase) FinishPasskeyLogin(ctx context.Context, challengeKey string, body io.Reader) (sessionID string, err error) {
+	if u.webauthn == nil || u.challenges == nil {
+		return "", ErrWebAuthnUnavailable
+	}
+	session, ok, err := u.challenges.Take(ctx, challengeKey, u.clock.Now())
+	if err != nil {
+		return "", fmt.Errorf("auth: take challenge: %w", err)
+	}
+	if !ok {
+		return "", ErrChallengeNotFound
+	}
+	creds, err := u.ops.WebAuthnCredentials(ctx)
+	if err != nil {
+		return "", fmt.Errorf("auth: load webauthn credentials: %w", err)
+	}
+	if err := u.webauthn.FinishLogin(creds, session, body); err != nil {
+		return "", fmt.Errorf("auth: finish passkey login: %w", err)
+	}
+	sid, err := u.newSession(ctx)
+	if err != nil {
+		return "", err
+	}
+	_ = u.audit.Record(ctx, audit.ActionLogin, "", "", "passkey")
+	u.log.Info("operator login", "method", "passkey")
+	return sid, nil
 }
 
 func randToken() (string, error) {

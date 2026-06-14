@@ -991,6 +991,11 @@ body {
   background: var(--surface-hover);
 }
 
+.login-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 .login-tab-active {
   background: var(--accent);
   color: var(--text-primary);
@@ -1023,13 +1028,18 @@ body {
 .login-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(74, 106, 170, 0.3);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .login-error {
   font-size: 12px;
   color: #e06c75;
   margin: 0;
+  min-height: 1.4em;
+}
+
+.login-error::before {
+  content: '⚠ ';
 }
 
 .login-submit {
@@ -1048,9 +1058,60 @@ body {
   opacity: 0.85;
 }
 
+.login-submit:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 .login-submit:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ── Passkey button ───────────────────────────────────────────────────────── */
+
+.login-passkey-btn {
+  background: var(--surface-hover);
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  transition: background 0.1s, border-color 0.1s;
+  width: 100%;
+}
+
+.login-passkey-btn:hover:not(:disabled) {
+  background: var(--border-subtle);
+  border-color: var(--accent);
+}
+
+.login-passkey-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.login-passkey-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
 }
 
 /* ── Logout button ────────────────────────────────────────────────────────── */
@@ -1063,12 +1124,29 @@ body {
   cursor: pointer;
   font-size: 11px;
   padding: 4px 10px;
+  min-height: 28px;
   transition: color 0.1s, border-color 0.1s;
 }
 
 .logout-btn:hover {
   color: var(--text-primary);
   border-color: var(--border-muted);
+}
+
+.logout-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* ── Header inline message ───────────────────────────────────────────────── */
+
+.header-msg {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.header-msg-error {
+  color: #e06c75;
 }
 
 /* ── Reduced motion ───────────────────────────────────────────────────────── */

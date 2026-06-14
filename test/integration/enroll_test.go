@@ -24,7 +24,6 @@ import (
 )
 
 // newEnrollHub wires an in-process hub with memory stores and credential-based auth.
-// devToken is empty so only credential auth works.
 func newEnrollHub(t *testing.T) (
 	ts *httptest.Server,
 	enrollUC *enroll.UseCase,
@@ -51,8 +50,7 @@ func newEnrollHub(t *testing.T) (
 		logger,
 	)
 
-	// No devToken — force credential-based auth only.
-	endpoint := wsagent.NewEndpoint(reg, links, noopEvents{}, nil, enrollUC, "", logger)
+	endpoint := wsagent.NewEndpoint(reg, links, noopEvents{}, nil, enrollUC, logger)
 	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, stubProjectService{}, enrollUC, endpoint, nil, nil, nil, false, logger)
 
 	ts = httptest.NewServer(srv.Handler())

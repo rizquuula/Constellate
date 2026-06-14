@@ -2,7 +2,6 @@ package wsagent
 
 import (
 	"context"
-	"crypto/subtle"
 	"log/slog"
 	"net/http"
 
@@ -27,39 +26,47 @@ type OverviewSink interface {
 	DropSession(sessionID string)
 }
 
+// AgentAuthenticator validates a bearer token and returns the authenticated machineID.
+// *enroll.UseCase satisfies this interface.
+type AgentAuthenticator interface {
+	Authenticate(ctx context.Context, bearerToken string) (machineID string, err error)
+}
+
 // Endpoint handles WebSocket dial-home connections from agents.
 type Endpoint struct {
 	reg      *registry.UseCase
 	links    *agentlink.Registry
 	events   SessionEvents
 	overview OverviewSink
-	devToken string
+	auth     AgentAuthenticator
 	log      *slog.Logger
 }
 
 // NewEndpoint creates a ready Endpoint.
-func NewEndpoint(reg *registry.UseCase, links *agentlink.Registry, events SessionEvents, overview OverviewSink, devToken string, log *slog.Logger) *Endpoint {
+func NewEndpoint(reg *registry.UseCase, links *agentlink.Registry, events SessionEvents, overview OverviewSink, auth AgentAuthenticator, log *slog.Logger) *Endpoint {
 	return &Endpoint{
 		reg:      reg,
 		links:    links,
 		events:   events,
 		overview: overview,
-		devToken: devToken,
+		auth:     auth,
 		log:      log,
 	}
 }
 
 // ServeHTTP is the /ws/agent HTTP handler.
 func (e *Endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Auth: require Bearer token.
-	if e.devToken == "" {
-		e.log.Warn("wsagent: devToken not configured, rejecting connection")
+	bearer := extractBearer(r.Header.Get("Authorization"))
+
+	if e.auth == nil {
+		e.log.Warn("wsagent: rejected connection: no authenticator configured", "remote", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	provided := extractBearer(r.Header.Get("Authorization"))
-	if subtle.ConstantTimeCompare([]byte(provided), []byte(e.devToken)) != 1 {
-		e.log.Warn("wsagent: rejected connection: invalid token", "remote", r.RemoteAddr)
+
+	authMachineID, err := e.auth.Authenticate(r.Context(), bearer)
+	if err != nil {
+		e.log.Warn("wsagent: rejected connection: auth failed", "remote", r.RemoteAddr, "err", err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -89,7 +96,7 @@ func (e *Endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	e.handleControl(ctx, sess, ctrl)
+	e.handleControl(ctx, sess, ctrl, authMachineID)
 	_ = c.Close(websocket.StatusNormalClosure, "")
 }
 

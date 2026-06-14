@@ -66,5 +66,11 @@ func statusFor(err error) int {
 	if errors.Is(err, appauth.ErrNoOperator) {
 		return http.StatusForbidden
 	}
+	if errors.Is(err, appauth.ErrWebAuthnUnavailable) {
+		return http.StatusNotImplemented
+	}
+	if errors.Is(err, appauth.ErrChallengeNotFound) {
+		return http.StatusUnauthorized
+	}
 	return http.StatusInternalServerError
 }

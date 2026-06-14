@@ -1,0 +1,18 @@
+# Constellate — Caddy reverse-proxy config (production)
+#
+# Caddy terminates TLS (automatic HTTPS via Let's Encrypt / ZeroSSL) and
+# forwards plain HTTP to the hub container. The hub itself runs without TLS
+# (no tls.cert/tls.key in hub config), safely isolated on the internal Docker
+# network; only Caddy is published to the host on ports 80 and 443.
+#
+# Usage:
+#   Set CONSTELLATE_DOMAIN in your environment (or .env file) before starting
+#   the stack:
+#
+#     CONSTELLATE_DOMAIN=example.com docker compose -f deploy/compose.yaml up -d
+#
+# Caddy will obtain and renew TLS certificates automatically.
+
+{$CONSTELLATE_DOMAIN} {
+    reverse_proxy hub:8080
+}
