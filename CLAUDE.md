@@ -21,11 +21,19 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 - Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
 
 ## Status
-M2 done (persistent terminals): agent keeps a per-session **scrollback ring buffer** and **replays it
-on attach** (fixes blank-on-switch); session manager is broadcast-buffer + per-attach drain (a slow
-client can't stall the PTY). Agent **process restart** → its `running` sessions marked `lost`, detected
-via a per-process `instanceID` in `Hello` (transient reconnects don't false-trigger). Next: M3
-(multi-session + projects). Milestone roadmap in `DESIGN.md` §18.
+M3 done (multi-session + projects): new **project** bounded context (`domain/project`, `app/projects`,
+sqlite + memory `ProjectStore`); REST `GET/POST /api/projects` and session rename `PATCH
+/api/sessions/{id}` (metadata only, no wire change). Sessions may be **project-less** (nullable
+`project_id`, an "Ungrouped" bucket); **no project delete in M3**. Frontend is a **recursive
+split-pane terminal workspace** (react-resizable-panels) — each pane leaf binds one live session,
+split H/V — plus a project-grouped sidebar. Decisions/innovations folded into `DESIGN.md` §9/§18/§19.
+
+M2 (persistent terminals): agent keeps a per-session **scrollback ring buffer** and **replays it on
+attach**; session manager is broadcast-buffer + per-attach drain. Agent **process restart** → its
+`running` sessions marked `lost`, detected via a per-process `instanceID` in `Hello`.
+
+Next: M4 (mission-control overview — vt parser → screen state, snapshot stream, tile grid,
+click-to-dive). Milestone roadmap in `DESIGN.md` §18.
 
 ## M1 conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is
