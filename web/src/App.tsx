@@ -1,8 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { ProjectTree } from './features/sidebar/ProjectTree'
 import { TerminalView } from './features/terminal/TerminalView'
 import { OverviewGrid } from './features/overview/OverviewGrid'
+import { Login } from './features/auth/Login'
 import { useStore } from './store'
+import { authStatus, logout } from './api/rest'
+
+type AuthState = 'loading' | 'setup' | 'login' | 'authed'
 
 export function App() {
   const refreshMachines = useStore((s) => s.refreshMachines)
@@ -11,7 +15,30 @@ export function App() {
   const viewMode = useStore((s) => s.viewMode)
   const setViewMode = useStore((s) => s.setViewMode)
 
+  const [authState, setAuthState] = useState<AuthState>('loading')
+
+  async function checkAuth() {
+    try {
+      const status = await authStatus()
+      if (!status.hasOperator) {
+        setAuthState('setup')
+      } else if (!status.authenticated) {
+        setAuthState('login')
+      } else {
+        setAuthState('authed')
+      }
+    } catch {
+      // If auth check fails (e.g. server not yet up), treat as loading.
+      setAuthState('loading')
+    }
+  }
+
   useEffect(() => {
+    checkAuth()
+  }, [])
+
+  useEffect(() => {
+    if (authState !== 'authed') return
     const tick = () => {
       refreshMachines().catch(console.error)
       refreshProjects().catch(console.error)
@@ -20,7 +47,40 @@ export function App() {
     tick()
     const id = setInterval(tick, 2000)
     return () => clearInterval(id)
-  }, [refreshMachines, refreshProjects, refreshSessions])
+  }, [authState, refreshMachines, refreshProjects, refreshSessions])
+
+  async function handleLogout() {
+    await logout().catch(console.error)
+    setAuthState('login')
+  }
+
+  if (authState === 'loading') {
+    return (
+      <div className="login-overlay">
+        <div className="login-card">
+          <p className="login-title">Connecting…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (authState === 'setup') {
+    return (
+      <div className="login-overlay">
+        <div className="login-card">
+          <h2 className="login-title">Setup Required</h2>
+          <p className="login-label">
+            No operator account configured. Run{' '}
+            <code>constellate-hub operator add</code> to bootstrap TOTP.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (authState === 'login') {
+    return <Login onSuccess={() => setAuthState('authed')} />
+  }
 
   return (
     <div className="app-root">
@@ -43,6 +103,9 @@ export function App() {
             Overview
           </button>
         </div>
+        <button className="logout-btn" onClick={handleLogout} title="Sign out">
+          Sign out
+        </button>
       </header>
 
       {viewMode === 'overview' ? (

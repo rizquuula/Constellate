@@ -61,8 +61,8 @@ func TestDialHomeTopology(t *testing.T) {
 	store := memory.NewMachineStore()
 	links := agentlink.NewRegistry()
 	reg := registry.New(store, links, registry.SystemClock{}, testLogger)
-	endpoint := wsagent.NewEndpoint(reg, links, noopEvents{}, nil, devToken, testLogger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, stubProjectService{}, endpoint, nil, nil, testLogger)
+	endpoint := wsagent.NewEndpoint(reg, links, noopEvents{}, nil, nil, devToken, testLogger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, stubProjectService{}, nil, endpoint, nil, nil, nil, false, testLogger)
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

@@ -3,6 +3,7 @@ import type { Machine, Project, Session } from '../types'
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
+    credentials: 'include',
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   })
@@ -53,4 +54,20 @@ export function renameSession(id: string, title: string): Promise<void> {
 
 export function closeSession(id: string): Promise<void> {
   return request<void>('DELETE', `/api/sessions/${id}`)
+}
+
+export function authStatus(): Promise<{ hasOperator: boolean; authenticated: boolean }> {
+  return request<{ hasOperator: boolean; authenticated: boolean }>('GET', '/api/auth/status')
+}
+
+export function loginTOTP(code: string): Promise<void> {
+  return request<void>('POST', '/api/auth/totp', { code })
+}
+
+export function loginRecovery(code: string): Promise<void> {
+  return request<void>('POST', '/api/auth/recovery', { code })
+}
+
+export function logout(): Promise<void> {
+  return request<void>('POST', '/api/auth/logout')
 }

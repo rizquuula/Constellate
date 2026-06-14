@@ -22,23 +22,30 @@ type MachineService interface {
 
 // Server wraps an *http.Server and exposes Start/Shutdown.
 type Server struct {
-	http     *http.Server
-	addr     string
-	mux      *http.ServeMux
-	machines MachineService
-	sessions SessionService
-	projects ProjectService
-	log      *slog.Logger
+	http          *http.Server
+	addr          string
+	mux           *http.ServeMux
+	handler       http.Handler
+	machines      MachineService
+	sessions      SessionService
+	projects      ProjectService
+	enroll        EnrollService
+	auth          AuthService
+	secureCookies bool
+	log           *slog.Logger
 }
 
 // NewServer wires up the mux and returns a ready-to-start Server.
-func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, agentWS http.Handler, termWS http.Handler, overviewWS http.Handler, log *slog.Logger) *Server {
+func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, enrollSvc EnrollService, agentWS http.Handler, termWS http.Handler, overviewWS http.Handler, authSvc AuthService, secureCookies bool, log *slog.Logger) *Server {
 	s := &Server{
-		addr:     addr,
-		machines: machines,
-		sessions: sessions,
-		projects: projects,
-		log:      log,
+		addr:          addr,
+		machines:      machines,
+		sessions:      sessions,
+		projects:      projects,
+		enroll:        enrollSvc,
+		auth:          authSvc,
+		secureCookies: secureCookies,
+		log:           log,
 	}
 
 	mux := http.NewServeMux()
@@ -50,7 +57,17 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.handleRenameSession)
 	mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
-	mux.Handle("/ws/agent", agentWS)
+	// POST /api/enroll is intentionally unauthenticated — bootstrap endpoint,
+	// protected only by the one-time token. Operator-auth middleware must allowlist this route.
+	mux.HandleFunc("POST /api/enroll", s.handleEnroll)
+	// Auth endpoints — allowed without session cookie.
+	mux.HandleFunc("POST /api/auth/totp", s.handleLoginTOTP)
+	mux.HandleFunc("POST /api/auth/recovery", s.handleLoginRecovery)
+	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	if agentWS != nil {
+		mux.Handle("/ws/agent", agentWS)
+	}
 	if termWS != nil {
 		mux.Handle("/ws/term", termWS)
 	}
@@ -62,9 +79,10 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 	mux.Handle("/{path...}", spaHandler(distFS))
 
 	s.mux = mux
+	s.handler = loggingMiddleware(log, authMiddleware(authSvc, secureCookies, log, mux))
 	s.http = &http.Server{
 		Addr:    addr,
-		Handler: loggingMiddleware(log, mux),
+		Handler: s.handler,
 	}
 	return s
 }
@@ -120,10 +138,10 @@ func (s *Server) Addr() string {
 	return s.addr
 }
 
-// Handler returns the underlying mux so callers (e.g. httptest.NewServer) can
+// Handler returns the full middleware chain so callers (e.g. httptest.NewServer) can
 // drive the server without binding a real listener.
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return s.handler
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code.

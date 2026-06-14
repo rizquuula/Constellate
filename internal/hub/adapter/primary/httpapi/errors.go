@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
+	appauth "github.com/rizquuula/Constellate/internal/hub/app/auth"
+	"github.com/rizquuula/Constellate/internal/hub/app/enroll"
 	"github.com/rizquuula/Constellate/internal/hub/domain/machine"
 	"github.com/rizquuula/Constellate/internal/hub/domain/project"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
@@ -48,6 +50,21 @@ func statusFor(err error) int {
 	}
 	if errors.Is(err, agentlink.ErrAgentOffline) {
 		return http.StatusServiceUnavailable
+	}
+	if errors.Is(err, enroll.ErrInvalidToken) {
+		return http.StatusUnauthorized
+	}
+	if errors.Is(err, enroll.ErrUnknownMachine) {
+		return http.StatusNotFound
+	}
+	if errors.Is(err, enroll.ErrRevoked) {
+		return http.StatusForbidden
+	}
+	if errors.Is(err, appauth.ErrInvalidCredential) {
+		return http.StatusUnauthorized
+	}
+	if errors.Is(err, appauth.ErrNoOperator) {
+		return http.StatusForbidden
 	}
 	return http.StatusInternalServerError
 }
