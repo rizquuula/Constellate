@@ -919,9 +919,18 @@ acceptance check passes.
 - **Dev token removed** everywhere. Tests authenticate via real enrollment.
 - Decisions folded into `DESIGN.md` §5.1/§6/§8/§10/§13/§14.
 
-### M6 — Progress dashboard
-- Activity/status rollups across machines and projects.
+### M6 — Progress dashboard *(done)*
+- Status/liveness rollups across machines and projects.
 - **Done when:** the operator can see, at a glance, what's running/idle/needs attention fleet-wide.
+- **Shipped:** a server-side aggregation use case (`app/dashboard`) composes the machine/session/
+  project/audit read ports + live-agent presence into a single `View` — fleet totals
+  (machines online/total, sessions running/exited/lost/total, projects), per-machine and
+  per-project rollups (with an "Ungrouped" bucket for project-less sessions), an **attention list**
+  (lost sessions; offline machines with still-running sessions), and the **20 most recent audit
+  events**. Exposed at session-gated `GET /api/dashboard`; the frontend adds a third
+  **Workspace ↔ Overview ↔ Dashboard** view (summary cards, rollup tables, attention banner,
+  recent-activity feed) that polls only while active. Per-session *activity* (active/idle/
+  awaiting-input) is deferred to M7 — M6 rolls up **status** only.
 
 ### M7 — AI-session awareness
 - Track per-session **activity** (active / idle / awaiting-input) from output heuristics plus an

@@ -25,6 +25,14 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 - Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
 
 ## Status
+M6 done (progress dashboard): a server-side aggregation use case (`app/dashboard`) composes the
+machine/session/project/audit read ports + live-agent presence into one `View` — fleet totals,
+per-machine + per-project **status rollups** (running/exited/lost, with an "Ungrouped" bucket), an
+**attention list** (lost sessions; offline machines with running sessions), and the 20 most recent
+audit events. Session-gated `GET /api/dashboard`; frontend adds a third **Dashboard** view
+(summary cards, rollups, attention banner, activity feed) polling only while active. Per-session
+*activity* (active/idle/awaiting-input) is deferred to M7. Decisions folded into `DESIGN.md` §18.
+
 M5 done (auth + audit hardening): **agent enrollment** — `hub enroll-token` + `agent enroll`
 generates an Ed25519 keypair; hub stores only the public key; dial-home presents a
 **agent-signed bearer assertion** (`v1.<machineID>.<ts>.<sig>`) — hub holds no signing secret.
@@ -60,7 +68,9 @@ M2 (persistent terminals): agent keeps a per-session **scrollback ring buffer** 
 attach**; session manager is broadcast-buffer + per-attach drain. Agent **process restart** → its
 `running` sessions marked `lost`, detected via a per-process `instanceID` in `Hello`.
 
-Next: M6 (progress dashboard — activity/status rollups across machines and projects). Milestone roadmap in `DESIGN.md` §18.
+Next: M7 (AI-session awareness — per-session activity active/idle/awaiting-input from output
+heuristics + opt-in shell hook, surfaced on overview tiles + the dashboard; the `sessions.activity`
+column exists from M1). Milestone roadmap in `DESIGN.md` §18.
 
 ## M1 conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is

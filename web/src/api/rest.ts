@@ -1,4 +1,4 @@
-import type { Machine, Project, Session } from '../types'
+import type { Machine, Project, Session, Dashboard } from '../types'
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -54,6 +54,10 @@ export function renameSession(id: string, title: string): Promise<void> {
 
 export function closeSession(id: string): Promise<void> {
   return request<void>('DELETE', `/api/sessions/${id}`)
+}
+
+export function getDashboard(): Promise<Dashboard> {
+  return request<Dashboard>('GET', '/api/dashboard')
 }
 
 export function authStatus(): Promise<{ hasOperator: boolean; authenticated: boolean }> {

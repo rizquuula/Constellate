@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ProjectTree } from './features/sidebar/ProjectTree'
 import { TerminalView } from './features/terminal/TerminalView'
 import { OverviewGrid } from './features/overview/OverviewGrid'
+import { DashboardView } from './features/dashboard/DashboardView'
 import { Login } from './features/auth/Login'
 import { useStore } from './store'
 import { authStatus, logout, passkeyRegister } from './api/rest'
@@ -14,6 +15,7 @@ export function App() {
   const refreshMachines = useStore((s) => s.refreshMachines)
   const refreshProjects = useStore((s) => s.refreshProjects)
   const refreshSessions = useStore((s) => s.refreshSessions)
+  const refreshDashboard = useStore((s) => s.refreshDashboard)
   const viewMode = useStore((s) => s.viewMode)
   const setViewMode = useStore((s) => s.setViewMode)
 
@@ -42,14 +44,18 @@ export function App() {
   useEffect(() => {
     if (authState !== 'authed') return
     const tick = () => {
-      refreshMachines().catch(console.error)
-      refreshProjects().catch(console.error)
-      refreshSessions().catch(console.error)
+      if (viewMode === 'dashboard') {
+        refreshDashboard().catch(console.error)
+      } else {
+        refreshMachines().catch(console.error)
+        refreshProjects().catch(console.error)
+        refreshSessions().catch(console.error)
+      }
     }
     tick()
     const id = setInterval(tick, 2000)
     return () => clearInterval(id)
-  }, [authState, refreshMachines, refreshProjects, refreshSessions])
+  }, [authState, viewMode, refreshMachines, refreshProjects, refreshSessions, refreshDashboard])
 
   const [registerMsg, setRegisterMsg] = useState('')
   const [registerErr, setRegisterErr] = useState(false)
@@ -122,6 +128,13 @@ export function App() {
           >
             Overview
           </button>
+          <button
+            className={`view-toggle-btn${viewMode === 'dashboard' ? ' view-toggle-active' : ''}`}
+            onClick={() => setViewMode('dashboard')}
+            aria-pressed={viewMode === 'dashboard'}
+          >
+            Dashboard
+          </button>
         </div>
         {hasPasskeySupport && (
           <button className="logout-btn" onClick={handleAddPasskey} title="Register a passkey for this device">
@@ -142,6 +155,8 @@ export function App() {
         <div className="overview-shell">
           <OverviewGrid />
         </div>
+      ) : viewMode === 'dashboard' ? (
+        <DashboardView />
       ) : (
         <div className="layout">
           <ProjectTree />

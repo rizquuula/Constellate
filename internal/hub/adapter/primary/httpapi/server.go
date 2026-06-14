@@ -31,6 +31,7 @@ type Server struct {
 	projects           ProjectService
 	enroll             EnrollService
 	auth               AuthService
+	dashboard          DashboardService
 	secureCookies      bool
 	log                *slog.Logger
 	loginIPLimiter     *rateLimiter
@@ -38,7 +39,7 @@ type Server struct {
 }
 
 // NewServer wires up the mux and returns a ready-to-start Server.
-func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, enrollSvc EnrollService, agentWS http.Handler, termWS http.Handler, overviewWS http.Handler, authSvc AuthService, secureCookies bool, log *slog.Logger) *Server {
+func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, enrollSvc EnrollService, agentWS http.Handler, termWS http.Handler, overviewWS http.Handler, authSvc AuthService, dashboardSvc DashboardService, secureCookies bool, log *slog.Logger) *Server {
 	s := &Server{
 		addr:               addr,
 		machines:           machines,
@@ -46,6 +47,7 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 		projects:           projects,
 		enroll:             enrollSvc,
 		auth:               authSvc,
+		dashboard:          dashboardSvc,
 		secureCookies:      secureCookies,
 		log:                log,
 		loginIPLimiter:     newRateLimiter(loginIPMax, loginWindow),
@@ -61,6 +63,7 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.handleRenameSession)
 	mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
+	mux.HandleFunc("GET /api/dashboard", s.handleDashboard)
 	// POST /api/enroll is intentionally unauthenticated — bootstrap endpoint,
 	// protected only by the one-time token. Operator-auth middleware must allowlist this route.
 	mux.HandleFunc("POST /api/enroll", s.handleEnroll)

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Machine, Project, Session } from '../types'
+import type { Machine, Project, Session, Dashboard } from '../types'
 import {
   listMachines,
   listProjects,
@@ -8,6 +8,7 @@ import {
   createProject as apiCreateProject,
   renameSession as apiRenameSession,
   closeSession as apiCloseSession,
+  getDashboard,
 } from '../api/rest'
 import {
   type PaneNode,
@@ -20,8 +21,13 @@ import {
 
 interface Store {
   // ── view mode ─────────────────────────────────────────────────────────────
-  viewMode: 'workspace' | 'overview'
-  setViewMode: (mode: 'workspace' | 'overview') => void
+  viewMode: 'workspace' | 'overview' | 'dashboard'
+  setViewMode: (mode: 'workspace' | 'overview' | 'dashboard') => void
+
+  // ── dashboard ─────────────────────────────────────────────────────────────
+  dashboard: Dashboard | null
+  dashboardError: boolean
+  refreshDashboard: () => Promise<void>
 
   // ── server state ──────────────────────────────────────────────────────────
   machines: Machine[]
@@ -55,6 +61,18 @@ const initialLeaf = makeLeaf(null)
 export const useStore = create<Store>((set, get) => ({
   viewMode: 'workspace',
   setViewMode: (mode) => set({ viewMode: mode }),
+
+  dashboard: null,
+  dashboardError: false,
+  refreshDashboard: async () => {
+    try {
+      const dashboard = await getDashboard()
+      set({ dashboard, dashboardError: false })
+    } catch (err) {
+      console.error('refreshDashboard:', err)
+      set({ dashboardError: true })
+    }
+  },
 
   machines: [],
   projects: [],

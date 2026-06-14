@@ -1149,6 +1149,409 @@ body {
   color: #e06c75;
 }
 
+/* ── Dashboard shell ─────────────────────────────────────────────────────── */
+
+.dashboard-shell {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-base);
+}
+
+.dashboard-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.dashboard-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.dashboard-retry-btn {
+  background: transparent;
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 12px;
+  min-height: 28px;
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.dashboard-retry-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.dashboard-retry-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.dashboard-stale-banner {
+  padding: 4px 24px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--surface-chrome);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* ── Summary cards ────────────────────────────────────────────────────────── */
+
+.dashboard-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.dashboard-card {
+  background: var(--surface-chrome);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dashboard-card-danger {
+  border-color: #5a2a1a;
+  background: #1e0f0f;
+}
+
+.dashboard-card-number {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.dashboard-card-danger .dashboard-card-number {
+  /* #e0906f on #1e0f0f: contrast ≈ 5.0:1 — passes AA */
+  color: #e0906f;
+}
+
+.dashboard-card-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.dashboard-card-warn-tag {
+  color: #e0906f;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+/* ── Section headings ─────────────────────────────────────────────────────── */
+
+.dashboard-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboard-section-heading {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dashboard-attention-count {
+  font-weight: 400;
+  color: #e0906f;
+}
+
+/* ── Attention section ────────────────────────────────────────────────────── */
+
+.dashboard-all-clear {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 8px 0;
+}
+
+.dashboard-attention-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dashboard-attention-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #1e0f0f;
+  border: 1px solid #5a2a1a;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 13px;
+  /* #e0d0c0 on #1e0f0f: contrast ≈ 7.5:1 — passes AA */
+  color: #e0d0c0;
+}
+
+.dashboard-attention-icon {
+  flex-shrink: 0;
+  font-weight: 700;
+  /* #e0906f on #1e0f0f: contrast ≈ 5.0:1 — passes AA */
+  color: #e0906f;
+  font-size: 13px;
+  line-height: 1.4;
+  user-select: none;
+}
+
+/* ── Machines table ───────────────────────────────────────────────────────── */
+
+.dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dashboard-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.dashboard-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.dashboard-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.dashboard-table tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+.dashboard-row-revoked td {
+  opacity: 0.55;
+}
+
+.dashboard-cell-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary) !important;
+  font-weight: 500;
+}
+
+.dashboard-cell-meta {
+  color: var(--text-muted) !important;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ── Status dot ───────────────────────────────────────────────────────────── */
+
+.dashboard-status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.dashboard-dot-online {
+  background: #4dbb4d;
+}
+
+.dashboard-dot-offline {
+  background: #888;
+}
+
+.dashboard-status-text {
+  vertical-align: middle;
+  font-size: 12px;
+}
+
+/* ── Chips ────────────────────────────────────────────────────────────────── */
+
+.dashboard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dashboard-chip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.dashboard-chip-running {
+  background: #1a3a1a;
+  color: #4dbb4d;
+  border: 1px solid #2a5a2a;
+}
+
+.dashboard-chip-exited {
+  background: #2a2a2a;
+  /* #aaaaaa on #2a2a2a: contrast ≈ 5.4:1 — passes AA */
+  color: #aaaaaa;
+  border: 1px solid #444;
+}
+
+/* #e0906f on #3a1a1a: contrast ≈ 4.55:1 — passes AA */
+.dashboard-chip-lost {
+  background: #3a1a1a;
+  color: #e0906f;
+  border: 1px solid #5a2a1a;
+}
+
+.dashboard-chip-total {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.dashboard-chip-revoked {
+  background: #2a1a2a;
+  color: #c080c0;
+  border: 1px solid #4a2a4a;
+  font-size: 11px;
+}
+
+/* ── Projects list ────────────────────────────────────────────────────────── */
+
+.dashboard-project-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashboard-project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: var(--surface-chrome);
+  border: 1px solid var(--border-subtle);
+}
+
+.dashboard-project-ungrouped {
+  opacity: 0.7;
+  border-style: dashed;
+}
+
+.dashboard-project-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.dashboard-project-machine {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ── Activity list ────────────────────────────────────────────────────────── */
+
+.dashboard-activity-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashboard-activity-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.dashboard-activity-item:nth-child(odd) {
+  background: var(--surface-chrome);
+}
+
+.dashboard-activity-actor {
+  font-weight: 600;
+  color: var(--accent-text);
+  flex-shrink: 0;
+}
+
+.dashboard-activity-action {
+  color: var(--text-secondary);
+}
+
+.dashboard-activity-detail {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.dashboard-activity-time {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* ── Empty states ─────────────────────────────────────────────────────────── */
+
+.dashboard-empty-state {
+  font-size: 13px;
+  color: var(--text-faint);
+  padding: 8px 0;
+}
+
 /* ── Reduced motion ───────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {

@@ -31,6 +31,61 @@ export interface Session {
   lastActiveAt: number
 }
 
+export interface DashboardTotals {
+  machinesOnline: number
+  machinesTotal: number
+  sessionsRunning: number
+  sessionsExited: number
+  sessionsLost: number
+  sessionsTotal: number
+  projectsTotal: number
+}
+
+export interface MachineRollup {
+  id: string
+  name: string
+  os: string
+  online: boolean
+  revoked: boolean
+  lastSeenAt: number
+  running: number
+  total: number
+}
+
+export interface ProjectRollup {
+  id: string
+  name: string
+  machineID: string
+  running: number
+  exited: number
+  lost: number
+  total: number
+}
+
+export interface AttentionItem {
+  kind: 'lost_session' | 'offline_with_running'
+  machineID: string
+  sessionID: string
+  label: string
+}
+
+export interface AuditEntry {
+  ts: number
+  actor: string
+  action: 'login' | 'enroll' | 'attach' | 'open' | 'close' | 'revoke'
+  machineID: string
+  sessionID: string
+  detail: string
+}
+
+export interface Dashboard {
+  totals: DashboardTotals
+  machines: MachineRollup[]
+  projects: ProjectRollup[]
+  attentionItems: AttentionItem[]
+  recentAudit: AuditEntry[]
+}
+
 export interface SnapRun {
   t: string      // run text (UTF-8)
   f?: number     // FG color; omitted/0 = default

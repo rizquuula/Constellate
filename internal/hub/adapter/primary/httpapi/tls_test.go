@@ -75,7 +75,7 @@ func TestStartTLS_BadPath(t *testing.T) {
 	logger := log.New("error", "text")
 	links := agentlink.NewRegistry()
 	reg := registry.New(memory.NewMachineStore(), links, registry.SystemClock{}, logger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, nil, nil, nil, nil, nil, nil, nil, false, logger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, nil, nil, nil, nil, nil, nil, nil, nil, false, logger)
 
 	err := srv.StartTLS("/nonexistent/cert.pem", "/nonexistent/key.pem")
 	if err == nil {
@@ -106,7 +106,7 @@ func TestStartTLS_Connectivity(t *testing.T) {
 	logger := log.New("error", "text")
 	links := agentlink.NewRegistry()
 	reg := registry.New(memory.NewMachineStore(), links, registry.SystemClock{}, logger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, nil, nil, nil, nil, nil, nil, nil, false, logger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, nil, nil, nil, nil, nil, nil, nil, nil, false, logger)
 
 	ts := httptest.NewUnstartedServer(srv.Handler())
 	ts.TLS = &tls.Config{Certificates: []tls.Certificate{tlsCert}}

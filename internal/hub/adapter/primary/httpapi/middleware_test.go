@@ -96,6 +96,7 @@ func buildMiddlewareTestServer(t *testing.T) (*httptest.Server, string) {
 		nil,
 		nil, nil, nil,
 		uc,
+		nil,
 		false,
 		logger,
 	)

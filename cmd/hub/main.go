@@ -25,6 +25,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/app/attach"
 	auditapp "github.com/rizquuula/Constellate/internal/hub/app/audit"
 	authapp "github.com/rizquuula/Constellate/internal/hub/app/auth"
+	"github.com/rizquuula/Constellate/internal/hub/app/dashboard"
 	"github.com/rizquuula/Constellate/internal/hub/app/enroll"
 	"github.com/rizquuula/Constellate/internal/hub/app/overview"
 	"github.com/rizquuula/Constellate/internal/hub/app/projects"
@@ -51,6 +52,7 @@ var _ wsagent.AgentAuthenticator = (*enroll.UseCase)(nil)
 var _ httpapi.EnrollService = (*enroll.UseCase)(nil)
 var _ httpapi.AuthService = (*authapp.UseCase)(nil)
 var _ authapp.WebAuthn = (*waadapter.Provider)(nil)
+var _ httpapi.DashboardService = (*dashboard.UseCase)(nil)
 
 func main() {
 	args := os.Args[1:]
@@ -201,10 +203,11 @@ func cmdServe(args []string) {
 
 	authUC := authapp.New(operatorStore, sessionStore, totpVerifier, auditUC, authapp.SystemClock{}, id.New, 24*time.Hour, log, waProvider, waChallenge)
 
+	dashboardUC := dashboard.New(machineStore, links, sessStore, projStore, auditStore, log)
 	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, overviewUC, enrollUC, log)
 	termHandler := wsbrowser.NewTerminalHandler(attachUC, log)
 	overviewHandler := wsbrowser.NewOverviewHandler(overviewUC, log)
-	srv := httpapi.NewServer(cfg.Addr, reg, sessionsUC, projectsUC, enrollUC, endpoint, termHandler, overviewHandler, authUC, secureCookies, log)
+	srv := httpapi.NewServer(cfg.Addr, reg, sessionsUC, projectsUC, enrollUC, endpoint, termHandler, overviewHandler, authUC, dashboardUC, secureCookies, log)
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

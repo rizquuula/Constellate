@@ -104,7 +104,7 @@ func newTopologyHub(t *testing.T) (ts *httptest.Server, enrollUC *enroll.UseCase
 	)
 
 	endpoint := wsagent.NewEndpoint(reg, links, noopEvents{}, nil, enrollUC, logger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, stubProjectService{}, enrollUC, endpoint, nil, nil, nil, false, logger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, stubSessionService{}, stubProjectService{}, enrollUC, endpoint, nil, nil, nil, nil, false, logger)
 
 	ts = httptest.NewServer(srv.Handler())
 	wsAgentURL = "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/agent"
