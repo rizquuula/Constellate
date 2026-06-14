@@ -25,6 +25,7 @@ web:
 		cd web && npm ci; \
 	fi
 	cd web && npm run build
+	@touch web/dist/.gitkeep   # vite emptyOutDir wipes it; keep the embed placeholder tracked
 
 build-hub:
 	go build $(LDFLAGS_HUB) -o bin/constellate-hub ./cmd/hub
