@@ -1,12 +1,22 @@
 # Constellate
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Made with React](https://img.shields.io/badge/UI-React%20%2B%20xterm.js-61DAFB?logo=react&logoColor=white)](web/)
+[![Status](https://img.shields.io/badge/status-feature--complete-success.svg)](#what-works-today)
+
 > A self-hosted control plane for a fleet of developer machines: one web UI, served from a public
 > hub, giving a single operator live terminal access to every machine they own — organized by
 > project, persistent across reconnects, with a mission-control overview of every running terminal at
 > a glance.
 
-**Status:** all roadmap features complete · **Module:** `github.com/rizquuula/Constellate` ·
-**Go:** 1.25+
+Constellate collapses the two axes you juggle today — one terminal tab per project, one per SSH
+session into each machine — into **a single browser tab**. Pick a machine or a project, get a live
+shell; see every running terminal on one overview; reconnect from any device without losing in-flight
+work. It is a **single-operator** tool for **machines you already own** — not a multi-tenant PaaS, not
+an environment provisioner, not a web IDE.
+
+**Module:** `github.com/rizquuula/Constellate` · **Go:** 1.25+ · **License:** MIT
 
 See [`DESIGN.md`](DESIGN.md) for the canonical architecture and the full roadmap.
 
@@ -35,12 +45,32 @@ project, and auth layers on top:
 - **Auth + TLS**: agents enroll with an **Ed25519 keypair** (the hub stores only the public key); the
   operator logs in with **TOTP + recovery codes + WebAuthn passkeys**; all `/api/*` and `/ws/*` routes
   are gated by a session cookie; the hub serves HTTPS directly or behind Caddy.
-
-- A **React + xterm.js** app (embedded in the hub binary) serves all of the above.
+- A **React + xterm.js** app (embedded in the hub binary) serves all of the above as one web UI.
 
 > **Security note:** the hub is a remote-code-execution gateway to every enrolled machine. It is built
 > to face the public internet — over HTTPS, behind operator auth — but treat the deployment
 > accordingly. See [`DESIGN.md`](DESIGN.md) §10 for the threat model.
+
+---
+
+## Architecture at a glance
+
+```
+   Browser ──HTTPS/WSS──►  HUB  ◄──one TLS WebSocket per agent (outbound dial-home, yamux-muxed)──┐
+   overview · terminal     (public VPS)                                                           │
+   · dashboard             • serves the React app + REST/WS                          ┌────────────┴───────────┐
+                           • brokers browser ↔ agent ↔ PTY                        Machine 1   Machine 2  …  Machine N
+                           • SQLite: machines·projects·sessions·audit              AGENT       AGENT          AGENT
+                           • holds NO shells itself                                 ├ PTYs      ├ PTYs         ├ PTYs
+                                                                                    └ vt        └ vt           └ vt
+```
+
+**Agents dial home** (outbound only) — the hub never connects into a machine, so dev boxes need zero
+inbound ports and work behind NAT. Each agent holds one TLS WebSocket carrying many [yamux](https://github.com/hashicorp/yamux)
+streams (control, per-session data, snapshots). The hub is a pure control plane and relay; PTYs live
+on the agents. The codebase is **two hexagons in one Go module** (`internal/hub`, `internal/agent`),
+sharing only `internal/transport` (wire protocol) and `internal/platform`. See
+[`DESIGN.md`](DESIGN.md) §4–§12 for the full design.
 
 ---
 
@@ -121,3 +151,29 @@ overview grid, and dashboard. Accuracy improves with optional OSC 133 prompt mar
 Two bounded contexts in one module, each its own hexagon (`internal/hub`, `internal/agent`), sharing
 only `internal/transport` (the wire protocol) and `internal/platform` (logging, ids, config, version).
 See `DESIGN.md` §11–§12 for the full layering and folder tree.
+
+## Built with
+
+[Go](https://go.dev) · [coder/websocket](https://github.com/coder/websocket) ·
+[hashicorp/yamux](https://github.com/hashicorp/yamux) · [creack/pty](https://github.com/creack/pty) ·
+[modernc.org/sqlite](https://modernc.org/sqlite) (pure-Go, `CGO_ENABLED=0`) ·
+[go-webauthn](https://github.com/go-webauthn/webauthn) · [pquerna/otp](https://github.com/pquerna/otp) ·
+[React](https://react.dev) + [xterm.js](https://xtermjs.org). The VT/ANSI emulator is an in-repo,
+dependency-free pure-Go implementation.
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a non-trivial PR, please read
+[`DESIGN.md`](DESIGN.md) — it is the canonical architecture — and keep changes within the hexagonal
+layering it describes. A few house rules:
+
+- **Pure Go, static binaries.** Keep `CGO_ENABLED=0`; don't add cgo dependencies.
+- **Run the gates locally:** `make lint` and `make test` should pass before you push; the heavier
+  `make test-e2e` / `make test-docker` tiers are worth running for changes to the transport, agent, or
+  browser flow.
+- **Match the surrounding style** and keep the two bounded contexts (`internal/hub`,
+  `internal/agent`) from importing each other.
+
+## License
+
+Released under the [MIT License](LICENSE). © 2026 M Razif Rizqullah.
