@@ -14,7 +14,7 @@ LDFLAGS_AGENT := -ldflags "-X $(VERSION_PKG).Version=$(AGENT_VERSION) \
 	-X $(VERSION_PKG).Commit=$(COMMIT) \
 	-X $(VERSION_PKG).BuildTime=$(BUILDTIME)"
 
-.PHONY: build build-hub build-agent web test test-docker test-e2e lint image-hub
+.PHONY: build build-hub build-agent web test test-web test-docker test-e2e lint image-hub
 
 build: web build-hub build-agent
 
@@ -35,6 +35,9 @@ build-agent:
 
 test:
 	go test ./...
+
+test-web:
+	cd web && npm run test:run
 
 test-docker:
 	./test/docker/run.sh
