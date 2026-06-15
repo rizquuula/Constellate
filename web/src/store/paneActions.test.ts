@@ -209,3 +209,42 @@ describe('store.assignSessionFromSidebar', () => {
     expect((useStore.getState().paneRoot as LeafPane).sessionId).toBe('ses-new')
   })
 })
+
+// ── diveToSession (Overview click-to-dive — focus existing or fill) ───────────
+
+describe('store.diveToSession', () => {
+  beforeEach(resetStore)
+
+  it('focuses the existing pane when the session is already open (layout unchanged)', () => {
+    // Two-pane split: A holds ses-open, B is empty and focused.
+    const leaf = makeLeaf('ses-open')
+    useStore.setState({ paneRoot: leaf, focusedPaneId: leaf.id })
+    useStore.getState().splitPane(leaf.id, 'horizontal')
+    const root1 = useStore.getState().paneRoot as SplitPane
+    const laId = root1.children[0].id // still holds ses-open
+    const lbId = root1.children[1].id // empty, currently focused
+    useStore.setState({ focusedPaneId: lbId })
+    const before = useStore.getState().paneRoot
+
+    useStore.getState().diveToSession('ses-open')
+
+    // Layout untouched; focus moves to the pane already showing the session.
+    expect(useStore.getState().paneRoot).toBe(before)
+    expect(useStore.getState().focusedPaneId).toBe(laId)
+  })
+
+  it('loads into the focused pane when the session is not open anywhere', () => {
+    const leaf = makeLeaf(null)
+    useStore.setState({ paneRoot: leaf, focusedPaneId: leaf.id })
+    useStore.getState().splitPane(leaf.id, 'horizontal')
+    const root1 = useStore.getState().paneRoot as SplitPane
+    const lbId = root1.children[1].id
+    useStore.setState({ focusedPaneId: lbId })
+
+    useStore.getState().diveToSession('ses-fresh')
+
+    const root2 = useStore.getState().paneRoot as SplitPane
+    expect((root2.children[1] as LeafPane).sessionId).toBe('ses-fresh')
+    expect(useStore.getState().focusedPaneId).toBe(lbId)
+  })
+})

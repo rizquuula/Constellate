@@ -21,6 +21,7 @@ import {
   assignSession,
   clearSession,
   collectSessionIds,
+  findLeafBySession,
   splitPaneWithSession as treeSplitPaneWithSession,
 } from '../features/terminal/paneTree'
 
@@ -60,6 +61,7 @@ interface Store {
   closePane: (paneId: string) => void
   assignSessionToPane: (paneId: string, sessionId: string) => void
   assignSessionFromSidebar: (paneId: string, sessionId: string) => void
+  diveToSession: (sessionId: string) => void
   splitPaneWithSession: (paneId: string, edge: 'top' | 'bottom' | 'left' | 'right', sessionId: string) => void
   openSessionInPane: (
     paneId: string,
@@ -177,6 +179,20 @@ export const useStore = create<Store>((set, get) => ({
     )
     if (hasLiveTerminal) return
     set({ paneRoot: assignSession(paneRoot, paneId, sessionId), focusedPaneId: paneId })
+  },
+
+  // diveToSession is the Overview click-to-dive path: open the selected window
+  // as the active pane. If it is already bound to a pane, just focus that pane;
+  // otherwise load it into the currently focused pane. The split layout is
+  // preserved either way (no collapse to a single pane).
+  diveToSession: (sessionId) => {
+    const { paneRoot, focusedPaneId } = get()
+    const existing = findLeafBySession(paneRoot, sessionId)
+    if (existing) {
+      set({ focusedPaneId: existing.id })
+      return
+    }
+    set({ paneRoot: assignSession(paneRoot, focusedPaneId, sessionId), focusedPaneId })
   },
 
   splitPaneWithSession: (paneId, edge, sessionId) => {

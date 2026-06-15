@@ -6,8 +6,7 @@ import { SessionTile } from './SessionTile'
 export function OverviewGrid() {
   const sessions = useStore((s) => s.sessions)
   const machines = useStore((s) => s.machines)
-  const focusedPaneId = useStore((s) => s.focusedPaneId)
-  const assignSessionToPane = useStore((s) => s.assignSessionToPane)
+  const diveToSession = useStore((s) => s.diveToSession)
   const setViewMode = useStore((s) => s.setViewMode)
 
   const { snapshots, status } = useSnapshots()
@@ -18,9 +17,9 @@ export function OverviewGrid() {
   const handleDive = useCallback(
     (sessionId: string) => {
       setViewMode('workspace')
-      assignSessionToPane(focusedPaneId, sessionId)
+      diveToSession(sessionId)
     },
-    [setViewMode, assignSessionToPane, focusedPaneId],
+    [setViewMode, diveToSession],
   )
 
   // Show running sessions first, then exited/lost greyed out

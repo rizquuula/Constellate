@@ -188,3 +188,13 @@ export function collectSessionIds(root: PaneNode): string[] {
   if (root.kind === 'leaf') return root.sessionId ? [root.sessionId] : []
   return [...collectSessionIds(root.children[0]), ...collectSessionIds(root.children[1])]
 }
+
+// findLeafBySession returns the leaf currently bound to sessionId, or null.
+// (Occupancy is single-pane, so there is at most one such leaf.)
+export function findLeafBySession(root: PaneNode, sessionId: string): LeafPane | null {
+  if (root.kind === 'leaf') return root.sessionId === sessionId ? root : null
+  return (
+    findLeafBySession(root.children[0], sessionId) ??
+    findLeafBySession(root.children[1], sessionId)
+  )
+}
