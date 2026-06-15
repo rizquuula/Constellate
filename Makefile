@@ -14,9 +14,15 @@ LDFLAGS_AGENT := -ldflags "-X $(VERSION_PKG).Version=$(AGENT_VERSION) \
 	-X $(VERSION_PKG).Commit=$(COMMIT) \
 	-X $(VERSION_PKG).BuildTime=$(BUILDTIME)"
 
+DEV_COMPOSE  := docker compose -f docker-compose.dev.yaml
+PROD_COMPOSE := docker compose -f deploy/compose.yaml
+
 .DEFAULT_GOAL := help
 
-.PHONY: help build build-hub build-agent web test test-web test-docker test-e2e lint image-hub
+.PHONY: help build build-hub build-agent web image-hub \
+	test test-web test-e2e test-docker lint \
+	dev-up dev-totp dev-logs dev-down dev-reset \
+	prod-up prod-down prod-logs
 
 ##@ General
 
@@ -26,7 +32,7 @@ help: ## Show this help
 		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
 	@echo ""
 
-##@ Build (prod)
+##@ Build
 
 build: web build-hub build-agent ## Build everything: web assets + both binaries
 
@@ -48,7 +54,7 @@ web: ## Build the embedded frontend into web/dist
 image-hub: ## Build the hub Docker image (tagged with the hub version)
 	docker build -f deploy/hub.Dockerfile -t constellate-hub:$(HUB_VERSION) .
 
-##@ Test & lint (dev)
+##@ Test & lint
 
 test: ## Run Go unit + integration + in-proc E2E tests
 	go test ./...
@@ -64,3 +70,31 @@ test-docker: ## Run dockerized E2E (hub + 2 agent containers)
 
 lint: ## Run golangci-lint (v2 config)
 	golangci-lint run
+
+##@ Dev stack (local docker: hub + 2 agents)
+
+dev-up: ## Build & start the local dev stack, bootstrap operator + enroll agents
+	./deploy/dev-up.sh
+
+dev-totp: ## Print a current TOTP login code for the dev operator
+	./deploy/dev-totp.sh
+
+dev-logs: ## Follow the dev hub logs
+	$(DEV_COMPOSE) logs -f hub
+
+dev-down: ## Stop the dev stack (keep volumes/data)
+	$(DEV_COMPOSE) down
+
+dev-reset: ## Stop the dev stack and wipe volumes (fresh operator next up)
+	$(DEV_COMPOSE) down -v
+
+##@ Prod stack (deploy/compose.yaml + Caddy TLS)
+
+prod-up: ## Start the production stack detached (needs CONSTELLATE_DOMAIN + DNS)
+	$(PROD_COMPOSE) up -d
+
+prod-down: ## Stop the production stack
+	$(PROD_COMPOSE) down
+
+prod-logs: ## Follow the production stack logs
+	$(PROD_COMPOSE) logs -f
