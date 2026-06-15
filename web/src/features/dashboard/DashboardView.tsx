@@ -168,7 +168,7 @@ function MachinesSection({ machines }: MachinesSectionProps) {
     return (
       <section className="dashboard-section" aria-labelledby="machines-heading">
         <h2 className="dashboard-section-heading" id="machines-heading">Machines</h2>
-        <p className="dashboard-empty-state">No machines enrolled yet.</p>
+        <p className="dashboard-empty-state"><span className="empty-glyph" aria-hidden="true">❯</span>No machines enrolled yet. Run <code>constellate-agent enroll</code> to connect one.</p>
       </section>
     )
   }
@@ -176,6 +176,7 @@ function MachinesSection({ machines }: MachinesSectionProps) {
   return (
     <section className="dashboard-section" aria-labelledby="machines-heading">
       <h2 className="dashboard-section-heading" id="machines-heading">Machines</h2>
+      <div className="dashboard-table-wrap">
       <table className="dashboard-table" role="table">
         <thead>
           <tr>
@@ -208,6 +209,7 @@ function MachinesSection({ machines }: MachinesSectionProps) {
           ))}
         </tbody>
       </table>
+      </div>
     </section>
   )
 }
@@ -224,7 +226,7 @@ function ProjectsSection({ projects, machines }: ProjectsSectionProps) {
     return (
       <section className="dashboard-section" aria-labelledby="projects-heading">
         <h2 className="dashboard-section-heading" id="projects-heading">Projects</h2>
-        <p className="dashboard-empty-state">No projects yet.</p>
+        <p className="dashboard-empty-state"><span className="empty-glyph" aria-hidden="true">❯</span>No projects yet.</p>
       </section>
     )
   }
@@ -278,7 +280,7 @@ function ActivitySection({ entries }: ActivitySectionProps) {
     return (
       <section className="dashboard-section" aria-labelledby="activity-heading">
         <h2 className="dashboard-section-heading" id="activity-heading">Recent activity</h2>
-        <p className="dashboard-empty-state">No recent activity.</p>
+        <p className="dashboard-empty-state"><span className="empty-glyph" aria-hidden="true">❯</span>No recent activity.</p>
       </section>
     )
   }

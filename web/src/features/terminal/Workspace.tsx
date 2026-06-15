@@ -1,6 +1,7 @@
+import { useState, useEffect } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { useStore } from '../../store'
-import type { PaneNode } from './paneTree'
+import type { PaneNode, LeafPane } from './paneTree'
 import { TerminalPane } from './TerminalPane'
 
 interface WorkspaceNodeProps {
@@ -28,7 +29,6 @@ function WorkspaceNode({ node }: WorkspaceNodeProps) {
   }
 
   // Split node: "horizontal" pane direction = side-by-side panels.
-  // react-resizable-panels v4: Group orientation "horizontal" = horizontal splits (side by side).
   const orientation = node.direction === 'horizontal' ? 'horizontal' : 'vertical'
 
   return (
@@ -44,8 +44,54 @@ function WorkspaceNode({ node }: WorkspaceNodeProps) {
   )
 }
 
+// On phones, side-by-side split panes are unusable; render only the focused
+// leaf full-screen. Session switching happens via the sidebar drawer.
+function useIsNarrow(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 600px)').matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 600px)')
+    const onChange = () => setNarrow(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return narrow
+}
+
+function findLeaf(node: PaneNode, id: string): LeafPane | null {
+  if (node.kind === 'leaf') return node.id === id ? node : null
+  return findLeaf(node.children[0], id) ?? findLeaf(node.children[1], id)
+}
+
+function firstLeaf(node: PaneNode): LeafPane {
+  return node.kind === 'leaf' ? node : firstLeaf(node.children[0])
+}
+
 export function Workspace() {
   const paneRoot = useStore((s) => s.paneRoot)
+  const focusedPaneId = useStore((s) => s.focusedPaneId)
+  const focusPane = useStore((s) => s.focusPane)
+  const doSplitPane = useStore((s) => s.splitPane)
+  const doClosePane = useStore((s) => s.closePane)
+  const isNarrow = useIsNarrow()
+
+  if (isNarrow) {
+    const leaf = findLeaf(paneRoot, focusedPaneId) ?? firstLeaf(paneRoot)
+    return (
+      <div className="workspace workspace-mobile">
+        <TerminalPane
+          paneId={leaf.id}
+          sessionId={leaf.sessionId}
+          focused
+          onFocus={() => focusPane(leaf.id)}
+          onSplitH={() => doSplitPane(leaf.id, 'horizontal')}
+          onSplitV={() => doSplitPane(leaf.id, 'vertical')}
+          onClose={() => doClosePane(leaf.id)}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="workspace">

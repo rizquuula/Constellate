@@ -176,7 +176,11 @@ export function TerminalPane({
         <PaneDropZones paneId={paneId} />
         {!sessionId && (
           <div className="pane-empty">
-            Drag a shell here
+            <div className="empty-state">
+              <span className="empty-state-icon" aria-hidden="true">❯</span>
+              <p className="empty-state-title">Empty pane</p>
+              <p className="empty-state-hint">Drag a session from the sidebar onto this pane.</p>
+            </div>
           </div>
         )}
         {sessionEnded && session && (

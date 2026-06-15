@@ -117,6 +117,8 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
     setActionError(null)
   }, [])
 
+  const setSidebarOpen = useStore((s) => s.setSidebarOpen)
+
   const handleRowKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -144,6 +146,7 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
       role="button"
       tabIndex={0}
       className={`session-item${isTargetPane ? ' session-active' : ''}${!isRunning ? ' session-dead' : ''}${isRunning ? ' session-draggable' : ''}`}
+      onClick={() => { if (isRunning) { onAssign(); setSidebarOpen(false) } }}
       onKeyDown={handleRowKeyDown}
       title={isRunning ? 'Drag onto a pane' : `Session ${session.status}`}
       aria-label={`Session ${label}, status ${session.status}${isRunning && session.activity && session.activity !== 'unknown' ? `, ${session.activity === 'awaiting-input' ? 'needs input' : session.activity}` : ''}${isRunning ? ' — drag onto a pane to place' : ''}`}
@@ -318,7 +321,7 @@ function ProjectSection({ project, sessions, focusedSessionId, onOpenShell, onAs
       {!collapsed && (
         <div className="project-sessions">
           {projectSessions.length === 0 && (
-            <p className="sidebar-empty">No sessions</p>
+            <p className="sidebar-empty"><span className="empty-glyph" aria-hidden="true">❯</span>No sessions</p>
           )}
           {projectSessions.map((s) => (
             <SessionRow
@@ -523,7 +526,11 @@ export function ProjectTree() {
       <div className="sidebar-section">
         <h2 className="sidebar-heading">Machines</h2>
         {machines.length === 0 && (
-          <p className="sidebar-empty">No machines enrolled</p>
+          <div className="empty-state empty-state-sidebar">
+            <span className="empty-state-icon" aria-hidden="true">❯</span>
+            <p className="empty-state-title">No machines enrolled</p>
+            <p className="empty-state-hint">Run <code>constellate-agent enroll</code> on a machine to connect it.</p>
+          </div>
         )}
         {machines.map((m) => (
           <MachineGroup key={m.id} machine={m} />

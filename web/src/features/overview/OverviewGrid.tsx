@@ -31,7 +31,14 @@ export function OverviewGrid() {
   if (ordered.length === 0) {
     return (
       <div className="overview-empty" role="region" aria-label="Session overview">
-        <span>No sessions yet. Open a shell from the sidebar.</span>
+        <div className="empty-state">
+          <span className="empty-state-icon" aria-hidden="true">❯</span>
+          <p className="empty-state-title">No active sessions</p>
+          <p className="empty-state-hint">Open a shell from the sidebar, or jump to the workspace to get started.</p>
+          <button className="empty-state-cta" onClick={() => setViewMode('workspace')}>
+            Go to Workspace
+          </button>
+        </div>
       </div>
     )
   }

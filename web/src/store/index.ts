@@ -26,6 +26,8 @@ interface Store {
   // ── view mode ─────────────────────────────────────────────────────────────
   viewMode: 'workspace' | 'overview' | 'dashboard'
   setViewMode: (mode: 'workspace' | 'overview' | 'dashboard') => void
+  sidebarOpen: boolean
+  setSidebarOpen: (open: boolean) => void
 
   // ── dashboard ─────────────────────────────────────────────────────────────
   dashboard: Dashboard | null
@@ -66,6 +68,8 @@ const initialLeaf = makeLeaf(null)
 export const useStore = create<Store>((set, get) => ({
   viewMode: 'workspace',
   setViewMode: (mode) => set({ viewMode: mode }),
+  sidebarOpen: false,
+  setSidebarOpen: (open) => set({ sidebarOpen: open }),
 
   dashboard: null,
   dashboardError: false,

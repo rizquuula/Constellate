@@ -46,6 +46,8 @@ export function App() {
   const setViewMode = useStore((s) => s.setViewMode)
   const assignSessionToPane = useStore((s) => s.assignSessionToPane)
   const doSplitPaneWithSession = useStore((s) => s.splitPaneWithSession)
+  const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const setSidebarOpen = useStore((s) => s.setSidebarOpen)
 
   const [authState, setAuthState] = useState<AuthState>('loading')
   const [activeDragLabel, setActiveDragLabel] = useState<string | null>(null)
@@ -162,6 +164,16 @@ export function App() {
   return (
     <div className="app-root">
       <header className="app-header">
+        {viewMode === 'workspace' && (
+          <button
+            className="menu-btn"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+            aria-expanded={sidebarOpen}
+          >
+            ☰
+          </button>
+        )}
         <span className="app-wordmark" aria-hidden="true">Constellate</span>
         <h1 className="sr-only">Constellate</h1>
         <div className="view-toggle" role="group" aria-label="View mode">
@@ -216,7 +228,10 @@ export function App() {
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="layout">
+          <div className={`layout${sidebarOpen ? ' drawer-open' : ''}`}>
+            {sidebarOpen && (
+              <div className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+            )}
             <ProjectTree />
             <TerminalView />
           </div>
