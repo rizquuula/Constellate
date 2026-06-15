@@ -109,6 +109,25 @@ func (u *UseCase) Close(ctx context.Context, id string) error {
 	return nil
 }
 
+// Delete permanently removes a session record. Only non-running sessions
+// (exited/lost) may be deleted: a running session is refused with
+// ErrSessionRunning — close it first. Returns session.ErrNotFound if no
+// session with the given id exists.
+func (u *UseCase) Delete(ctx context.Context, id string) error {
+	s, err := u.store.ByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if s.Status() == session.StatusRunning {
+		return ErrSessionRunning
+	}
+	if err := u.store.Delete(ctx, id); err != nil {
+		return err
+	}
+	_ = u.audit.Record(ctx, audit.ActionDelete, s.MachineID(), id, "")
+	return nil
+}
+
 // MarkExited records that a session has exited. Satisfies wsagent.SessionEvents.
 func (u *UseCase) MarkExited(ctx context.Context, id string, exitCode int) error {
 	return u.store.SetExited(ctx, id, exitCode, u.clock.Now())

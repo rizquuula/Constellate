@@ -47,6 +47,7 @@ func (stubSessionService) ListByMachine(_ context.Context, _ string) ([]session.
 	return []session.Session{}, nil
 }
 func (stubSessionService) Close(_ context.Context, _ string) error     { return nil }
+func (stubSessionService) Delete(_ context.Context, _ string) error    { return nil }
 func (stubSessionService) Rename(_ context.Context, _, _ string) error { return nil }
 
 // stubProjectService satisfies httpapi.ProjectService for tests that don't exercise projects.

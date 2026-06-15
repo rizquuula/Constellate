@@ -11,6 +11,7 @@ const (
 	ActionAttach Action = "attach"
 	ActionOpen   Action = "open"
 	ActionClose  Action = "close"
+	ActionDelete Action = "delete"
 	ActionRevoke Action = "revoke"
 )
 

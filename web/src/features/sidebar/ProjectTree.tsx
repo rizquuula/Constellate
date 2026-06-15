@@ -9,6 +9,31 @@ import type { SessionDragData } from '../terminal/dnd'
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
+// TrashIcon is a small monochrome trash glyph. It inherits `currentColor` so it
+// follows the button's text color (and the red delete-hover) like the other
+// unicode-glyph action buttons.
+function TrashIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </svg>
+  )
+}
+
 interface SessionRowProps {
   session: Session
   isTargetPane: boolean
@@ -18,23 +43,27 @@ interface SessionRowProps {
 function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
   const renameSession = useStore((s) => s.renameSession)
   const closeSession = useStore((s) => s.closeSession)
+  const deleteSession = useStore((s) => s.deleteSession)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
-  const [confirmClose, setConfirmClose] = useState(false)
-  const [closeError, setCloseError] = useState<string | null>(null)
+  const [confirmAction, setConfirmAction] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isRunning = session.status === 'running'
+  // A running session can be closed (signals the agent); an already-closed
+  // (exited/lost) one can only be deleted — closing it again is meaningless.
+  const actionVerb = isRunning ? 'close' : 'delete'
 
   // Auto-cancel confirm after 4 seconds
   useEffect(() => {
-    if (confirmClose) {
-      confirmTimerRef.current = setTimeout(() => setConfirmClose(false), 4000)
+    if (confirmAction) {
+      confirmTimerRef.current = setTimeout(() => setConfirmAction(false), 4000)
     }
     return () => {
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
     }
-  }, [confirmClose])
+  }, [confirmAction])
 
   const startEdit = useCallback(
     (e: React.MouseEvent) => {
@@ -61,35 +90,31 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
     }
   }, [draft, renameSession, session.id])
 
-  const handleCloseClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      if (!confirmClose) {
-        setConfirmClose(true)
-        return
-      }
-    },
-    [confirmClose],
-  )
+  const handleActionClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setConfirmAction(true)
+  }, [])
 
-  const handleConfirmClose = useCallback(
+  const handleConfirmAction = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation()
-      setConfirmClose(false)
-      setCloseError(null)
+      setConfirmAction(false)
+      setActionError(null)
       try {
-        await closeSession(session.id)
+        if (isRunning) await closeSession(session.id)
+        else await deleteSession(session.id)
       } catch (err) {
-        setCloseError(err instanceof Error ? err.message : 'Close failed')
+        const fallback = isRunning ? 'Close failed' : 'Delete failed'
+        setActionError(err instanceof Error ? err.message : fallback)
       }
     },
-    [closeSession, session.id],
+    [isRunning, closeSession, deleteSession, session.id],
   )
 
-  const handleCancelClose = useCallback((e: React.MouseEvent) => {
+  const handleCancelAction = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    setConfirmClose(false)
-    setCloseError(null)
+    setConfirmAction(false)
+    setActionError(null)
   }, [])
 
   const handleRowKeyDown = useCallback(
@@ -148,25 +173,25 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
         <span className="session-label" title={label}>{label}</span>
       )}
       {isRunning && <ActivityBadge activity={session.activity} compact />}
-      {closeError && !confirmClose && (
-        <span className="rename-error" role="alert" aria-live="assertive">{closeError}</span>
+      {actionError && !confirmAction && (
+        <span className="rename-error" role="alert" aria-live="assertive">{actionError}</span>
       )}
-      {confirmClose ? (
+      {confirmAction ? (
         <div className="session-confirm-close" onClick={(e) => e.stopPropagation()}>
-          <span className="session-confirm-label">Close?</span>
+          <span className="session-confirm-label">{isRunning ? 'Close?' : 'Delete?'}</span>
           <button
             className="session-confirm-yes"
-            title="Confirm close"
-            aria-label="Confirm close session"
-            onClick={handleConfirmClose}
+            title={`Confirm ${actionVerb}`}
+            aria-label={`Confirm ${actionVerb} session`}
+            onClick={handleConfirmAction}
           >
             ✓
           </button>
           <button
             className="session-confirm-no"
             title="Cancel"
-            aria-label="Cancel close"
-            onClick={handleCancelClose}
+            aria-label={`Cancel ${actionVerb}`}
+            onClick={handleCancelAction}
           >
             ✕
           </button>
@@ -183,14 +208,25 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
               ✎
             </button>
           )}
-          <button
-            className="session-action-btn session-action-close"
-            title="Close session"
-            aria-label="Close session"
-            onClick={handleCloseClick}
-          >
-            ✕
-          </button>
+          {isRunning ? (
+            <button
+              className="session-action-btn session-action-close"
+              title="Close session"
+              aria-label="Close session"
+              onClick={handleActionClick}
+            >
+              ✕
+            </button>
+          ) : (
+            <button
+              className="session-action-btn session-action-delete"
+              title="Delete session"
+              aria-label="Delete session"
+              onClick={handleActionClick}
+            >
+              <TrashIcon />
+            </button>
+          )}
         </div>
       )}
     </div>

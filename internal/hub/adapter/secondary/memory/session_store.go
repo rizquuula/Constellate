@@ -112,6 +112,19 @@ func (s *SessionStore) SetTitle(_ context.Context, id, title string) error {
 	return nil
 }
 
+// Delete permanently removes a session record. Returns session.ErrNotFound
+// (wrapped) if no session with the given id exists.
+func (s *SessionStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.data[id]; !ok {
+		return fmt.Errorf("memory: delete %q: %w", id, session.ErrNotFound)
+	}
+	delete(s.data, id)
+	return nil
+}
+
 // SetActivity updates the session's activity. When lastActiveAt > 0,
 // last_active_at is also updated. Returns session.ErrNotFound (wrapped) if the
 // session does not exist.

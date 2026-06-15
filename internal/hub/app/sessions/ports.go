@@ -17,6 +17,7 @@ type SessionStore interface {
 	MarkRunningLost(ctx context.Context, machineID string, ts int64) error
 	SetTitle(ctx context.Context, id, title string) error
 	SetActivity(ctx context.Context, id, activity string, lastActiveAt int64) error
+	Delete(ctx context.Context, id string) error
 }
 
 // AgentGateway is the outbound port for controlling agent PTY sessions.

@@ -60,6 +60,7 @@ func (s stubSessionSvcMW) ListByMachine(_ context.Context, _ string) ([]session.
 	return nil, nil
 }
 func (s stubSessionSvcMW) Close(_ context.Context, _ string) error      { return nil }
+func (s stubSessionSvcMW) Delete(_ context.Context, _ string) error     { return nil }
 func (s stubSessionSvcMW) Rename(_ context.Context, _, _ string) error  { return nil }
 
 // stubProjectSvcMW satisfies httpapi.ProjectService.

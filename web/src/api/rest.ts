@@ -77,6 +77,12 @@ export function closeSession(id: string): Promise<void> {
   return request<void>('DELETE', `/api/sessions/${id}`)
 }
 
+// deleteSession permanently removes an already-closed (exited/lost) session
+// record. The hub refuses (409) if the session is still running — close it first.
+export function deleteSession(id: string): Promise<void> {
+  return request<void>('DELETE', `/api/sessions/${id}?purge=1`)
+}
+
 export function getDashboard(): Promise<Dashboard> {
   return request<Dashboard>('GET', '/api/dashboard')
 }

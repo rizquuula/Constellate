@@ -8,6 +8,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	appauth "github.com/rizquuula/Constellate/internal/hub/app/auth"
 	"github.com/rizquuula/Constellate/internal/hub/app/enroll"
+	appsessions "github.com/rizquuula/Constellate/internal/hub/app/sessions"
 	"github.com/rizquuula/Constellate/internal/hub/domain/machine"
 	"github.com/rizquuula/Constellate/internal/hub/domain/project"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
@@ -38,6 +39,9 @@ func statusFor(err error) int {
 	}
 	if errors.Is(err, session.ErrNotFound) {
 		return http.StatusNotFound
+	}
+	if errors.Is(err, appsessions.ErrSessionRunning) {
+		return http.StatusConflict
 	}
 	if errors.Is(err, project.ErrNotFound) {
 		return http.StatusNotFound

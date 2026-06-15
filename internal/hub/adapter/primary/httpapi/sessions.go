@@ -19,6 +19,7 @@ type SessionService interface {
 	List(ctx context.Context) ([]session.Session, error)
 	ListByMachine(ctx context.Context, machineID string) ([]session.Session, error)
 	Close(ctx context.Context, id string) error
+	Delete(ctx context.Context, id string) error
 	Rename(ctx context.Context, id, title string) error
 }
 
@@ -100,6 +101,16 @@ func (s *Server) handleListSessionsByMachine(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleCloseSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// ?purge permanently deletes an already-closed (exited/lost) session record.
+	// Without it, DELETE closes a running session (signals the agent to exit).
+	if r.URL.Query().Has("purge") {
+		if err := s.sessions.Delete(r.Context(), id); err != nil {
+			writeError(w, statusFor(err), "delete_failed", err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err := s.sessions.Close(r.Context(), id); err != nil {
 		writeError(w, statusFor(err), "close_failed", err.Error())
 		return

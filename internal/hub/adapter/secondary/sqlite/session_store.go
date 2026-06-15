@@ -176,6 +176,23 @@ func (s *SessionStore) SetActivity(ctx context.Context, id, activity string, las
 	return nil
 }
 
+// Delete permanently removes a session record. Returns session.ErrNotFound
+// (wrapped) if no row matches.
+func (s *SessionStore) Delete(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete session %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: delete session %q: %w", id, session.ErrNotFound)
+	}
+	return nil
+}
+
 func collectSessions(rows *sql.Rows) ([]session.Session, error) {
 	var out []session.Session
 	for rows.Next() {

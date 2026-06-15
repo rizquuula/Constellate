@@ -113,6 +113,14 @@ func (s *fakeSessionStore) SetActivity(_ context.Context, id, activity string, l
 	return nil
 }
 
+func (s *fakeSessionStore) Delete(_ context.Context, id string) error {
+	if _, ok := s.data[id]; !ok {
+		return session.ErrNotFound
+	}
+	delete(s.data, id)
+	return nil
+}
+
 type fakeGateway struct {
 	openErr    error
 	closeCalls []string
@@ -477,6 +485,70 @@ func TestOpen_AuditsOpenEvent(t *testing.T) {
 	}
 	if sink.calls[0].sessionID != s.ID() {
 		t.Errorf("audit sessionID: got %q, want %q", sink.calls[0].sessionID, s.ID())
+	}
+}
+
+func TestDelete_RemovesExitedAndAudits(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	sink := &fakeAuditSink{}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), sink)
+	ctx := context.Background()
+
+	// Seed an already-exited session.
+	id := "exited-session"
+	es := session.New(id, "m1", "", "", "", 1000)
+	es.SetExited(0, 1000)
+	store.data[id] = es
+
+	if err := uc.Delete(ctx, id); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := store.ByID(ctx, id); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("session should be gone after Delete; got %v", err)
+	}
+	if gw.closeCalls != nil {
+		t.Errorf("Delete must not signal the agent; got close calls %v", gw.closeCalls)
+	}
+	if len(sink.calls) != 1 || sink.calls[0].action != audit.ActionDelete {
+		t.Errorf("audit after Delete: got %v, want one delete event", sink.calls)
+	}
+	if len(sink.calls) == 1 && sink.calls[0].sessionID != id {
+		t.Errorf("audit sessionID: got %q, want %q", sink.calls[0].sessionID, id)
+	}
+}
+
+func TestDelete_RunningRefused(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if err := uc.Delete(ctx, s.ID()); !errors.Is(err, sessions.ErrSessionRunning) {
+		t.Errorf("Delete running: got %v, want ErrSessionRunning", err)
+	}
+	// Record must survive a refused delete.
+	if _, err := store.ByID(ctx, s.ID()); err != nil {
+		t.Errorf("running session must remain after refused delete; got %v", err)
+	}
+}
+
+func TestDelete_NotFound(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+
+	if err := uc.Delete(context.Background(), "no-such-id"); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("Delete missing: got %v, want session.ErrNotFound", err)
 	}
 }
 

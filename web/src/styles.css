@@ -340,7 +340,8 @@ body {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
-.session-action-close:hover {
+.session-action-close:hover,
+.session-action-delete:hover {
   color: #e06060;
 }
 

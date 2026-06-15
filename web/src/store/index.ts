@@ -8,6 +8,7 @@ import {
   createProject as apiCreateProject,
   renameSession as apiRenameSession,
   closeSession as apiCloseSession,
+  deleteSession as apiDeleteSession,
   getDashboard,
 } from '../api/rest'
 import {
@@ -17,6 +18,7 @@ import {
   splitPane,
   closePane,
   assignSession,
+  clearSession,
   splitPaneWithSession as treeSplitPaneWithSession,
 } from '../features/terminal/paneTree'
 
@@ -42,6 +44,7 @@ interface Store {
   createProject: (input: { machineID: string; name: string; path: string; color?: string }) => Promise<Project>
   renameSession: (id: string, title: string) => Promise<void>
   closeSession: (id: string) => Promise<void>
+  deleteSession: (id: string) => Promise<void>
 
   // ── workspace (pane tree) ─────────────────────────────────────────────────
   paneRoot: PaneNode
@@ -115,6 +118,15 @@ export const useStore = create<Store>((set, get) => ({
     // would race and often read a stale "running". The periodic poll reconciles.
     set((s) => ({
       sessions: s.sessions.map((x) => (x.id === id ? { ...x, status: 'exited' } : x)),
+    }))
+  },
+
+  deleteSession: async (id) => {
+    await apiDeleteSession(id)
+    // Drop the record from the list and detach it from any pane still showing it.
+    set((s) => ({
+      sessions: s.sessions.filter((x) => x.id !== id),
+      paneRoot: clearSession(s.paneRoot, id),
     }))
   },
 
