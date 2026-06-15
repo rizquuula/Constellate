@@ -44,6 +44,19 @@ func (vtScreenFactory) NewScreen(cols, rows int) session.Screen { return vt.New(
 func main() {
 	args := os.Args[1:]
 
+	// Top-level version/help flags, before subcommand dispatch (a leading "-"
+	// would otherwise fall through to the default subcommand's flag parser).
+	if len(args) > 0 {
+		switch args[0] {
+		case "-v", "--v", "-version", "--version":
+			cmdVersion()
+			return
+		case "-h", "--h", "-help", "--help":
+			usage()
+			return
+		}
+	}
+
 	// Determine subcommand; default is "connect".
 	sub := "connect"
 	if len(args) > 0 && len(args[0]) > 0 && args[0][0] != '-' {
@@ -64,8 +77,29 @@ func main() {
 		cmdReset(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", sub)
+		usage()
 		os.Exit(1)
 	}
+}
+
+func usage() {
+	fmt.Println(`constellate-agent — dials home to a Constellate hub and owns local PTYs.
+
+Usage:
+  constellate-agent [command] [flags]
+
+Commands:
+  connect   Connect to the hub and serve sessions (default)
+  enroll    Enroll this machine with the hub (--hub, --token)
+  status    Show local enrollment status
+  reset     Remove local enrollment (id + credential)
+  version   Print version and protocol info
+
+Flags:
+  -v, --version   Print version and protocol info
+  -h, --help      Show this help
+
+Run "constellate-agent <command> -h" for command-specific flags.`)
 }
 
 func cmdVersion() {

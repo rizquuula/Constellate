@@ -58,6 +58,19 @@ var _ httpapi.DashboardService = (*dashboard.UseCase)(nil)
 func main() {
 	args := os.Args[1:]
 
+	// Top-level version/help flags, before subcommand dispatch (a leading "-"
+	// would otherwise fall through to the default subcommand's flag parser).
+	if len(args) > 0 {
+		switch args[0] {
+		case "-v", "--v", "-version", "--version":
+			cmdVersion()
+			return
+		case "-h", "--h", "-help", "--help":
+			usage()
+			return
+		}
+	}
+
 	// Determine subcommand.
 	sub := "serve"
 	if len(args) > 0 && len(args[0]) > 0 && args[0][0] != '-' {
@@ -82,8 +95,31 @@ func main() {
 		cmdOperator(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", sub)
+		usage()
 		os.Exit(1)
 	}
+}
+
+func usage() {
+	fmt.Println(`constellate-hub — brokers browser <-> agent connections and serves the control plane.
+
+Usage:
+  constellate-hub [command] [flags]
+
+Commands:
+  serve         Run the hub server (default)
+  migrate       Apply database migrations
+  enroll-token  Mint an agent enrollment token (--ttl)
+  machines      List enrolled machines
+  revoke        Revoke a machine by ID
+  operator add  Bootstrap an operator (TOTP + recovery codes)
+  version       Print version and protocol info
+
+Flags:
+  -v, --version   Print version and protocol info
+  -h, --help      Show this help
+
+Run "constellate-hub <command> -h" for command-specific flags.`)
 }
 
 func cmdVersion() {
