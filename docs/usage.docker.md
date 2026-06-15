@@ -34,6 +34,11 @@ open http://localhost:8080         # log in → pick an agent → "New shell"
 make ddocker-totp                  # print a fresh 6-digit TOTP code anytime
 ```
 
+`ddocker-up` already bootstrapped the operator and registered its TOTP secret, so in the dev stack
+you don't run `operator add` yourself — `ddocker-totp` just derives the current 6-digit code from
+that secret for you. For how the secret works and how to load it into a real authenticator app
+(prod), see [Set up the TOTP authenticator secret](#set-up-the-totp-authenticator-secret) below.
+
 The hub binds to `127.0.0.1:8080` with plain `http://` (no `CONSTELLATE_PUBLIC_URL`, so the session
 cookie is not marked `Secure` and login works without TLS). It is **not** for the public internet.
 
@@ -82,6 +87,35 @@ docker compose -f deploy/compose.yaml exec hub constellate-hub operator add
 # 2. Mint a one-time enrollment token per agent machine
 docker compose -f deploy/compose.yaml exec hub constellate-hub enroll-token
 ```
+
+#### Set up the TOTP authenticator secret
+
+`operator add` prints a base32 **TOTP secret**, an `otpauth://` URI, and ten single-use **recovery
+codes**:
+
+```
+TOTP secret: JBSWY3DPEHPK3PXP
+Scan this URI in your authenticator app:
+otpauth://totp/Constellate:operator?secret=JBSWY3DPEHPK3PXP&issuer=Constellate
+
+Recovery codes (store these safely):
+  a1b2c-3d4e5
+  ...
+```
+
+The hub keeps this secret in its database (the `hub-data` volume) — there is no secret to put in
+compose env or a `.env` file. Load it into any standard TOTP app (Google Authenticator, 1Password,
+Aegis, Authy, …) either by **scanning a QR** rendered locally from the `otpauth://` URI
+(`qrencode -t ANSIUTF8 '<uri>'`) or by **typing the secret** with the default parameters: time-based,
+**SHA-1**, **6 digits**, **30-second** period. Keep the recovery codes safe — they are the only way
+back in if you lose the authenticator. `operator add` bootstraps the first operator only; it fails
+with `operator already exists` afterward.
+
+Then open `https://$CONSTELLATE_DOMAIN`, log in with the current 6-digit code (or a recovery code),
+and optionally register a WebAuthn passkey. The hub accepts the code for the current 30-second
+window ±1, so keep the **host clock correct** (NTP); codes are single-use and can't be replayed.
+For the full walkthrough and troubleshooting, see
+[`usage.binary.md` §3](usage.binary.md#3-create-an-operator-one-time-bootstrap).
 
 Copy each token to the target machine and enroll the agent there (host binary or the
 [`deploy/agent.Dockerfile`](../deploy/agent.Dockerfile) container):

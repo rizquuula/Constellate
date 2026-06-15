@@ -86,29 +86,67 @@ TOTP:
 ./bin/constellate-hub operator add --config configs/hub.yaml
 ```
 
-This prints a **TOTP secret**, an **`otpauth://` URI**, and a list of single-use **recovery codes**:
+This prints a **TOTP secret** (base32), an **`otpauth://` URI**, and ten single-use **recovery
+codes**:
 
 ```
 TOTP secret: JBSWY3DPEHPK3PXP
 Scan this URI in your authenticator app:
-otpauth://totp/Constellate:operator?secret=...&issuer=Constellate
+otpauth://totp/Constellate:operator?secret=JBSWY3DPEHPK3PXP&issuer=Constellate
 
 Recovery codes (store these safely):
-  a1b2-c3d4
+  a1b2c-3d4e5
   ...
 ```
 
-Scan the URI into an authenticator app (Google Authenticator, 1Password, Aegis, …) and **store the
-recovery codes somewhere safe** — they are the only way back in if you lose the authenticator.
+The hub stores this secret in its database; there is no separate secret to put in config or an env
+var. It is the **shared seed** your authenticator and the hub both use to derive the rotating
+6-digit code.
+
+#### Load the secret into an authenticator app
+
+Use any standard TOTP app — Google Authenticator, 1Password, Aegis, Authy, Bitwarden, etc. You have
+two ways to add it:
+
+1. **Scan a QR code (easiest).** The CLI prints the `otpauth://` URI as *text*, not as an image.
+   Turn it into a scannable QR with any local tool, e.g.:
+
+   ```bash
+   # paste the printed otpauth:// URI as the argument
+   qrencode -t ANSIUTF8 'otpauth://totp/Constellate:operator?secret=...&issuer=Constellate'
+   ```
+
+   Then scan it from your phone. (Generate the QR locally — never paste a live TOTP secret into an
+   online QR website.)
+
+2. **Type the secret by hand.** In the app choose *add account → enter setup key* and paste the
+   **TOTP secret** string. If the app asks for parameters, Constellate uses the standard TOTP
+   defaults, so leave them as-is: **time-based**, **SHA-1**, **6 digits**, **30-second** period.
+
+**Store the recovery codes somewhere safe** — each works once and they are the only way back in if
+you lose the authenticator.
 
 Optional flags: `--issuer` (default `Constellate`) and `--account` (default `operator`) customize
-how the entry is labelled in your authenticator.
+how the entry is labelled in your authenticator (it shows as `issuer:account`).
+
+> **One operator secret.** `operator add` bootstraps the *first* operator only; re-running it once
+> an operator exists fails with `operator already exists`. To start over you must reset the hub's
+> auth state (wipe the operator credentials in the DB). Treat the secret + recovery codes as your
+> root credentials.
 
 ### Log in
 
-Open the hub URL in a browser and log in with your **6-digit TOTP code** (or a recovery code). On
-success the hub sets the `constellate_session` cookie (HttpOnly, 24 h). Once logged in you can
-register a **WebAuthn passkey** for faster subsequent logins.
+Open the hub URL in a browser and log in with the current **6-digit code** from your authenticator
+(or a recovery code if you've lost it). Notes on verification:
+
+- The hub accepts the code for the current 30-second window plus one window on either side, so minor
+  clock skew is fine — but the **hub's clock must be roughly correct** (run NTP on the VPS) or codes
+  will never match.
+- Codes are **single-use**: once a code is accepted it can't be replayed, even within its 30-second
+  window. If login says the code was already used, wait for the next one.
+
+On success the hub sets the `constellate_session` cookie (HttpOnly, 24 h). Once logged in you can
+register a **WebAuthn passkey** for faster, phishing-resistant logins afterward.
 
 ---
 
