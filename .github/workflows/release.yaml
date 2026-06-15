@@ -149,7 +149,8 @@ jobs:
           if [ -n "$PREV" ]; then RANGE="${PREV}..${TAG}"; else RANGE="${TAG}"; fi
           echo "Changelog range: ${RANGE}"
 
-          LOG="$(git log --no-merges --pretty=format:'- %s' ${RANGE})"
+          # Subject as a bullet, body indented 2 spaces beneath it.
+          LOG="$(git log --no-merges --pretty=format:'- %s%n%w(0,2,2)%b' ${RANGE})"
           HUB_VERSION="$(cat cmd/hub/VERSION)"
           AGENT_VERSION="$(cat cmd/agent/VERSION)"
 
@@ -161,7 +162,11 @@ jobs:
           Write concise, user-facing notes in GitHub-flavored Markdown:
           a one-paragraph overview, then meaningful changes grouped under short
           headings (e.g. Features, Fixes, Internal). Omit pure CI/chore noise.
-          Do not invent changes. Output only the Markdown body, no preamble.
+          Do not invent changes. Do not use any emoji. Output only the Markdown
+          body, no preamble.
+
+          Each entry below is a commit subject (bulleted), with its commit body
+          indented beneath it when present. Use the bodies for detail and accuracy.
 
           Commits:
           ${LOG}
