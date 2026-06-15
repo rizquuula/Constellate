@@ -54,6 +54,13 @@ jobs:
           check-latest: true
           cache: true
 
+      # web/embed.go has `//go:embed all:dist`, which needs web/dist/ to exist
+      # at compile time. The frontend isn't built in this job, and Vite wipes
+      # dist/ (incl. the tracked .gitkeep) on every build — so ensure a
+      # placeholder exists here rather than depending on a fragile committed file.
+      - name: Ensure embed dir exists
+        run: mkdir -p web/dist && touch web/dist/.gitkeep
+
       - name: Build
         run: go build ./...
 
