@@ -6,6 +6,7 @@ import {
   listSessions,
   createSession,
   createProject as apiCreateProject,
+  deleteProject as apiDeleteProject,
   renameSession as apiRenameSession,
   closeSession as apiCloseSession,
   deleteSession as apiDeleteSession,
@@ -44,6 +45,7 @@ interface Store {
   refreshSessions: () => Promise<void>
 
   createProject: (input: { machineID: string; name: string; path: string; color?: string }) => Promise<Project>
+  deleteProject: (id: string) => Promise<void>
   renameSession: (id: string, title: string) => Promise<void>
   closeSession: (id: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
@@ -107,6 +109,11 @@ export const useStore = create<Store>((set, get) => ({
     const projects = await listProjects()
     set({ projects })
     return project
+  },
+
+  deleteProject: async (id) => {
+    await apiDeleteProject(id)
+    set((s) => ({ projects: s.projects.filter((p) => p.id !== id) }))
   },
 
   renameSession: async (id, title) => {

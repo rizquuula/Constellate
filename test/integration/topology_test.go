@@ -57,6 +57,7 @@ func (stubProjectService) Create(_ context.Context, _ projects.CreateInput) (pro
 	return project.Project{}, nil
 }
 func (stubProjectService) List(_ context.Context) ([]project.Project, error) { return nil, nil }
+func (stubProjectService) Delete(_ context.Context, _ string) error           { return nil }
 
 // enrollAgent mints a token, generates an Ed25519 keypair, enrolls it, and
 // returns the assigned machineID and the private key. The credential persists in

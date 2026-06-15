@@ -193,6 +193,19 @@ func (s *SessionStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// CountByProject returns the number of sessions that reference the given
+// project ID (regardless of status).
+func (s *SessionStore) CountByProject(ctx context.Context, projectID string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM sessions WHERE project_id = ?
+	`, projectID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: count sessions by project %q: %w", projectID, err)
+	}
+	return n, nil
+}
+
 func collectSessions(rows *sql.Rows) ([]session.Session, error) {
 	var out []session.Session
 	for rows.Next() {

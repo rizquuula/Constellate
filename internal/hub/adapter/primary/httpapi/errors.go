@@ -8,6 +8,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	appauth "github.com/rizquuula/Constellate/internal/hub/app/auth"
 	"github.com/rizquuula/Constellate/internal/hub/app/enroll"
+	appprojects "github.com/rizquuula/Constellate/internal/hub/app/projects"
 	appsessions "github.com/rizquuula/Constellate/internal/hub/app/sessions"
 	"github.com/rizquuula/Constellate/internal/hub/domain/machine"
 	"github.com/rizquuula/Constellate/internal/hub/domain/project"
@@ -50,6 +51,9 @@ func statusFor(err error) int {
 		return http.StatusBadRequest
 	}
 	if errors.Is(err, project.ErrDuplicatePath) {
+		return http.StatusConflict
+	}
+	if errors.Is(err, appprojects.ErrHasSessions) {
 		return http.StatusConflict
 	}
 	if errors.Is(err, agentlink.ErrAgentOffline) {

@@ -73,3 +73,16 @@ func (s *ProjectStore) ListByMachine(_ context.Context, machineID string) ([]pro
 	}
 	return out, nil
 }
+
+// Delete permanently removes a project record.
+// Returns project.ErrNotFound (wrapped) if not present.
+func (s *ProjectStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[id]; !ok {
+		return fmt.Errorf("memory: delete %q: %w", id, project.ErrNotFound)
+	}
+	delete(s.projects, id)
+	return nil
+}

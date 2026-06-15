@@ -63,6 +63,7 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.handleRenameSession)
 	mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
+	mux.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)
 	mux.HandleFunc("GET /api/dashboard", s.handleDashboard)
 	// POST /api/enroll is intentionally unauthenticated — bootstrap endpoint,
 	// protected only by the one-time token. Operator-auth middleware must allowlist this route.

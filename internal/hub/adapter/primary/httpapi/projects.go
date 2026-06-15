@@ -14,6 +14,7 @@ import (
 type ProjectService interface {
 	Create(ctx context.Context, in projects.CreateInput) (project.Project, error)
 	List(ctx context.Context) ([]project.Project, error)
+	Delete(ctx context.Context, id string) error
 }
 
 type createProjectRequest struct {
@@ -68,4 +69,13 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, projectToDTO(p))
+}
+
+func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.projects.Delete(r.Context(), id); err != nil {
+		writeError(w, statusFor(err), "delete_failed", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

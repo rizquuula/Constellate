@@ -65,7 +65,7 @@ func newInProcessHub(t *testing.T) (ts *httptest.Server, sessionsUC *sessions.Us
 	reg := registry.New(machineStore, links, registry.SystemClock{}, logger)
 	auditUC := auditapp.New(memory.NewAuditStore(), auditapp.SystemClock{}, logger)
 	sessionsUC = sessions.New(sessStore, gateway, sessions.SystemClock{}, id.New, logger, auditUC)
-	projectsUC := projects.New(projStore, projects.SystemClock{}, id.New, logger)
+	projectsUC := projects.New(projStore, sessStore, projects.SystemClock{}, id.New, logger)
 	attachUC := attach.New(sessStore, gateway, logger, auditUC)
 	overviewUC := overview.New(gateway, logger)
 	enrollUC = enroll.New(tokenStore, credStore, machineStore, auditUC, enroll.SystemClock{}, id.New, 15*time.Minute, logger)

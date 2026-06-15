@@ -70,6 +70,7 @@ func (s stubProjectSvcMW) Create(_ context.Context, _ projects.CreateInput) (pro
 	return project.Project{}, nil
 }
 func (s stubProjectSvcMW) List(_ context.Context) ([]project.Project, error) { return nil, nil }
+func (s stubProjectSvcMW) Delete(_ context.Context, _ string) error          { return nil }
 
 func buildMiddlewareTestServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()

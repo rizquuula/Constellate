@@ -5,7 +5,7 @@
 > organized by project, persistent across reconnects, with a mission-control overview of every
 > running terminal at a glance.
 
-**Status:** M5 complete (auth + audit hardening) · **Module:** `github.com/rizquuula/Constellate` · **Go:** 1.25+
+**Status:** M0–M7 complete + project delete (post-M7); full test matrix (unit/integration/in-proc E2E, `make test-e2e`, `make test-docker`) run and passing · **Module:** `github.com/rizquuula/Constellate` · **Go:** 1.25+
 
 ---
 
@@ -413,6 +413,7 @@ GET    /api/machines                     list machines + online status
 GET    /api/machines/{id}/sessions       sessions on a machine
 GET    /api/projects                     list projects
 POST   /api/projects                     create a project {machineID, name, path, color?}
+DELETE /api/projects/{id}                delete a project (409 if it still owns sessions)
 GET    /api/sessions                     all sessions (overview index)
 POST   /api/sessions                     open a session {machineID, projectID?, cwd, shell, cols, rows, title?}
 PATCH  /api/sessions/{id}                 rename a session {title}   (metadata only; no wire-protocol change)
@@ -884,7 +885,8 @@ acceptance check passes.
 - Many sessions per machine; create/rename/close; group by project; persist projects.
 - Sessions may be **project-less** (an "ungrouped" bucket per machine) — `projectID` is nullable.
   Rename is metadata-only (`PATCH /api/sessions/{id}`, no agent/PTY disruption). **No project
-  delete in M3** (close sessions individually; project deletion is deferred).
+  delete in M3** (close sessions individually; project deletion was deferred — see *Post-M7:
+  project delete* below).
 - **Terminal UI is a recursive split-pane workspace**: a binary split tree whose leaves are each a
   live terminal bound to one session, splittable horizontally/vertically, with a focused pane you can
   split or close. This collapses the project axis (sidebar tree) and the session axis (panes) into a
@@ -951,6 +953,20 @@ acceptance check passes.
   reduced-motion-safe) on sidebar rows, overview tiles, and the dashboard. The **opt-in shell hook**
   (OSC 133 bash/zsh snippets) is documented in [`docs/shell-integration.md`]; without it, activity
   falls back to output-timing + the screen-tail heuristic. Decisions folded into §6/§7.2/§18.
+
+### Post-M7 — project delete
+- Closes the M3 deferral. `DELETE /api/projects/{id}` (session-gated like the rest of `/api/*`)
+  removes a project. The use case **refuses with `409` (`projects.ErrHasSessions`)** when the
+  project still owns one or more sessions — they are **never orphaned or cascade-deleted**; the
+  operator reassigns or closes them first. This is the most conservative of the three options
+  (block / reparent-to-ungrouped / cascade) and keeps terminal history safe by default.
+- **Ports:** `ProjectStore.Delete(id)` (sqlite + memory) and a new consumer-side `SessionCounter`
+  SPI (`CountByProject`) satisfied by the existing session store — the project use case asks "does
+  anything still reference me?" without importing the session use case.
+- **Frontend:** sidebar project headers gained a trash button with an inline confirm (4 s
+  auto-cancel, mirroring `SessionRow`) and a 409-aware error message.
+- **Done when:** an empty project can be deleted from the sidebar; a project with live/closed
+  sessions is refused with a clear message until its sessions are moved or closed.
 
 ---
 

@@ -52,6 +52,12 @@ export function createProject(input: {
   return request<Project>('POST', '/api/projects', input)
 }
 
+// deleteProject removes a project. The hub refuses (409) if the project still
+// owns any sessions — reassign or delete those sessions first.
+export function deleteProject(id: string): Promise<void> {
+  return request<void>('DELETE', `/api/projects/${id}`)
+}
+
 export function createSession(input: {
   machineID: string
   projectID?: string

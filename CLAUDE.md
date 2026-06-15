@@ -78,10 +78,16 @@ M2 (persistent terminals): agent keeps a per-session **scrollback ring buffer** 
 attach**; session manager is broadcast-buffer + per-attach drain. Agent **process restart** → its
 `running` sessions marked `lost`, detected via a per-process `instanceID` in `Hello`.
 
-Next: all roadmap milestones (M0–M7) are complete. Remaining before public exposure: run the
-heavier test tiers in a real environment (`make test-e2e` single-machine Playwright + `make
-test-docker` multi-container) — these are code-complete but not run in the dev sandbox. Milestone
-roadmap in `DESIGN.md` §18.
+Post-M7: **project delete** added — `DELETE /api/projects/{id}` (session-gated) removes a project;
+the use case **refuses with 409** (`projects.ErrHasSessions`) if the project still owns any
+session, so sessions are never orphaned or cascade-deleted (reassign/close them first). Sidebar
+project headers gained a trash button with inline confirm + 409-aware error. Persistence ports
+grew `ProjectStore.Delete` and a `SessionCounter` (sessions-by-project) SPI.
+
+Next: all roadmap milestones (M0–M7) are complete **and the full test matrix has been run
+end-to-end and passes** — `make test` (unit + integration + in-proc E2E), `make test-e2e`
+(single-machine Playwright), and `make test-docker` (hub + 2 agent containers). Milestone roadmap
+in `DESIGN.md` §18.
 
 ## M1 conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is

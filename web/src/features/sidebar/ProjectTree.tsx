@@ -245,11 +245,39 @@ interface ProjectSectionProps {
 }
 
 function ProjectSection({ project, sessions, focusedSessionId, onOpenShell, onAssign }: ProjectSectionProps) {
+  const deleteProject = useStore((s) => s.deleteProject)
   const [collapsed, setCollapsed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirmCreateDir, setConfirmCreateDir] = useState(false)
   const [shellError, setShellError] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const projectSessions = sessions.filter((s) => s.projectID === project.id)
+
+  // Auto-cancel the delete confirmation after 4 seconds, matching SessionRow.
+  useEffect(() => {
+    if (confirmDelete) {
+      confirmTimerRef.current = setTimeout(() => setConfirmDelete(false), 4000)
+    }
+    return () => {
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+    }
+  }, [confirmDelete])
+
+  const handleConfirmDelete = useCallback(async () => {
+    setConfirmDelete(false)
+    setDeleteError(null)
+    try {
+      await deleteProject(project.id)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setDeleteError('Project still has sessions — move or close them first.')
+      } else {
+        setDeleteError(err instanceof Error ? err.message : 'Failed to delete project')
+      }
+    }
+  }, [deleteProject, project.id])
 
   const openShell = useCallback(
     async (createDir: boolean) => {
@@ -286,15 +314,51 @@ function ProjectSection({ project, sessions, focusedSessionId, onOpenShell, onAs
           {collapsed ? '▶' : '▼'}
         </button>
         <span className="project-name" title={project.path}>{project.name}</span>
-        <button
-          className="btn-shell"
-          title={`New shell in ${project.path}`}
-          onClick={() => openShell(false)}
-          disabled={busy}
-        >
-          {busy ? '…' : '＋'}
-        </button>
+        {confirmDelete ? (
+          <div className="session-confirm-close" onClick={(e) => e.stopPropagation()}>
+            <span className="session-confirm-label">Delete?</span>
+            <button
+              className="session-confirm-yes"
+              title="Confirm delete project"
+              aria-label={`Confirm delete project ${project.name}`}
+              onClick={handleConfirmDelete}
+            >
+              ✓
+            </button>
+            <button
+              className="session-confirm-no"
+              title="Cancel"
+              aria-label="Cancel delete project"
+              onClick={() => { setConfirmDelete(false); setDeleteError(null) }}
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <div className="session-actions">
+            <button
+              className="btn-shell"
+              title={`New shell in ${project.path}`}
+              onClick={() => openShell(false)}
+              disabled={busy}
+            >
+              {busy ? '…' : '＋'}
+            </button>
+            <button
+              className="session-action-btn session-action-delete"
+              title="Delete project"
+              aria-label={`Delete project ${project.name}`}
+              onClick={() => { setConfirmDelete(true); setDeleteError(null) }}
+            >
+              <TrashIcon />
+            </button>
+          </div>
+        )}
       </div>
+
+      {deleteError && (
+        <p className="inline-error" role="alert">{deleteError}</p>
+      )}
 
       {confirmCreateDir && (
         <div className="project-create-dir" role="alert">

@@ -11,6 +11,7 @@ vi.mock('../api/rest', () => ({
   listSessions: vi.fn(),
   createSession: vi.fn(),
   createProject: vi.fn(),
+  deleteProject: vi.fn(),
   renameSession: vi.fn(),
   closeSession: vi.fn(),
   getDashboard: vi.fn(),

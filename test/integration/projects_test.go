@@ -95,6 +95,26 @@ func TestProjectsLifecycle(t *testing.T) {
 		t.Errorf("rename non-existent session: got %d, want 404", renameResp.StatusCode)
 	}
 	t.Log("step 5: PATCH /api/sessions/{non-existent} → 404")
+
+	// --- Step 6: DELETE a session-free project → 204 ---
+	delResp := doDelete(t, ts.URL+"/api/projects/"+proj1.ID)
+	defer func() { _ = delResp.Body.Close() }()
+	if delResp.StatusCode != http.StatusNoContent {
+		b, _ := io.ReadAll(delResp.Body)
+		t.Errorf("DELETE /api/projects/{id}: got %d, want 204; body: %s", delResp.StatusCode, b)
+	}
+	if got := listProjects(t, ts.URL); len(got) != 0 {
+		t.Errorf("after delete: got %d projects, want 0", len(got))
+	}
+	t.Log("step 6: DELETE /api/projects/{id} → 204 and list is empty")
+
+	// --- Step 7: DELETE a non-existent project → 404 ---
+	missingResp := doDelete(t, ts.URL+"/api/projects/no-such-id")
+	defer func() { _ = missingResp.Body.Close() }()
+	if missingResp.StatusCode != http.StatusNotFound {
+		t.Errorf("DELETE non-existent project: got %d, want 404", missingResp.StatusCode)
+	}
+	t.Log("step 7: DELETE /api/projects/{non-existent} → 404")
 }
 
 // --- helpers ---
@@ -147,6 +167,19 @@ func doPost(t *testing.T, url, body string) *http.Response {
 	resp, err := http.Post(url, "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
+	}
+	return resp
+}
+
+func doDelete(t *testing.T, url string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		t.Fatalf("DELETE %s new request: %v", url, err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE %s: %v", url, err)
 	}
 	return resp
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/memory"
 	"github.com/rizquuula/Constellate/internal/hub/app/projects"
 	"github.com/rizquuula/Constellate/internal/hub/domain/project"
+	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 )
 
 type fixedClock struct{ ts int64 }
@@ -32,7 +33,7 @@ func nextID() func() string {
 func TestCreate_Succeeds(t *testing.T) {
 	store := memory.NewProjectStore()
 	clk := &fixedClock{ts: 1000}
-	uc := projects.New(store, clk, nextID(), discardLogger())
+	uc := projects.New(store, memory.NewSessionStore(), clk, nextID(), discardLogger())
 
 	p, err := uc.Create(context.Background(), projects.CreateInput{
 		MachineID: "m1",
@@ -67,7 +68,7 @@ func TestCreate_DuplicatePath(t *testing.T) {
 		return "id-" + string(rune('0'+callCount))
 	}
 
-	uc := projects.New(store, clk, newID, discardLogger())
+	uc := projects.New(store, memory.NewSessionStore(), clk, newID, discardLogger())
 
 	_, err := uc.Create(context.Background(), projects.CreateInput{
 		MachineID: "m1",
@@ -97,7 +98,7 @@ func TestList(t *testing.T) {
 		callCount++
 		return "id-" + string(rune('0'+callCount))
 	}
-	uc := projects.New(store, clk, newID, discardLogger())
+	uc := projects.New(store, memory.NewSessionStore(), clk, newID, discardLogger())
 
 	_, err := uc.Create(context.Background(), projects.CreateInput{MachineID: "m1", Name: "p1", Path: "/a"})
 	if err != nil {
@@ -126,7 +127,7 @@ func TestListByMachine(t *testing.T) {
 		callCount++
 		return "id-" + string(rune('0'+callCount))
 	}
-	uc := projects.New(store, clk, newID, discardLogger())
+	uc := projects.New(store, memory.NewSessionStore(), clk, newID, discardLogger())
 
 	_, err := uc.Create(context.Background(), projects.CreateInput{MachineID: "m1", Name: "p1", Path: "/a"})
 	if err != nil {
@@ -146,5 +147,66 @@ func TestListByMachine(t *testing.T) {
 	}
 	if list[0].MachineID() != "m1" {
 		t.Errorf("ListByMachine: got machineID %q, want m1", list[0].MachineID())
+	}
+}
+
+func TestDelete_Succeeds(t *testing.T) {
+	store := memory.NewProjectStore()
+	clk := &fixedClock{ts: 1000}
+	uc := projects.New(store, memory.NewSessionStore(), clk, nextID(), discardLogger())
+
+	p, err := uc.Create(context.Background(), projects.CreateInput{MachineID: "m1", Name: "p1", Path: "/a"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := uc.Delete(context.Background(), p.ID()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	list, err := uc.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("List after delete: got %d, want 0", len(list))
+	}
+}
+
+func TestDelete_NotFound(t *testing.T) {
+	store := memory.NewProjectStore()
+	clk := &fixedClock{ts: 1000}
+	uc := projects.New(store, memory.NewSessionStore(), clk, nextID(), discardLogger())
+
+	err := uc.Delete(context.Background(), "missing")
+	if !errors.Is(err, project.ErrNotFound) {
+		t.Errorf("Delete missing: got %v, want project.ErrNotFound", err)
+	}
+}
+
+func TestDelete_RefusedWhenProjectHasSessions(t *testing.T) {
+	store := memory.NewProjectStore()
+	sessStore := memory.NewSessionStore()
+	clk := &fixedClock{ts: 1000}
+	uc := projects.New(store, sessStore, clk, nextID(), discardLogger())
+
+	p, err := uc.Create(context.Background(), projects.CreateInput{MachineID: "m1", Name: "p1", Path: "/a"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Attach a session to the project.
+	s := session.New("s1", "m1", p.ID(), "", "", 1000)
+	if err := sessStore.Create(context.Background(), s); err != nil {
+		t.Fatalf("session create: %v", err)
+	}
+
+	if err := uc.Delete(context.Background(), p.ID()); !errors.Is(err, projects.ErrHasSessions) {
+		t.Errorf("Delete with sessions: got %v, want projects.ErrHasSessions", err)
+	}
+
+	// The project must still exist.
+	if _, err := uc.ByID(context.Background(), p.ID()); err != nil {
+		t.Errorf("project should still exist after refused delete: %v", err)
 	}
 }

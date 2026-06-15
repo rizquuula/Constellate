@@ -175,7 +175,7 @@ func cmdServe(args []string) {
 	reg := registry.New(machineStore, links, registry.SystemClock{}, log)
 	auditUC := auditapp.New(auditStore, auditapp.SystemClock{}, log)
 	sessionsUC := sessions.New(sessStore, gateway, sessions.SystemClock{}, id.New, log, auditUC)
-	projectsUC := projects.New(projStore, projects.SystemClock{}, id.New, log)
+	projectsUC := projects.New(projStore, sessStore, projects.SystemClock{}, id.New, log)
 	attachUC := attach.New(sessStore, gateway, log, auditUC)
 	overviewUC := overview.New(gateway, log)
 

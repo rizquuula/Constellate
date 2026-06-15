@@ -97,6 +97,23 @@ func (s *ProjectStore) ListByMachine(ctx context.Context, machineID string) ([]p
 	return collectProjects(rows)
 }
 
+// Delete permanently removes a project record.
+// Returns project.ErrNotFound (wrapped) if no row matches.
+func (s *ProjectStore) Delete(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete project %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: delete project %q: %w", id, project.ErrNotFound)
+	}
+	return nil
+}
+
 func collectProjects(rows *sql.Rows) ([]project.Project, error) {
 	var out []project.Project
 	for rows.Next() {

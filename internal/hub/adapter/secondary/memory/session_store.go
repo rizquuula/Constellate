@@ -67,6 +67,21 @@ func (s *SessionStore) ListByMachine(_ context.Context, machineID string) ([]ses
 	return out, nil
 }
 
+// CountByProject returns the number of sessions that reference the given
+// project ID (regardless of status).
+func (s *SessionStore) CountByProject(_ context.Context, projectID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	n := 0
+	for _, ss := range s.data {
+		if ss.ProjectID() == projectID {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // SetExited updates the session's status, exit_code, and last_active_at.
 // Returns session.ErrNotFound (wrapped) if no session with the given id exists.
 func (s *SessionStore) SetExited(_ context.Context, id string, exitCode int, ts int64) error {
