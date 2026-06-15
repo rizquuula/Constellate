@@ -129,11 +129,52 @@ export function closePane(
   return [newRoot, resolvedFocus]
 }
 
+// clearSession nulls out sessionId from every leaf that holds it.
+export function clearSession(root: PaneNode, sessionId: string): PaneNode {
+  if (root.kind === 'leaf') {
+    return root.sessionId === sessionId ? { ...root, sessionId: null } : root
+  }
+  const children: [PaneNode, PaneNode] = [
+    clearSession(root.children[0], sessionId),
+    clearSession(root.children[1], sessionId),
+  ]
+  return { ...root, children }
+}
+
+// assignSession enforces single-pane occupancy: clears sessionId from any other
+// leaf first, then sets it on the target pane.
 export function assignSession(root: PaneNode, paneId: string, sessionId: string): PaneNode {
-  return mapNode(root, paneId, (n) => {
+  const cleared = clearSession(root, sessionId)
+  return mapNode(cleared, paneId, (n) => {
     if (n.kind !== 'leaf') return n
     return { ...n, sessionId }
   })
+}
+
+// splitPaneWithSession splits the target pane and places sessionId in the new
+// leaf. before=true puts the new leaf as children[0], else children[1].
+// Runs clearSession first so a move-via-edge-split vacates the source pane.
+export function splitPaneWithSession(
+  root: PaneNode,
+  paneId: string,
+  direction: PaneDirection,
+  sessionId: string,
+  before: boolean,
+): [PaneNode, string] {
+  const cleared = clearSession(root, sessionId)
+  const newLeaf = makeLeaf(sessionId)
+  const newRoot = mapNode(cleared, paneId, (n) => {
+    if (n.kind !== 'leaf') return n
+    const children: [PaneNode, PaneNode] = before ? [newLeaf, n] : [n, newLeaf]
+    const split: SplitPane = {
+      kind: 'split',
+      id: genId(),
+      direction,
+      children,
+    }
+    return split
+  })
+  return [newRoot, newLeaf.id]
 }
 
 export function findLeaf(root: PaneNode, id: string): LeafPane | null {

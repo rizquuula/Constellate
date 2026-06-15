@@ -1,9 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useDraggable } from '@dnd-kit/core'
 import { useStore } from '../../store'
 import type { Machine, Project, Session } from '../../types'
 import { ApiError } from '../../api/rest'
 import { findLeaf } from '../terminal/paneTree'
 import { ActivityBadge } from '../activity/ActivityBadge'
+import type { SessionDragData } from '../terminal/dnd'
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
@@ -102,15 +104,24 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
 
   const label = session.title || session.id.slice(0, 12)
 
+  const dragData: SessionDragData = { kind: 'session', sessionId: session.id, label }
+  const { attributes, listeners, setNodeRef } = useDraggable({
+    id: `session-row:${session.id}`,
+    data: dragData,
+    disabled: !isRunning,
+  })
+
   return (
     <div
+      ref={setNodeRef}
+      {...(isRunning ? attributes : {})}
+      {...(isRunning ? listeners : {})}
       role="button"
       tabIndex={0}
-      className={`session-item${isTargetPane ? ' session-active' : ''}${!isRunning ? ' session-dead' : ''}`}
-      onClick={() => { if (isRunning) onAssign() }}
+      className={`session-item${isTargetPane ? ' session-active' : ''}${!isRunning ? ' session-dead' : ''}${isRunning ? ' session-draggable' : ''}`}
       onKeyDown={handleRowKeyDown}
-      title={isRunning ? 'Click to open in focused pane' : `Session ${session.status}`}
-      aria-label={`Session ${label}, status ${session.status}${isRunning && session.activity && session.activity !== 'unknown' ? `, ${session.activity === 'awaiting-input' ? 'needs input' : session.activity}` : ''}`}
+      title={isRunning ? 'Drag onto a pane' : `Session ${session.status}`}
+      aria-label={`Session ${label}, status ${session.status}${isRunning && session.activity && session.activity !== 'unknown' ? `, ${session.activity === 'awaiting-input' ? 'needs input' : session.activity}` : ''}${isRunning ? ' — drag onto a pane to place' : ''}`}
     >
       <span className={`session-badge session-badge-${session.status}`}>{session.status}</span>
       {editing ? (

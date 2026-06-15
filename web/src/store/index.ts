@@ -17,6 +17,7 @@ import {
   splitPane,
   closePane,
   assignSession,
+  splitPaneWithSession as treeSplitPaneWithSession,
 } from '../features/terminal/paneTree'
 
 interface Store {
@@ -50,6 +51,7 @@ interface Store {
   splitPane: (paneId: string, direction: PaneDirection) => void
   closePane: (paneId: string) => void
   assignSessionToPane: (paneId: string, sessionId: string) => void
+  splitPaneWithSession: (paneId: string, edge: 'top' | 'bottom' | 'left' | 'right', sessionId: string) => void
   openSessionInPane: (
     paneId: string,
     opts: { machineID: string; projectID?: string; cwd: string; createDir?: boolean },
@@ -135,6 +137,18 @@ export const useStore = create<Store>((set, get) => ({
   assignSessionToPane: (paneId, sessionId) => {
     const newRoot = assignSession(get().paneRoot, paneId, sessionId)
     set({ paneRoot: newRoot, focusedPaneId: paneId })
+  },
+
+  splitPaneWithSession: (paneId, edge, sessionId) => {
+    const directionMap: Record<'top' | 'bottom' | 'left' | 'right', [PaneDirection, boolean]> = {
+      left:   ['horizontal', true],
+      right:  ['horizontal', false],
+      top:    ['vertical',   true],
+      bottom: ['vertical',   false],
+    }
+    const [direction, before] = directionMap[edge]
+    const [newRoot, newLeafId] = treeSplitPaneWithSession(get().paneRoot, paneId, direction, sessionId, before)
+    set({ paneRoot: newRoot, focusedPaneId: newLeafId })
   },
 
   openSessionInPane: async (paneId, { machineID, projectID, cwd, createDir }) => {

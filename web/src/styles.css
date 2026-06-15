@@ -1759,6 +1759,97 @@ body {
   animation: activity-active-pulse 2.4s ease-in-out infinite;
 }
 
+/* ── Drag and drop ────────────────────────────────────────────────────────── */
+
+/* Draggable pane title — grab cursor */
+.pane-title-draggable {
+  cursor: grab;
+}
+
+.pane-title-dragging {
+  cursor: grabbing;
+  opacity: 0.6;
+}
+
+/* Draggable session rows */
+.session-draggable {
+  cursor: grab;
+}
+
+.session-draggable:active {
+  cursor: grabbing;
+}
+
+/* Drop-zone overlay container — absolutely covers the pane body */
+.pane-drop-zones {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* Individual drop zones */
+.pane-drop-zone {
+  position: absolute;
+  pointer-events: all;
+  transition: background 0.08s, border-color 0.08s;
+}
+
+/* Center zone fills the middle 70% */
+.pane-drop-zone-center {
+  inset: 15% 15%;
+}
+
+/* Edge bands ~15% */
+.pane-drop-zone-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 15%;
+}
+
+.pane-drop-zone-bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 15%;
+}
+
+.pane-drop-zone-left {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 15%;
+}
+
+.pane-drop-zone-right {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 15%;
+}
+
+/* is-over highlight using amber accent tokens */
+.pane-drop-zone.is-over {
+  background: rgba(217, 119, 6, 0.25);
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+}
+
+/* Drag overlay chip */
+.drag-chip {
+  background: var(--surface-chrome);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--accent-text);
+  font-size: 11px;
+  font-family: monospace;
+  padding: 4px 10px;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
 /* ── Reduced motion ───────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {

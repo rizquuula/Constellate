@@ -1,6 +1,9 @@
 import { useRef, useState, useCallback } from 'react'
+import { useDraggable } from '@dnd-kit/core'
 import { useStore } from '../../store'
 import { useTerminal } from './useTerminal'
+import { PaneDropZones } from './dnd'
+import type { SessionDragData } from './dnd'
 
 interface TerminalPaneProps {
   paneId: string
@@ -31,6 +34,20 @@ export function TerminalPane({
 
   useTerminal(containerRef, sessionId)
   const sessionEnded = session !== undefined && session.status !== 'running'
+
+  const paneLabel = session
+    ? (session.title || session.id.slice(0, 8))
+    : 'empty'
+
+  const dragData: SessionDragData | undefined = session && !sessionEnded
+    ? { kind: 'session', sessionId: session.id, label: paneLabel }
+    : undefined
+
+  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({
+    id: `pane-title:${paneId}`,
+    data: dragData,
+    disabled: !dragData,
+  })
 
   const startRename = useCallback(() => {
     setTitleDraft(session?.title ?? '')
@@ -69,10 +86,6 @@ export function TerminalPane({
     [onFocus],
   )
 
-  const paneLabel = session
-    ? (session.title || session.id.slice(0, 8))
-    : 'empty'
-
   const paneAriaLabel = session
     ? `Terminal pane: ${paneLabel}, status ${session.status}`
     : 'Terminal pane: empty'
@@ -87,7 +100,12 @@ export function TerminalPane({
     >
       {/* Pane chrome: title + controls */}
       <div className="pane-chrome" onClick={(e) => e.stopPropagation()}>
-        <div className="pane-title">
+        <div
+          className={`pane-title${dragData ? ' pane-title-draggable' : ''}${isDragging ? ' pane-title-dragging' : ''}`}
+          ref={dragData ? setDragRef : undefined}
+          {...(dragData ? listeners : {})}
+          {...(dragData ? attributes : {})}
+        >
           {session && (
             <span className={`pane-status-dot pane-status-${session.status}`} />
           )}
@@ -155,9 +173,10 @@ export function TerminalPane({
 
       {/* Terminal body */}
       <div className="pane-body" onClick={onFocus}>
+        <PaneDropZones paneId={paneId} />
         {!sessionId && (
           <div className="pane-empty">
-            Pick a session from the sidebar, or open a new shell
+            Drag a shell here
           </div>
         )}
         {sessionEnded && session && (

@@ -1,4 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
 import { ProjectTree } from './features/sidebar/ProjectTree'
 import { TerminalView } from './features/terminal/TerminalView'
 import { OverviewGrid } from './features/overview/OverviewGrid'
@@ -7,6 +17,8 @@ import { Login } from './features/auth/Login'
 import { Snackbar, type SnackbarVariant } from './components/Snackbar'
 import { useStore } from './store'
 import { authStatus, logout, passkeyRegister } from './api/rest'
+import { parsePaneDropId } from './features/terminal/dnd'
+import type { SessionDragData } from './features/terminal/dnd'
 
 const hasPasskeySupport = typeof window !== 'undefined' && !!window.PublicKeyCredential
 
@@ -32,8 +44,36 @@ export function App() {
   const refreshDashboard = useStore((s) => s.refreshDashboard)
   const viewMode = useStore((s) => s.viewMode)
   const setViewMode = useStore((s) => s.setViewMode)
+  const assignSessionToPane = useStore((s) => s.assignSessionToPane)
+  const doSplitPaneWithSession = useStore((s) => s.splitPaneWithSession)
 
   const [authState, setAuthState] = useState<AuthState>('loading')
+  const [activeDragLabel, setActiveDragLabel] = useState<string | null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor),
+  )
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const data = event.active.data.current as SessionDragData | undefined
+    setActiveDragLabel(data?.label ?? null)
+  }, [])
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    setActiveDragLabel(null)
+    const source = event.active.data.current as SessionDragData | undefined
+    if (!source || source.kind !== 'session') return
+    if (!event.over) return
+    const parsed = parsePaneDropId(String(event.over.id))
+    if (!parsed) return
+    const { paneId, zone } = parsed
+    if (zone === 'center') {
+      assignSessionToPane(paneId, source.sessionId)
+    } else {
+      doSplitPaneWithSession(paneId, zone, source.sessionId)
+    }
+  }, [assignSessionToPane, doSplitPaneWithSession])
 
   async function checkAuth() {
     try {
@@ -171,10 +211,21 @@ export function App() {
       ) : viewMode === 'dashboard' ? (
         <DashboardView />
       ) : (
-        <div className="layout">
-          <ProjectTree />
-          <TerminalView />
-        </div>
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="layout">
+            <ProjectTree />
+            <TerminalView />
+          </div>
+          <DragOverlay>
+            {activeDragLabel && (
+              <div className="drag-chip">{activeDragLabel}</div>
+            )}
+          </DragOverlay>
+        </DndContext>
       )}
     </div>
   )
