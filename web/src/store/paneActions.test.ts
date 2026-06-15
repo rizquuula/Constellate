@@ -161,3 +161,51 @@ describe('store.assignSessionToPane', () => {
     expect((root2.children[1] as LeafPane).sessionId).toBe('ses-x')
   })
 })
+
+// ── assignSessionFromSidebar (sidebar click — never clobbers a live terminal) ──
+
+describe('store.assignSessionFromSidebar', () => {
+  beforeEach(resetStore)
+
+  // Minimal Session stubs: only id + status matter to the gate.
+  const sessionsWith = (entries: Array<[string, string]>) =>
+    entries.map(([id, status]) => ({ id, status })) as never
+
+  it('assigns to the focused pane when the workspace has no live terminal', () => {
+    useStore.setState({ sessions: sessionsWith([['ses-new', 'running']]) })
+    const paneId = (useStore.getState().paneRoot as LeafPane).id
+    useStore.getState().assignSessionFromSidebar(paneId, 'ses-new')
+    expect((useStore.getState().paneRoot as LeafPane).sessionId).toBe('ses-new')
+  })
+
+  it('is a no-op when any pane already holds a running session', () => {
+    // Pane A holds a running session; focus B (empty) and try to assign there.
+    const leaf = makeLeaf('ses-live')
+    useStore.setState({
+      paneRoot: leaf,
+      focusedPaneId: leaf.id,
+      sessions: sessionsWith([['ses-live', 'running'], ['ses-new', 'running']]),
+    })
+    useStore.getState().splitPane(leaf.id, 'horizontal')
+    const root1 = useStore.getState().paneRoot as SplitPane
+    const lbId = root1.children[1].id
+    const before = useStore.getState().paneRoot
+    useStore.getState().assignSessionFromSidebar(lbId, 'ses-new')
+    // Tree unchanged: empty pane stays empty, live pane untouched.
+    expect(useStore.getState().paneRoot).toBe(before)
+    const root2 = useStore.getState().paneRoot as SplitPane
+    expect((root2.children[1] as LeafPane).sessionId).toBeNull()
+  })
+
+  it('still assigns when bound panes only hold non-running (exited/lost) sessions', () => {
+    const leaf = makeLeaf('ses-dead')
+    useStore.setState({
+      paneRoot: leaf,
+      focusedPaneId: leaf.id,
+      sessions: sessionsWith([['ses-dead', 'exited'], ['ses-new', 'running']]),
+    })
+    // Focused pane already shows a dead session — clicking replaces it.
+    useStore.getState().assignSessionFromSidebar(leaf.id, 'ses-new')
+    expect((useStore.getState().paneRoot as LeafPane).sessionId).toBe('ses-new')
+  })
+})

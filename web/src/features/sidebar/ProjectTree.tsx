@@ -525,7 +525,7 @@ function MachineGroup({ machine }: MachineGroupProps) {
   const sessions = useStore((s) => s.sessions.filter((s) => s.machineID === machine.id))
   const focusedPaneId = useStore((s) => s.focusedPaneId)
   const focusedSessionId = useStore((s) => findLeaf(s.paneRoot, s.focusedPaneId)?.sessionId ?? null)
-  const assignSessionToPane = useStore((s) => s.assignSessionToPane)
+  const assignSessionFromSidebar = useStore((s) => s.assignSessionFromSidebar)
   const openSessionInPane = useStore((s) => s.openSessionInPane)
 
   const [addingProject, setAddingProject] = useState(false)
@@ -558,9 +558,9 @@ function MachineGroup({ machine }: MachineGroupProps) {
 
   const handleAssign = useCallback(
     (sessionId: string) => {
-      assignSessionToPane(focusedPaneId, sessionId)
+      assignSessionFromSidebar(focusedPaneId, sessionId)
     },
-    [focusedPaneId, assignSessionToPane],
+    [focusedPaneId, assignSessionFromSidebar],
   )
 
   return (

@@ -20,6 +20,7 @@ import {
   closePane,
   assignSession,
   clearSession,
+  collectSessionIds,
   splitPaneWithSession as treeSplitPaneWithSession,
 } from '../features/terminal/paneTree'
 
@@ -58,6 +59,7 @@ interface Store {
   splitPane: (paneId: string, direction: PaneDirection) => void
   closePane: (paneId: string) => void
   assignSessionToPane: (paneId: string, sessionId: string) => void
+  assignSessionFromSidebar: (paneId: string, sessionId: string) => void
   splitPaneWithSession: (paneId: string, edge: 'top' | 'bottom' | 'left' | 'right', sessionId: string) => void
   openSessionInPane: (
     paneId: string,
@@ -160,6 +162,21 @@ export const useStore = create<Store>((set, get) => ({
   assignSessionToPane: (paneId, sessionId) => {
     const newRoot = assignSession(get().paneRoot, paneId, sessionId)
     set({ paneRoot: newRoot, focusedPaneId: paneId })
+  },
+
+  // assignSessionFromSidebar is the click-from-sidebar path. It refuses to touch
+  // the workspace while any pane already holds a live (running) terminal — a
+  // sidebar click should never silently clobber an active pane. Once the
+  // workspace has zero running terminals it behaves like assignSessionToPane.
+  // Drag-and-drop (assignSessionToPane / splitPaneWithSession) remains the
+  // deliberate way to reassign sessions when terminals are live.
+  assignSessionFromSidebar: (paneId, sessionId) => {
+    const { paneRoot, sessions } = get()
+    const hasLiveTerminal = collectSessionIds(paneRoot).some((id) =>
+      sessions.some((s) => s.id === id && s.status === 'running'),
+    )
+    if (hasLiveTerminal) return
+    set({ paneRoot: assignSession(paneRoot, paneId, sessionId), focusedPaneId: paneId })
   },
 
   splitPaneWithSession: (paneId, edge, sessionId) => {

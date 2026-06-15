@@ -182,3 +182,9 @@ export function findLeaf(root: PaneNode, id: string): LeafPane | null {
   if (n && n.kind === 'leaf') return n
   return null
 }
+
+// collectSessionIds returns every non-null sessionId currently bound in the tree.
+export function collectSessionIds(root: PaneNode): string[] {
+  if (root.kind === 'leaf') return root.sessionId ? [root.sessionId] : []
+  return [...collectSessionIds(root.children[0]), ...collectSessionIds(root.children[1])]
+}
