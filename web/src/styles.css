@@ -1,17 +1,19 @@
 /* ── Design tokens ────────────────────────────────────────────────────────── */
 :root {
-  --surface-base: #0f0f13;
-  --surface-sidebar: #13131a;
-  --surface-chrome: #16161f;
-  --surface-hover: #1a1a26;
-  --border-subtle: #2a2a3a;
-  --border-muted: #3a3a5a;
+  --surface-base: #0f0f11;
+  --surface-sidebar: #131315;
+  --surface-chrome: #16161a;
+  --surface-hover: #1a1a1e;
+  --border-subtle: #2a2a30;
+  --border-muted: #3a3a42;
   --text-primary: #e0e0e0;
   --text-secondary: #bbbbbb;
   --text-muted: #999999;
   --text-faint: #888888;
-  --accent: #4a6aaa;
-  --accent-text: #8ab4f8;
+  --accent: #d97706;
+  --accent-text: #fbbf24;
+  /* Near-black text for solid amber fills (primary button / active toggles). */
+  --accent-on: #18181b;
 }
 
 /* ── Screen-reader only utility ───────────────────────────────────────────── */
@@ -142,9 +144,9 @@ body {
 
 .btn-shell {
   align-self: flex-start;
-  background: #1e2a4a;
+  background: #322508;
   color: var(--accent-text);
-  border: 1px solid #2a3a6a;
+  border: 1px solid #5a440f;
   border-radius: 4px;
   padding: 3px 8px;
   font-size: 12px;
@@ -152,7 +154,7 @@ body {
 }
 
 .btn-shell:hover {
-  background: #263660;
+  background: #423110;
 }
 
 .btn-shell:disabled {
@@ -161,7 +163,7 @@ body {
 }
 
 .btn-shell:disabled:hover {
-  background: #1e2a4a;
+  background: #322508;
 }
 
 .btn-cancel {
@@ -263,7 +265,7 @@ body {
 }
 
 .session-item.session-active {
-  background: #1a2540;
+  background: #2e2207;
 }
 
 .session-item:focus-visible {
@@ -287,7 +289,7 @@ body {
 
 .session-rename-input {
   flex: 1;
-  background: #1e1e2a;
+  background: #1e1e22;
   border: 1px solid var(--border-muted);
   border-radius: 3px;
   color: var(--text-primary);
@@ -424,14 +426,14 @@ body {
 
 .session-confirm-no:hover {
   color: var(--text-primary);
-  background: #2a2a3a;
+  background: #2a2a30;
 }
 
 /* ── Inline error messages ────────────────────────────────────────────────── */
 
 .inline-error {
   font-size: 11px;
-  /* #f08070 on #16161f: contrast ≈ 5.8:1 — passes AA */
+  /* #f08070 on #16161a: contrast ≈ 5.8:1 — passes AA */
   color: #f08070;
   padding: 2px 0;
 }
@@ -454,14 +456,14 @@ body {
   gap: 6px;
   padding: 8px 10px;
   margin: 4px 0;
-  background: #1c1c28;
-  border: 1px solid #3a3a4a;
+  background: #1c1c20;
+  border: 1px solid #3a3a42;
   border-radius: 4px;
 }
 
 .project-create-dir-msg {
   font-size: 12px;
-  color: #d0d0da;
+  color: #d4d4d8;
 }
 
 .project-create-dir-msg code {
@@ -487,7 +489,7 @@ body {
 }
 
 .new-project-input {
-  background: #1e1e2a;
+  background: #1e1e22;
   border: 1px solid var(--border-muted);
   border-radius: 4px;
   color: var(--text-primary);
@@ -519,8 +521,8 @@ body {
 
 /* react-resizable-panels resize handle */
 .panel-resize-handle {
-  /* #3a3a5a on adjacent #0f0f13: contrast ≈ 3.1:1 — passes 3:1 UI threshold */
-  background: #3a3a5a;
+  /* #3a3a42 on adjacent #0f0f11: contrast ≈ 3.1:1 — passes 3:1 UI threshold */
+  background: #3a3a42;
   transition: background 0.15s;
 }
 
@@ -574,7 +576,7 @@ body {
 }
 
 .terminal-pane-focused .pane-chrome {
-  background: #1a1a2a;
+  background: #1a1a20;
 }
 
 .pane-title {
@@ -615,7 +617,7 @@ body {
 
 .pane-title-input {
   flex: 1;
-  background: #1e1e2a;
+  background: #1e1e22;
   border: 1px solid var(--accent);
   border-radius: 3px;
   color: var(--text-primary);
@@ -676,7 +678,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* #888 on #0f0f13: contrast ≈ 5.2:1 — passes AA */
+  /* #888 on #0f0f11: contrast ≈ 5.2:1 — passes AA */
   color: var(--text-faint);
   font-size: 13px;
   text-align: center;
@@ -722,7 +724,7 @@ body {
   background: var(--surface-base);
 }
 
-/* #888 on #0f0f13: contrast ≈ 5.2:1 — passes AA */
+/* #888 on #0f0f11: contrast ≈ 5.2:1 — passes AA */
 .terminal-empty {
   position: absolute;
   inset: 0;
@@ -811,7 +813,7 @@ body {
 
 .view-toggle .view-toggle-active {
   background: var(--accent);
-  color: var(--text-primary);
+  color: var(--accent-on);
 }
 
 /* ── Overview shell (full content area when overview is active) ───────────── */
@@ -1027,7 +1029,7 @@ body {
 
 .login-tab-active {
   background: var(--accent);
-  color: var(--text-primary);
+  color: var(--accent-on);
 }
 
 .login-form {
@@ -1075,7 +1077,7 @@ body {
   background: var(--accent);
   border: none;
   border-radius: 4px;
-  color: var(--text-primary);
+  color: var(--accent-on);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
@@ -1188,7 +1190,7 @@ body {
   padding: 10px 12px 10px 16px;
   border-radius: 8px;
   border: 1px solid var(--border-muted);
-  background: var(--surface-raised, #1e2128);
+  background: var(--surface-raised, #212125);
   color: var(--text-primary);
   font-size: 13px;
   line-height: 1.4;
@@ -1711,13 +1713,13 @@ body {
 }
 
 .activity-badge-active .activity-badge-label {
-  /* #4dbb4d on #16161f: contrast ≈ 5.0:1 — passes AA */
+  /* #4dbb4d on #16161a: contrast ≈ 5.0:1 — passes AA */
   color: #4dbb4d;
 }
 
 /* idle — muted grey */
 .activity-dot-idle {
-  background: #7a7a8e;
+  background: #7a7a80;
 }
 
 .activity-badge-idle .activity-badge-label {
@@ -1732,7 +1734,7 @@ body {
 }
 
 .activity-badge-awaiting-input .activity-badge-label {
-  /* #d4a44c on #16161f: contrast ≈ 7.9:1 — passes AA */
+  /* #d4a44c on #16161a: contrast ≈ 7.9:1 — passes AA */
   color: #d4a44c;
 }
 
@@ -1753,7 +1755,7 @@ body {
 }
 
 .activity-dot-active {
-  /* #4dbb4d on #16161f: contrast ≈ 7.3:1 — passes AA */
+  /* #4dbb4d on #16161a: contrast ≈ 7.3:1 — passes AA */
   animation: activity-active-pulse 2.4s ease-in-out infinite;
 }
 

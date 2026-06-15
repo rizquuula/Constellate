@@ -39,7 +39,7 @@ export const PALETTE: string[] = buildPalette()
 
 // Terminal default colors matching the xterm theme in useTerminal.ts
 export const DEFAULT_FG = '#e0e0e0'
-export const DEFAULT_BG = '#0f0f13'
+export const DEFAULT_BG = '#0f0f11'
 
 // Decode a packed color value to a CSS color string or null for default.
 // 0 / undefined → null (use default)

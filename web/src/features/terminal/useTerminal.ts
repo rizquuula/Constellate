@@ -22,7 +22,7 @@ export function useTerminal(
     const term = new Terminal({
       cursorBlink: true,
       theme: {
-        background: '#0f0f13',
+        background: '#0f0f11',
         foreground: '#e0e0e0',
       },
     })
