@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { loginTOTP, loginRecovery, passkeyLogin } from '../../api/rest'
+import { OtpInput } from './OtpInput'
+
+const TOTP_LENGTH = 6
 
 type Mode = 'totp' | 'recovery'
 
@@ -16,22 +19,28 @@ export function Login({ onSuccess }: Props) {
   const [loading, setLoading] = useState(false)
   const [passkeyLoading, setPasskeyLoading] = useState(false)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function submit(value: string) {
+    if (loading) return
     setError('')
     setLoading(true)
     try {
       if (mode === 'totp') {
-        await loginTOTP(code)
+        await loginTOTP(value)
       } else {
-        await loginRecovery(code)
+        await loginRecovery(value)
       }
       onSuccess()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
+      setCode('')
     } finally {
       setLoading(false)
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    void submit(code)
   }
 
   async function handlePasskeyLogin() {
@@ -84,18 +93,29 @@ export function Login({ onSuccess }: Props) {
           <label className="login-label" htmlFor="auth-code">
             {mode === 'totp' ? '6-digit code' : 'Recovery code (xxxxx-xxxxx)'}
           </label>
-          <input
-            id="auth-code"
-            className="login-input"
-            type="text"
-            inputMode={mode === 'totp' ? 'numeric' : 'text'}
-            autoComplete={mode === 'totp' ? 'one-time-code' : 'off'}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder={mode === 'totp' ? '000000' : 'aaaaa-bbbbb'}
-            required
-            autoFocus
-          />
+          {mode === 'totp' ? (
+            <OtpInput
+              value={code}
+              onChange={setCode}
+              onComplete={(value) => void submit(value)}
+              length={TOTP_LENGTH}
+              disabled={loading || passkeyLoading}
+              autoFocus
+            />
+          ) : (
+            <input
+              id="auth-code"
+              className="login-input"
+              type="text"
+              inputMode="text"
+              autoComplete="off"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="aaaaa-bbbbb"
+              required
+              autoFocus
+            />
+          )}
           <p className="login-error" role="alert" aria-live="assertive">{error || ' '}</p>
           <button className="login-submit" type="submit" disabled={loading || passkeyLoading || !code}>
             {loading ? 'Signing in…' : 'Sign in'}

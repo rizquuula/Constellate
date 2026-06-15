@@ -1112,6 +1112,36 @@ body {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+.otp-input {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.otp-box {
+  flex: 1 1 0;
+  min-width: 0;
+  background: var(--surface-base);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+  font-size: var(--text-lg);
+  text-align: center;
+  padding: 10px 0;
+  box-sizing: border-box;
+}
+
+.otp-box:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.otp-box:disabled {
+  opacity: 0.5;
+}
+
 .login-error {
   font-size: var(--text-sm);
   color: var(--danger);
