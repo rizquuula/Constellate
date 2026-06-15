@@ -67,8 +67,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # v9 is required for golangci-lint v2 configs (v6 only supports v1); with
+      # `latest` it pulls a golangci-lint built with Go 1.25, which the go 1.25.0
+      # module requires (older binaries refuse: "build Go version < targeted").
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
