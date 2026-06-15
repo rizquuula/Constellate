@@ -21,8 +21,8 @@ PROD_COMPOSE := docker compose -f deploy/compose.yaml
 
 .PHONY: help build build-hub build-agent web image-hub \
 	test test-web test-e2e test-docker lint \
-	dev-up dev-totp dev-logs dev-down dev-reset \
-	prod-up prod-down prod-logs
+	ddocker-up ddocker-totp ddocker-logs ddocker-down ddocker-reset \
+	docker-up docker-down docker-logs
 
 ##@ General
 
@@ -73,28 +73,28 @@ lint: ## Run golangci-lint (v2 config)
 
 ##@ Dev stack (local docker: hub + 2 agents)
 
-dev-up: ## Build & start the local dev stack, bootstrap operator + enroll agents
+ddocker-up: ## Build & start the local dev stack, bootstrap operator + enroll agents
 	./deploy/dev-up.sh
 
-dev-totp: ## Print a current TOTP login code for the dev operator
+ddocker-totp: ## Print a current TOTP login code for the dev operator
 	./deploy/dev-totp.sh
 
-dev-logs: ## Follow the dev hub logs
+ddocker-logs: ## Follow the dev hub logs
 	$(DEV_COMPOSE) logs -f hub
 
-dev-down: ## Stop the dev stack (keep volumes/data)
+ddocker-down: ## Stop the dev stack (keep volumes/data)
 	$(DEV_COMPOSE) down
 
-dev-reset: ## Stop the dev stack and wipe volumes (fresh operator next up)
+ddocker-reset: ## Stop the dev stack and wipe volumes (fresh operator next up)
 	$(DEV_COMPOSE) down -v
 
 ##@ Prod stack (deploy/compose.yaml + Caddy TLS)
 
-prod-up: ## Start the production stack detached (needs CONSTELLATE_DOMAIN + DNS)
+docker-up: ## Start the production stack detached (needs CONSTELLATE_DOMAIN + DNS)
 	$(PROD_COMPOSE) up -d
 
-prod-down: ## Stop the production stack
+docker-down: ## Stop the production stack
 	$(PROD_COMPOSE) down
 
-prod-logs: ## Follow the production stack logs
+docker-logs: ## Follow the production stack logs
 	$(PROD_COMPOSE) logs -f
