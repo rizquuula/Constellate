@@ -143,10 +143,63 @@ body {
   min-width: 0;
 }
 
+/* Quiet, hover-revealed action cluster on the machine name row — mirrors the
+   session-row action pattern so the sidebar speaks one visual language. */
 .machine-actions {
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.machine-item:hover .machine-actions,
+.machine-item:focus-within .machine-actions {
+  opacity: 1;
+}
+
+/* Touch devices have no hover — keep the primary actions discoverable. */
+@media (hover: none) {
+  .machine-actions {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .machine-actions {
+    transition: none;
+  }
+}
+
+.machine-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  padding: 4px 6px;
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.machine-action-btn:hover {
+  color: var(--text-primary);
+  background: var(--border-subtle);
+}
+
+.machine-action-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.machine-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .dot {

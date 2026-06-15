@@ -34,6 +34,49 @@ function TrashIcon() {
   )
 }
 
+// TerminalIcon / FolderPlusIcon are small monochrome glyphs in the same
+// Feather stroke style as TrashIcon; they inherit `currentColor`.
+function TerminalIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  )
+}
+
+function FolderPlusIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      <line x1="12" y1="11" x2="12" y2="17" />
+      <line x1="9" y1="14" x2="15" y2="14" />
+    </svg>
+  )
+}
+
 interface SessionRowProps {
   session: Session
   isTargetPane: boolean
@@ -528,6 +571,28 @@ function MachineGroup({ machine }: MachineGroupProps) {
             aria-label={machine.online ? 'online' : 'offline'}
           />
           <span className="machine-name">{machine.name}</span>
+          {machine.online && (
+            <div className="machine-actions">
+              <button
+                className="machine-action-btn"
+                title="New shell (ungrouped)"
+                aria-label="New shell"
+                onClick={handleOpenUngroupedShell}
+                disabled={shellBusy}
+              >
+                {shellBusy ? '…' : <TerminalIcon />}
+              </button>
+              <button
+                className="machine-action-btn"
+                title="New project"
+                aria-label="New project"
+                aria-expanded={addingProject}
+                onClick={() => setAddingProject((v) => !v)}
+              >
+                <FolderPlusIcon />
+              </button>
+            </div>
+          )}
         </div>
         <div className="machine-submeta">
           <span className="machine-meta">{machine.os}/{machine.arch}</span>
@@ -544,25 +609,6 @@ function MachineGroup({ machine }: MachineGroupProps) {
             </span>
           )}
         </div>
-        {machine.online && (
-          <div className="machine-actions">
-            <button
-              className="btn-shell"
-              title="New shell (ungrouped)"
-              onClick={handleOpenUngroupedShell}
-              disabled={shellBusy}
-            >
-              {shellBusy ? '…' : '＋ shell'}
-            </button>
-            <button
-              className="btn-shell"
-              title="Add project"
-              onClick={() => setAddingProject((v) => !v)}
-            >
-              ＋ project
-            </button>
-          </div>
-        )}
       </div>
 
       {addingProject && (
