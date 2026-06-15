@@ -316,6 +316,8 @@ All subcommands accept `--config <path>`; `serve`/`connect` also accept `--log-l
 
 ## See also
 
+- [`usage.agent.md`](usage.agent.md) — standalone per-machine guide: enroll **and** connect one
+  machine, then keep the agent running as a service (systemd/launchd).
 - [`shell-integration.md`](shell-integration.md) — opt-in OSC 133 prompt markers for accurate
   activity badges.
 - [`DESIGN.md`](../DESIGN.md) — canonical architecture, wire protocol, and milestone history.
