@@ -111,6 +111,10 @@ jobs:
     needs: binaries
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, for the changelog range
+
       - name: Download all archives
         uses: actions/download-artifact@v4
         with:
@@ -122,9 +126,75 @@ jobs:
         run: |
           cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS
 
+      # AI-written summary via OpenRouter, placed ABOVE GitHub's auto PR list.
+      # Non-fatal: if the key is missing or the API fails, the release still
+      # ships with just the default generated notes (empty body_path).
+      - name: AI release notes (OpenRouter)
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Override per repo: Settings → Variables → RELEASE_NOTES_MODEL.
+          # Must be a valid OpenRouter model slug (see https://openrouter.ai/models).
+          MODEL: ${{ vars.RELEASE_NOTES_MODEL || 'anthropic/claude-sonnet-4.6' }}
+        run: |
+          set -uo pipefail
+          : > RELEASE_NOTES.md
+
+          if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+            echo "::warning::OPENROUTER_API_KEY not set — skipping AI notes."
+            exit 0
+          fi
+
+          TAG="${GITHUB_REF_NAME}"
+          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          if [ -n "$PREV" ]; then RANGE="${PREV}..${TAG}"; else RANGE="${TAG}"; fi
+          echo "Changelog range: ${RANGE}"
+
+          LOG="$(git log --no-merges --pretty=format:'- %s' ${RANGE})"
+          HUB_VERSION="$(cat cmd/hub/VERSION)"
+          AGENT_VERSION="$(cat cmd/agent/VERSION)"
+
+          cat > prompt.txt <<EOF
+          You are writing GitHub release notes for Constellate, a self-hosted
+          control plane where a hub brokers browser <-> per-machine agents.
+          Hub version ${HUB_VERSION}, agent version ${AGENT_VERSION}.
+
+          Write concise, user-facing notes in GitHub-flavored Markdown:
+          a one-paragraph overview, then meaningful changes grouped under short
+          headings (e.g. Features, Fixes, Internal). Omit pure CI/chore noise.
+          Do not invent changes. Output only the Markdown body, no preamble.
+
+          Commits:
+          ${LOG}
+          EOF
+
+          REQ="$(jq -n --arg model "$MODEL" --rawfile prompt prompt.txt \
+            '{model: $model, messages: [{role: "user", content: $prompt}]}')"
+
+          if ! RESP="$(curl -sS --fail-with-body \
+              https://openrouter.ai/api/v1/chat/completions \
+              -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$REQ")"; then
+            echo "::warning::OpenRouter request failed — using default notes only."
+            echo "$RESP"
+            exit 0
+          fi
+
+          CONTENT="$(echo "$RESP" | jq -r '.choices[0].message.content // empty')"
+          if [ -z "$CONTENT" ]; then
+            echo "::warning::Empty AI response — using default notes only."
+            echo "$RESP" | jq -r '.error // .' || true
+            exit 0
+          fi
+
+          printf '%s\n\n---\n' "$CONTENT" > RELEASE_NOTES.md
+          echo "--- generated notes ---"
+          cat RELEASE_NOTES.md
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md # AI summary; GitHub appends its PR list below
           generate_release_notes: true
           files: |
             dist/*.tar.gz
