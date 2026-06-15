@@ -429,6 +429,21 @@ body {
   opacity: 1;
 }
 
+/* The project header reuses .session-actions for its new-shell / delete
+   buttons; reveal them on hover/focus like session rows (they were stuck at
+   opacity:0 because the reveal rules above are scoped to .session-item). */
+.project-header:hover .session-actions,
+.project-header:focus-within .session-actions {
+  opacity: 1;
+}
+
+/* Touch devices have no hover — keep the delete/new-shell actions reachable. */
+@media (hover: none) {
+  .session-actions {
+    opacity: 1;
+  }
+}
+
 .session-action-btn {
   background: transparent;
   border: none;

@@ -380,12 +380,13 @@ function ProjectSection({ project, sessions, focusedSessionId, onOpenShell, onAs
         ) : (
           <div className="session-actions">
             <button
-              className="btn-shell"
+              className="session-action-btn"
               title={`New shell in ${project.path}`}
+              aria-label={`New shell in ${project.name}`}
               onClick={() => openShell(false)}
               disabled={busy}
             >
-              {busy ? '…' : '＋'}
+              {busy ? '…' : <TerminalIcon />}
             </button>
             <button
               className="session-action-btn session-action-delete"
