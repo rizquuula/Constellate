@@ -27,6 +27,8 @@ type SessionManager interface {
 	Attach(sessionID string, stream io.ReadWriteCloser, in io.Reader) error
 	Resize(sessionID string, cols, rows int) error
 	Close(sessionID string) error
+	// Activities returns per-session activity signals at unix-second timestamp now.
+	Activities(now int64) []terminal.SessionActivity
 }
 
 // errNotConnected is returned by sendControl when no encoder is set.
@@ -47,6 +49,7 @@ func (stubSessions) Resize(_ string, _, _ int) error {
 func (stubSessions) Close(_ string) error {
 	return errors.New("hubclient: no session manager configured")
 }
+func (stubSessions) Activities(_ int64) []terminal.SessionActivity { return nil }
 
 // Config holds all parameters needed to create a Client.
 type Config struct {
@@ -375,7 +378,19 @@ func (c *Client) serve(ctx context.Context, sess *yamux.Session, ctrl net.Conn, 
 				errc <- ctx.Err()
 				return
 			case <-ticker.C:
-				if err := enc.Encode(transport.NewHeartbeat(time.Now().Unix(), nil)); err != nil {
+				now := time.Now().Unix()
+				activities := c.sessions.Activities(now)
+				var stats []transport.SessionStat
+				if len(activities) > 0 {
+					stats = make([]transport.SessionStat, len(activities))
+					for i, a := range activities {
+						stats[i] = transport.SessionStat{
+							ID:       a.ID,
+							Activity: string(a.Activity),
+						}
+					}
+				}
+				if err := enc.Encode(transport.NewHeartbeat(now, stats)); err != nil {
 					errc <- err
 					return
 				}

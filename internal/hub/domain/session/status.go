@@ -8,3 +8,11 @@ const (
 	StatusExited  Status = "exited"
 	StatusLost    Status = "lost"
 )
+
+// Activity constants for per-session AI-awareness state reported by heartbeats.
+const (
+	ActivityActive        = "active"
+	ActivityIdle          = "idle"
+	ActivityAwaitingInput = "awaiting-input"
+	ActivityUnknown       = "unknown"
+)

@@ -24,13 +24,16 @@ type DashboardDTO struct {
 
 // DashboardTotalsDTO carries fleet-wide aggregate counts.
 type DashboardTotalsDTO struct {
-	MachinesOnline  int `json:"machinesOnline"`
-	MachinesTotal   int `json:"machinesTotal"`
-	SessionsRunning int `json:"sessionsRunning"`
-	SessionsExited  int `json:"sessionsExited"`
-	SessionsLost    int `json:"sessionsLost"`
-	SessionsTotal   int `json:"sessionsTotal"`
-	ProjectsTotal   int `json:"projectsTotal"`
+	MachinesOnline        int `json:"machinesOnline"`
+	MachinesTotal         int `json:"machinesTotal"`
+	SessionsRunning       int `json:"sessionsRunning"`
+	SessionsExited        int `json:"sessionsExited"`
+	SessionsLost          int `json:"sessionsLost"`
+	SessionsTotal         int `json:"sessionsTotal"`
+	ProjectsTotal         int `json:"projectsTotal"`
+	SessionsActive        int `json:"sessionsActive"`
+	SessionsIdle          int `json:"sessionsIdle"`
+	SessionsAwaitingInput int `json:"sessionsAwaitingInput"`
 }
 
 // DashboardMachineDTO carries per-machine status and session counts.
@@ -132,13 +135,16 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	dto := DashboardDTO{
 		Totals: DashboardTotalsDTO{
-			MachinesOnline:  view.Totals.MachinesOnline,
-			MachinesTotal:   view.Totals.MachinesTotal,
-			SessionsRunning: view.Totals.SessionsRunning,
-			SessionsExited:  view.Totals.SessionsExited,
-			SessionsLost:    view.Totals.SessionsLost,
-			SessionsTotal:   view.Totals.SessionsTotal,
-			ProjectsTotal:   view.Totals.ProjectsTotal,
+			MachinesOnline:        view.Totals.MachinesOnline,
+			MachinesTotal:         view.Totals.MachinesTotal,
+			SessionsRunning:       view.Totals.SessionsRunning,
+			SessionsExited:        view.Totals.SessionsExited,
+			SessionsLost:          view.Totals.SessionsLost,
+			SessionsTotal:         view.Totals.SessionsTotal,
+			ProjectsTotal:         view.Totals.ProjectsTotal,
+			SessionsActive:        view.Totals.SessionsActive,
+			SessionsIdle:          view.Totals.SessionsIdle,
+			SessionsAwaitingInput: view.Totals.SessionsAwaitingInput,
 		},
 		Machines:       machines,
 		Projects:       projects,

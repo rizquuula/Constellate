@@ -932,12 +932,25 @@ acceptance check passes.
   recent-activity feed) that polls only while active. Per-session *activity* (active/idle/
   awaiting-input) is deferred to M7 — M6 rolls up **status** only.
 
-### M7 — AI-session awareness
+### M7 — AI-session awareness *(done)*
 - Track per-session **activity** (active / idle / awaiting-input) from output heuristics plus an
   opt-in shell hook, surfaced on overview tiles and the dashboard. The `sessions.activity` field is
   designed in from M1, so this is additive — not a rewrite.
 - **Done when:** you can see at a glance which Claude Code / agent sessions across the fleet need
   your attention.
+- **Shipped:** the agent derives activity per session from (a) **output timing** (output within a
+  ~2 s window → *active*), (b) **OSC 133** shell-integration prompt markers parsed by the vt
+  emulator (`133;C` running, `133;A/B/D` at-prompt) to distinguish *idle at a prompt* from a
+  *running command awaiting input*, and (c) a screen-tail **question heuristic** (bounded to short
+  lines to avoid log false-positives). Activity is reported in each `Heartbeat`
+  (`SessionStat.activity`) — **protocol bumped to 3**, window held open at **[1, 3]** (additive: a
+  v2 peer ignores the field). The hub persists it to `sessions.activity` (best-effort; a missing
+  session is tolerated), surfaces it on the session REST DTO, and the dashboard adds
+  active/idle/awaiting-input **totals** + an **`awaiting_input` attention** kind. The frontend shows
+  an **activity badge** (active/idle/**needs input**, the high-signal state, colorblind-distinct and
+  reduced-motion-safe) on sidebar rows, overview tiles, and the dashboard. The **opt-in shell hook**
+  (OSC 133 bash/zsh snippets) is documented in [`docs/shell-integration.md`]; without it, activity
+  falls back to output-timing + the screen-tail heuristic. Decisions folded into §6/§7.2/§18.
 
 ---
 

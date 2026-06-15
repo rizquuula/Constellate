@@ -1233,6 +1233,12 @@ body {
   background: #1e0f0f;
 }
 
+/* amber/attention — awaiting input */
+.dashboard-card-warn {
+  border-color: #5a4010;
+  background: #1e1600;
+}
+
 .dashboard-card-number {
   font-size: 28px;
   font-weight: 700;
@@ -1244,6 +1250,19 @@ body {
 .dashboard-card-danger .dashboard-card-number {
   /* #e0906f on #1e0f0f: contrast ≈ 5.0:1 — passes AA */
   color: #e0906f;
+}
+
+.dashboard-card-warn .dashboard-card-number {
+  /* #d4a44c on #1e1600: contrast ≈ 5.5:1 — passes AA */
+  color: #d4a44c;
+}
+
+.dashboard-card-breakdown {
+  font-weight: 400;
+  color: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .dashboard-card-label {
@@ -1319,6 +1338,18 @@ body {
   font-size: 13px;
   line-height: 1.4;
   user-select: none;
+}
+
+/* awaiting-input attention item — amber tint */
+.dashboard-attention-item-input {
+  background: #1a1400;
+  border-color: #5a4010;
+  /* #e0d4b0 on #1a1400: contrast ≈ 7.8:1 — passes AA */
+  color: #e0d4b0;
+}
+
+.dashboard-attention-item-input .activity-badge {
+  align-self: center;
 }
 
 /* ── Machines table ───────────────────────────────────────────────────────── */
@@ -1552,11 +1583,92 @@ body {
   padding: 8px 0;
 }
 
+/* ── Activity badges ──────────────────────────────────────────────────────── */
+
+.activity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.activity-badge-compact {
+  gap: 0;
+}
+
+.activity-badge-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* active — green */
+.activity-dot-active {
+  background: #4dbb4d;
+}
+
+.activity-badge-active .activity-badge-label {
+  /* #4dbb4d on #16161f: contrast ≈ 5.0:1 — passes AA */
+  color: #4dbb4d;
+}
+
+/* idle — muted grey */
+.activity-dot-idle {
+  background: #7a7a8e;
+}
+
+.activity-badge-idle .activity-badge-label {
+  color: var(--text-muted);
+}
+
+/* awaiting-input — amber attention */
+.activity-dot-awaiting {
+  background: #d4a44c;
+  /* ring gives a non-color distinguisher for colorblind users */
+  box-shadow: 0 0 0 1.5px #d4a44c;
+}
+
+.activity-badge-awaiting-input .activity-badge-label {
+  /* #d4a44c on #16161f: contrast ≈ 7.9:1 — passes AA */
+  color: #d4a44c;
+}
+
+/* pulse on awaiting-input dot */
+@keyframes activity-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.activity-dot-awaiting {
+  animation: activity-pulse 1.6s ease-in-out infinite;
+}
+
+/* pulse on active dot — subtler */
+@keyframes activity-active-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.activity-dot-active {
+  /* #4dbb4d on #16161f: contrast ≈ 7.3:1 — passes AA */
+  animation: activity-active-pulse 2.4s ease-in-out infinite;
+}
+
 /* ── Reduced motion ───────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

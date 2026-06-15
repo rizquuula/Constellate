@@ -1,6 +1,7 @@
 import type { AttentionItem, AuditEntry, MachineRollup, ProjectRollup } from '../../types'
 import { useStore } from '../../store'
 import { useCallback } from 'react'
+import { ActivityBadge } from '../activity/ActivityBadge'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,9 @@ interface SummaryCardsProps {
   sessionsRunning: number
   sessionsTotal: number
   sessionsLost: number
+  sessionsActive: number
+  sessionsIdle: number
+  sessionsAwaitingInput: number
   projectsTotal: number
 }
 
@@ -47,8 +51,16 @@ function SummaryCards({
   sessionsRunning,
   sessionsTotal,
   sessionsLost,
+  sessionsActive,
+  sessionsIdle,
+  sessionsAwaitingInput,
   projectsTotal,
 }: SummaryCardsProps) {
+  const hasBreakdown = sessionsActive > 0 || sessionsIdle > 0 || sessionsAwaitingInput > 0
+  const breakdownParts: string[] = []
+  if (sessionsActive > 0) breakdownParts.push(`${sessionsActive} active`)
+  if (sessionsIdle > 0) breakdownParts.push(`${sessionsIdle} idle`)
+  if (sessionsAwaitingInput > 0) breakdownParts.push(`${sessionsAwaitingInput} needs input`)
   return (
     <div className="dashboard-summary-grid" role="list" aria-label="Fleet summary">
       <div className="dashboard-card" role="listitem">
@@ -57,7 +69,24 @@ function SummaryCards({
       </div>
       <div className="dashboard-card" role="listitem">
         <span className="dashboard-card-number">{sessionsRunning}/{sessionsTotal}</span>
-        <span className="dashboard-card-label">Sessions running</span>
+        <span className="dashboard-card-label">
+          Sessions running
+          {hasBreakdown && (
+            <span className="dashboard-card-breakdown" aria-label={breakdownParts.join(', ')}>
+              {' '}· {breakdownParts.join(' · ')}
+            </span>
+          )}
+        </span>
+      </div>
+      <div
+        className={`dashboard-card${sessionsAwaitingInput > 0 ? ' dashboard-card-warn' : ''}`}
+        role="listitem"
+        {...(sessionsAwaitingInput > 0 ? { 'aria-label': `${sessionsAwaitingInput} session${sessionsAwaitingInput !== 1 ? 's' : ''} awaiting input — needs attention` } : {})}
+      >
+        <span className="dashboard-card-number">{sessionsAwaitingInput}</span>
+        <span className="dashboard-card-label">
+          Awaiting input{sessionsAwaitingInput > 0 && <span className="dashboard-card-warn-tag" aria-hidden="true"> !</span>}
+        </span>
       </div>
       <div
         className={`dashboard-card${sessionsLost > 0 ? ' dashboard-card-danger' : ''}`}
@@ -102,12 +131,25 @@ function AttentionSection({ items, machines }: AttentionSectionProps) {
       <ul className="dashboard-attention-list" role="list">
         {items.map((item) => {
           const machineName = machineMap.get(item.machineID) ?? (item.machineID || 'unknown')
-          const msg = item.kind === 'lost_session'
-            ? `Session "${item.label || item.sessionID}" on ${machineName} is lost.`
-            : `Machine ${machineName} is offline but has running sessions.`
+          let msg: string
+          let isAwaitingInput = false
+          if (item.kind === 'lost_session') {
+            msg = `Session "${item.label || item.sessionID}" on ${machineName} is lost.`
+          } else if (item.kind === 'awaiting_input') {
+            msg = `Session "${item.label || item.sessionID}" on ${machineName} needs input.`
+            isAwaitingInput = true
+          } else {
+            msg = `Machine ${machineName} is offline but has running sessions.`
+          }
           return (
-            <li key={`${item.kind}-${item.machineID}-${item.sessionID}`} className="dashboard-attention-item">
-              <span className="dashboard-attention-icon" aria-hidden="true">!</span>
+            <li
+              key={`${item.kind}-${item.machineID}-${item.sessionID}`}
+              className={`dashboard-attention-item${isAwaitingInput ? ' dashboard-attention-item-input' : ''}`}
+            >
+              {isAwaitingInput
+                ? <ActivityBadge activity="awaiting-input" />
+                : <span className="dashboard-attention-icon" aria-hidden="true">!</span>
+              }
               <span>{msg}</span>
             </li>
           )
@@ -303,6 +345,9 @@ export function DashboardView() {
           sessionsRunning={totals.sessionsRunning}
           sessionsTotal={totals.sessionsTotal}
           sessionsLost={totals.sessionsLost}
+          sessionsActive={totals.sessionsActive ?? 0}
+          sessionsIdle={totals.sessionsIdle ?? 0}
+          sessionsAwaitingInput={totals.sessionsAwaitingInput ?? 0}
           projectsTotal={totals.projectsTotal}
         />
 

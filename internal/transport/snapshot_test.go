@@ -110,10 +110,10 @@ func TestEncodeDecodeEnableSnaps(t *testing.T) {
 }
 
 func TestProtocolWindow(t *testing.T) {
-	if !ProtocolSupported(1) || !ProtocolSupported(2) {
-		t.Errorf("protocol window should accept 1 and 2")
+	if !ProtocolSupported(1) || !ProtocolSupported(2) || !ProtocolSupported(3) {
+		t.Errorf("protocol window should accept 1, 2, and 3")
 	}
-	if ProtocolSupported(0) || ProtocolSupported(3) {
-		t.Errorf("protocol window should reject 0 and 3")
+	if ProtocolSupported(0) || ProtocolSupported(4) {
+		t.Errorf("protocol window should reject 0 and 4")
 	}
 }

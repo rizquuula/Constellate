@@ -100,6 +100,19 @@ func (s *fakeSessionStore) SetTitle(_ context.Context, id, title string) error {
 	return nil
 }
 
+func (s *fakeSessionStore) SetActivity(_ context.Context, id, activity string, lastActiveAt int64) error {
+	ss, ok := s.data[id]
+	if !ok {
+		return session.ErrNotFound
+	}
+	ss.SetActivity(activity)
+	if lastActiveAt > 0 {
+		ss.Touch(lastActiveAt)
+	}
+	s.data[id] = ss
+	return nil
+}
+
 type fakeGateway struct {
 	openErr    error
 	closeCalls []string
@@ -296,6 +309,107 @@ func TestRename_NotFound(t *testing.T) {
 	err := uc.Rename(context.Background(), "no-such-id", "title")
 	if !errors.Is(err, session.ErrNotFound) {
 		t.Errorf("Rename missing: got %v, want session.ErrNotFound", err)
+	}
+}
+
+func TestRecordActivity_SetsActivity(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	clk.ts = 2000
+	if err := uc.RecordActivity(ctx, s.ID(), session.ActivityActive); err != nil {
+		t.Fatalf("RecordActivity active: %v", err)
+	}
+
+	got, err := store.ByID(ctx, s.ID())
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Activity() != session.ActivityActive {
+		t.Errorf("Activity: got %q, want %q", got.Activity(), session.ActivityActive)
+	}
+	if got.LastActiveAt() != 2000 {
+		t.Errorf("LastActiveAt should be bumped for active: got %d, want 2000", got.LastActiveAt())
+	}
+}
+
+func TestRecordActivity_IdleDoesNotBumpLastActiveAt(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	origLAT := s.LastActiveAt()
+
+	clk.ts = 5000
+	if err := uc.RecordActivity(ctx, s.ID(), session.ActivityIdle); err != nil {
+		t.Fatalf("RecordActivity idle: %v", err)
+	}
+
+	got, err := store.ByID(ctx, s.ID())
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Activity() != session.ActivityIdle {
+		t.Errorf("Activity: got %q, want %q", got.Activity(), session.ActivityIdle)
+	}
+	if got.LastActiveAt() != origLAT {
+		t.Errorf("LastActiveAt must not be bumped for idle: got %d, want %d", got.LastActiveAt(), origLAT)
+	}
+}
+
+func TestRecordActivity_NotFound_IsIgnored(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+
+	// Must not return an error for a missing session.
+	if err := uc.RecordActivity(context.Background(), "no-such-id", session.ActivityActive); err != nil {
+		t.Errorf("RecordActivity not-found: expected nil, got %v", err)
+	}
+}
+
+func TestRecordActivity_UnknownActivityIsIgnored(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// An unrecognised value should be a no-op with nil error.
+	if err := uc.RecordActivity(ctx, s.ID(), "bogus-value"); err != nil {
+		t.Errorf("RecordActivity bogus: expected nil, got %v", err)
+	}
+	// Empty string also a no-op.
+	if err := uc.RecordActivity(ctx, s.ID(), ""); err != nil {
+		t.Errorf("RecordActivity empty: expected nil, got %v", err)
+	}
+
+	got, err := store.ByID(ctx, s.ID())
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Activity() != "" {
+		t.Errorf("Activity should be unchanged (empty): got %q", got.Activity())
 	}
 }
 

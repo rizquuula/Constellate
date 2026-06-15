@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useStore } from '../../store'
 import type { Machine, Project, Session } from '../../types'
 import { findLeaf } from '../terminal/paneTree'
+import { ActivityBadge } from '../activity/ActivityBadge'
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
       onClick={() => { if (isRunning) onAssign() }}
       onKeyDown={handleRowKeyDown}
       title={isRunning ? 'Click to open in focused pane' : `Session ${session.status}`}
-      aria-label={`Session ${label}, status ${session.status}`}
+      aria-label={`Session ${label}, status ${session.status}${isRunning && session.activity && session.activity !== 'unknown' ? `, ${session.activity === 'awaiting-input' ? 'needs input' : session.activity}` : ''}`}
     >
       <span className={`session-badge session-badge-${session.status}`}>{session.status}</span>
       {editing ? (
@@ -134,6 +135,7 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
       ) : (
         <span className="session-label" title={label}>{label}</span>
       )}
+      {isRunning && <ActivityBadge activity={session.activity} compact />}
       {closeError && !confirmClose && (
         <span className="rename-error" role="alert" aria-live="assertive">{closeError}</span>
       )}

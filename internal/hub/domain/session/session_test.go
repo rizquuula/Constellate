@@ -102,3 +102,18 @@ func TestSetTitle(t *testing.T) {
 		t.Errorf("SetTitle: got %q, want renamed", s.Title())
 	}
 }
+
+func TestSetActivity(t *testing.T) {
+	s := session.New("sid7", "mid7", "", "", "", 100)
+	if s.Activity() != "" {
+		t.Errorf("Activity default: got %q, want empty", s.Activity())
+	}
+	s.SetActivity(session.ActivityAwaitingInput)
+	if s.Activity() != session.ActivityAwaitingInput {
+		t.Errorf("Activity: got %q, want %q", s.Activity(), session.ActivityAwaitingInput)
+	}
+	s.SetActivity(session.ActivityActive)
+	if s.Activity() != session.ActivityActive {
+		t.Errorf("Activity after update: got %q, want %q", s.Activity(), session.ActivityActive)
+	}
+}

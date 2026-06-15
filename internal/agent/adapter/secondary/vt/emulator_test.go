@@ -928,6 +928,110 @@ func TestDCHLargeN(t *testing.T) {
 	}
 }
 
+// ---------- OSC 133 shell-integration ----------
+
+func TestOSC133PromptCycle(t *testing.T) {
+	e := New(40, 5)
+
+	// Initially unknown.
+	if ps := e.PromptState(); ps != terminal.PromptUnknown {
+		t.Errorf("initial PromptState: got %v, want PromptUnknown", ps)
+	}
+
+	// 133;A — prompt start → PromptAtPrompt.
+	e.Write([]byte("\x1b]133;A\x07"))
+	if ps := e.PromptState(); ps != terminal.PromptAtPrompt {
+		t.Errorf("after 133;A: got %v, want PromptAtPrompt", ps)
+	}
+
+	// 133;B — command-line start → PromptAtPrompt.
+	e.Write([]byte("\x1b]133;B\x07"))
+	if ps := e.PromptState(); ps != terminal.PromptAtPrompt {
+		t.Errorf("after 133;B: got %v, want PromptAtPrompt", ps)
+	}
+
+	// 133;C — pre-execution → PromptRunning.
+	e.Write([]byte("\x1b]133;C\x07"))
+	if ps := e.PromptState(); ps != terminal.PromptRunning {
+		t.Errorf("after 133;C: got %v, want PromptRunning", ps)
+	}
+
+	// 133;D — command finished → PromptAtPrompt.
+	e.Write([]byte("\x1b]133;D;0\x07"))
+	if ps := e.PromptState(); ps != terminal.PromptAtPrompt {
+		t.Errorf("after 133;D: got %v, want PromptAtPrompt", ps)
+	}
+}
+
+func TestOSC133DoesNotAffectGrid(t *testing.T) {
+	e := New(20, 3)
+	e.Write([]byte("hello\x1b]133;C\x07world"))
+	sc, _ := e.Render()
+	rows := renderRows(sc)
+	if rows[0] != "helloworld" {
+		t.Errorf("OSC 133 corrupted grid: got %q, want %q", rows[0], "helloworld")
+	}
+}
+
+func TestNonShellOSCLeavesPromptUnknown(t *testing.T) {
+	e := New(20, 3)
+	// OSC 0 (window title) — should not affect prompt state.
+	e.Write([]byte("\x1b]0;My Title\x07"))
+	if ps := e.PromptState(); ps != terminal.PromptUnknown {
+		t.Errorf("non-133 OSC changed PromptState to %v, want PromptUnknown", ps)
+	}
+}
+
+func TestOSC133STTerminator(t *testing.T) {
+	e := New(40, 5)
+	// OSC terminated with ESC \ (ST) instead of BEL.
+	e.Write([]byte("\x1b]133;C\x1b\\"))
+	if ps := e.PromptState(); ps != terminal.PromptRunning {
+		t.Errorf("after 133;C (ST terminator): got %v, want PromptRunning", ps)
+	}
+}
+
+func TestHardResetClearsPromptState(t *testing.T) {
+	e := New(40, 5)
+	// Set a non-unknown prompt state via OSC 133;C.
+	e.Write([]byte("\x1b]133;C\x07"))
+	if ps := e.PromptState(); ps != terminal.PromptRunning {
+		t.Fatalf("precondition: expected PromptRunning, got %v", ps)
+	}
+	// ESC c — RIS hard reset.
+	e.Write([]byte("\x1bc"))
+	if ps := e.PromptState(); ps != terminal.PromptUnknown {
+		t.Errorf("after hard reset: PromptState = %v, want PromptUnknown", ps)
+	}
+}
+
+func TestTailText(t *testing.T) {
+	e := New(20, 5)
+
+	// Empty screen → empty string.
+	if tt := e.TailText(); tt != "" {
+		t.Errorf("empty screen TailText: got %q, want %q", tt, "")
+	}
+
+	// Write a line; cursor ends on it.
+	e.Write([]byte("hello world"))
+	if tt := e.TailText(); tt != "hello world" {
+		t.Errorf("TailText after write: got %q, want %q", tt, "hello world")
+	}
+
+	// Cursor moves to blank line below; TailText should fall back to last non-blank.
+	e.Write([]byte("\r\n"))
+	if tt := e.TailText(); tt != "hello world" {
+		t.Errorf("TailText with blank cursor row: got %q, want %q", tt, "hello world")
+	}
+
+	// Write new content on the current row.
+	e.Write([]byte("prompt$ "))
+	if tt := e.TailText(); tt != "prompt$" {
+		t.Errorf("TailText after prompt: got %q, want %q", tt, "prompt$")
+	}
+}
+
 // Ensure Render is safe to call from multiple goroutines (no panic / race).
 func TestConcurrentRender(t *testing.T) {
 	e := New(80, 24)

@@ -253,6 +253,71 @@ func TestSessionStore_ProjectID_NullAndSet(t *testing.T) {
 	}
 }
 
+func TestSessionStore_SetActivity_NoLastActiveAt(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	s := session.New("s1", "m1", "", "", "", 1000)
+	if err := ss.Create(ctx, s); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	origLAT := s.LastActiveAt()
+
+	// SetActivity with lastActiveAt=0 must NOT update last_active_at.
+	if err := ss.SetActivity(ctx, "s1", session.ActivityAwaitingInput, 0); err != nil {
+		t.Fatalf("SetActivity: %v", err)
+	}
+
+	got, err := ss.ByID(ctx, "s1")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Activity() != session.ActivityAwaitingInput {
+		t.Errorf("Activity: got %q, want %q", got.Activity(), session.ActivityAwaitingInput)
+	}
+	if got.LastActiveAt() != origLAT {
+		t.Errorf("LastActiveAt must not change when lastActiveAt=0: got %d, want %d", got.LastActiveAt(), origLAT)
+	}
+}
+
+func TestSessionStore_SetActivity_WithLastActiveAt(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	s := session.New("s1", "m1", "", "", "", 1000)
+	if err := ss.Create(ctx, s); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	now := int64(9999)
+	if err := ss.SetActivity(ctx, "s1", session.ActivityActive, now); err != nil {
+		t.Fatalf("SetActivity: %v", err)
+	}
+
+	got, err := ss.ByID(ctx, "s1")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Activity() != session.ActivityActive {
+		t.Errorf("Activity: got %q, want %q", got.Activity(), session.ActivityActive)
+	}
+	if got.LastActiveAt() != now {
+		t.Errorf("LastActiveAt: got %d, want %d", got.LastActiveAt(), now)
+	}
+}
+
+func TestSessionStore_SetActivity_NotFound(t *testing.T) {
+	_, ss := openTestSessionDB(t)
+	err := ss.SetActivity(context.Background(), "no-such-id", session.ActivityIdle, 0)
+	if !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("SetActivity missing: got %v, want session.ErrNotFound", err)
+	}
+}
+
 func TestSessionStore_MarkRunningLost(t *testing.T) {
 	ms, ss := openTestSessionDB(t)
 	ctx := context.Background()

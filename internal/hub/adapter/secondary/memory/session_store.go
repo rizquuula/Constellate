@@ -111,3 +111,22 @@ func (s *SessionStore) SetTitle(_ context.Context, id, title string) error {
 	s.data[id] = ss
 	return nil
 }
+
+// SetActivity updates the session's activity. When lastActiveAt > 0,
+// last_active_at is also updated. Returns session.ErrNotFound (wrapped) if the
+// session does not exist.
+func (s *SessionStore) SetActivity(_ context.Context, id, activity string, lastActiveAt int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ss, ok := s.data[id]
+	if !ok {
+		return fmt.Errorf("memory: set activity %q: %w", id, session.ErrNotFound)
+	}
+	ss.SetActivity(activity)
+	if lastActiveAt > 0 {
+		ss.Touch(lastActiveAt)
+	}
+	s.data[id] = ss
+	return nil
+}

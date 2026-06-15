@@ -56,6 +56,12 @@ func newSession(id, machineID, projectID string, st session.Status) session.Sess
 	return session.Rehydrate(id, projectID, machineID, id+"-title", "/bin/sh", st, 0, 1000, 1001)
 }
 
+func newSessionWithActivity(id, machineID string, st session.Status, activity string) session.Session {
+	s := session.Rehydrate(id, "", machineID, id+"-title", "/bin/sh", st, 0, 1000, 1001)
+	s.SetActivity(activity)
+	return s
+}
+
 func newProject(id, machineID, name string) project.Project {
 	return project.Rehydrate(id, machineID, name, "/"+name, "", 1000)
 }
@@ -428,5 +434,86 @@ func TestOverview_DeterministicSort(t *testing.T) {
 	}
 	if v.Machines[1].Name != "zebra" {
 		t.Errorf("Machines[1].Name: got %q, want zebra", v.Machines[1].Name)
+	}
+}
+
+func TestOverview_ActivityCounts(t *testing.T) {
+	m1 := newMachine("m1", "alpha")
+
+	sessions := []session.Session{
+		newSessionWithActivity("s1", "m1", session.StatusRunning, session.ActivityActive),
+		newSessionWithActivity("s2", "m1", session.StatusRunning, session.ActivityIdle),
+		newSessionWithActivity("s3", "m1", session.StatusRunning, session.ActivityIdle),
+		newSessionWithActivity("s4", "m1", session.StatusRunning, session.ActivityAwaitingInput),
+		newSessionWithActivity("s5", "m1", session.StatusRunning, session.ActivityUnknown),
+		newSessionWithActivity("s6", "m1", session.StatusRunning, ""), // no activity
+	}
+
+	uc := dashboard.New(
+		&fakeMachineStore{machines: []machine.Machine{m1}},
+		&fakeLiveAgents{online: map[string]bool{"m1": true}},
+		&fakeSessionStore{sessions: sessions},
+		&fakeProjectStore{},
+		&fakeAuditReader{},
+		newLogger(),
+	)
+
+	v, err := uc.Overview(context.Background())
+	if err != nil {
+		t.Fatalf("Overview: %v", err)
+	}
+
+	if v.Totals.SessionsActive != 1 {
+		t.Errorf("SessionsActive: got %d, want 1", v.Totals.SessionsActive)
+	}
+	if v.Totals.SessionsIdle != 2 {
+		t.Errorf("SessionsIdle: got %d, want 2", v.Totals.SessionsIdle)
+	}
+	if v.Totals.SessionsAwaitingInput != 1 {
+		t.Errorf("SessionsAwaitingInput: got %d, want 1", v.Totals.SessionsAwaitingInput)
+	}
+}
+
+func TestOverview_AttentionItems_AwaitingInput(t *testing.T) {
+	m1 := newMachine("m1", "alpha")
+
+	sessions := []session.Session{
+		newSessionWithActivity("s-await", "m1", session.StatusRunning, session.ActivityAwaitingInput),
+		newSessionWithActivity("s-active", "m1", session.StatusRunning, session.ActivityActive),
+		// Exited session with awaiting-input: should count in total but NOT generate an attention item.
+		newSessionWithActivity("s-exited-await", "m1", session.StatusExited, session.ActivityAwaitingInput),
+	}
+
+	uc := dashboard.New(
+		&fakeMachineStore{machines: []machine.Machine{m1}},
+		&fakeLiveAgents{online: map[string]bool{"m1": true}},
+		&fakeSessionStore{sessions: sessions},
+		&fakeProjectStore{},
+		&fakeAuditReader{},
+		newLogger(),
+	)
+
+	v, err := uc.Overview(context.Background())
+	if err != nil {
+		t.Fatalf("Overview: %v", err)
+	}
+
+	// Only the running awaiting-input session counts; exited sessions with stale
+	// awaiting-input activity are excluded from totals.
+	if v.Totals.SessionsAwaitingInput != 1 {
+		t.Errorf("SessionsAwaitingInput total: got %d, want 1", v.Totals.SessionsAwaitingInput)
+	}
+
+	awaitItems := 0
+	for _, a := range v.AttentionItems {
+		if a.Kind == "awaiting_input" {
+			awaitItems++
+			if a.SessionID != "s-await" {
+				t.Errorf("awaiting_input attention item SessionID: got %q, want s-await", a.SessionID)
+			}
+		}
+	}
+	if awaitItems != 1 {
+		t.Errorf("awaiting_input attention items: got %d, want 1", awaitItems)
 	}
 }

@@ -37,6 +37,7 @@ type SessionStat struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	BytesOut int64  `json:"bytesOut"`
+	Activity string `json:"activity,omitempty"`
 }
 
 // Heartbeat is sent periodically by the agent to confirm liveness.

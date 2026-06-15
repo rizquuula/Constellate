@@ -25,6 +25,16 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 - Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
 
 ## Status
+M7 done (AI-session awareness): the agent derives per-session **activity** (active/idle/
+awaiting-input) from output timing (~2 s window), **OSC 133** shell-integration prompt markers
+parsed by the vt emulator, and a short-line screen-tail question heuristic; it ships in each
+`Heartbeat` (`SessionStat.activity`) — **protocol bumped to 3**, window **[1,3]** (additive). The
+hub persists it to `sessions.activity` (best-effort), surfaces it on the session DTO, and the
+dashboard adds active/idle/awaiting-input totals + an `awaiting_input` attention kind. Frontend
+shows an **activity badge** (active/idle/**needs input**, colorblind-distinct, reduced-motion-safe)
+on sidebar rows, overview tiles, and the dashboard. Opt-in OSC 133 shell hook documented in
+`docs/shell-integration.md`. Decisions folded into `DESIGN.md` §6/§18.
+
 M6 done (progress dashboard): a server-side aggregation use case (`app/dashboard`) composes the
 machine/session/project/audit read ports + live-agent presence into one `View` — fleet totals,
 per-machine + per-project **status rollups** (running/exited/lost, with an "Ungrouped" bucket), an
@@ -68,9 +78,10 @@ M2 (persistent terminals): agent keeps a per-session **scrollback ring buffer** 
 attach**; session manager is broadcast-buffer + per-attach drain. Agent **process restart** → its
 `running` sessions marked `lost`, detected via a per-process `instanceID` in `Hello`.
 
-Next: M7 (AI-session awareness — per-session activity active/idle/awaiting-input from output
-heuristics + opt-in shell hook, surfaced on overview tiles + the dashboard; the `sessions.activity`
-column exists from M1). Milestone roadmap in `DESIGN.md` §18.
+Next: all roadmap milestones (M0–M7) are complete. Remaining before public exposure: run the
+heavier test tiers in a real environment (`make test-e2e` single-machine Playwright + `make
+test-docker` multi-container) — these are code-complete but not run in the dev sandbox. Milestone
+roadmap in `DESIGN.md` §18.
 
 ## M1 conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is

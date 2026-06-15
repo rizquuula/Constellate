@@ -1,6 +1,7 @@
 import React from 'react'
 import type { CSSProperties } from 'react'
 import type { Session, Snapshot, SnapRun } from '../../types'
+import { ActivityBadge } from '../activity/ActivityBadge'
 import {
   decodeColor,
   DEFAULT_FG,
@@ -90,6 +91,10 @@ function SessionTileInner({ session, machineName, snapshot, onDive }: SessionTil
   const label = session.title || session.shell || session.id.slice(0, 8)
   const dead = session.status !== 'running'
 
+  const activitySuffix = !dead && session.activity && session.activity !== 'unknown'
+    ? ` — ${session.activity === 'awaiting-input' ? 'needs input' : session.activity}`
+    : ''
+
   const interactiveProps = dead
     ? {
         tabIndex: -1,
@@ -99,7 +104,7 @@ function SessionTileInner({ session, machineName, snapshot, onDive }: SessionTil
     : {
         role: 'button' as const,
         tabIndex: 0,
-        'aria-label': `Dive into session ${label} on ${machineName}`,
+        'aria-label': `Dive into session ${label} on ${machineName} — running${activitySuffix}`,
         onClick: () => onDive(session.id),
         onKeyDown: (e: React.KeyboardEvent) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -118,6 +123,7 @@ function SessionTileInner({ session, machineName, snapshot, onDive }: SessionTil
       <div className="tile-header">
         <span className={`pane-status-dot ${statusDotClass(session.status)}`} />
         <span className="tile-label">{label}</span>
+        {!dead && <ActivityBadge activity={session.activity} compact />}
         <span className="tile-machine">{machineName}</span>
       </div>
 

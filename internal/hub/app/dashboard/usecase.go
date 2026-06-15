@@ -13,13 +13,16 @@ const recentAuditLimit = 20
 
 // Totals holds fleet-wide aggregate counts.
 type Totals struct {
-	MachinesOnline  int
-	MachinesTotal   int
-	SessionsRunning int
-	SessionsExited  int
-	SessionsLost    int
-	SessionsTotal   int
-	ProjectsTotal   int
+	MachinesOnline           int
+	MachinesTotal            int
+	SessionsRunning          int
+	SessionsExited           int
+	SessionsLost             int
+	SessionsTotal            int
+	ProjectsTotal            int
+	SessionsActive           int
+	SessionsIdle             int
+	SessionsAwaitingInput    int
 }
 
 // MachineRollup holds per-machine status + session counts.
@@ -49,7 +52,7 @@ type ProjectRollup struct {
 }
 
 // AttentionItem surfaces a condition that requires operator attention.
-// Kind is one of: "lost_session", "offline_with_running".
+// Kind is one of: "lost_session", "offline_with_running", "awaiting_input".
 type AttentionItem struct {
 	Kind      string
 	MachineID string
@@ -181,6 +184,29 @@ func (u *UseCase) Overview(ctx context.Context) (View, error) {
 				SessionID: s.ID(),
 				Label:     label,
 			})
+		}
+
+		// Activity counts — only tally the three named states for running sessions;
+		// exited/lost sessions may carry stale activity values that should not inflate totals.
+		if s.Status() == session.StatusRunning {
+			switch s.Activity() {
+			case session.ActivityActive:
+				totals.SessionsActive++
+			case session.ActivityIdle:
+				totals.SessionsIdle++
+			case session.ActivityAwaitingInput:
+				totals.SessionsAwaitingInput++
+				label := s.Title()
+				if label == "" {
+					label = s.ID()
+				}
+				attention = append(attention, AttentionItem{
+					Kind:      "awaiting_input",
+					MachineID: s.MachineID(),
+					SessionID: s.ID(),
+					Label:     label,
+				})
+			}
 		}
 
 		// Machine rollup.

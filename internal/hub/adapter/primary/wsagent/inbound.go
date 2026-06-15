@@ -108,6 +108,21 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 			} else {
 				e.log.Debug("wsagent: heartbeat", "machineID", hello.MachineID)
 			}
+			if e.events != nil {
+				hb, err := transport.Unmarshal[transport.Heartbeat](frame)
+				if err != nil {
+					e.log.Warn("wsagent: unmarshal Heartbeat failed", "machineID", hello.MachineID, "err", err)
+				} else {
+					for _, stat := range hb.Sessions {
+						if stat.Activity == "" {
+							continue
+						}
+						if err := e.events.RecordActivity(ctx, stat.ID, stat.Activity); err != nil {
+							e.log.Debug("wsagent: RecordActivity failed", "sessionID", stat.ID, "err", err)
+						}
+					}
+				}
+			}
 
 		case transport.TypeSessionOpened:
 			msg, err := transport.Unmarshal[transport.SessionOpened](frame)

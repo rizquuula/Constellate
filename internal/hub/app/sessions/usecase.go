@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -120,4 +121,31 @@ func (u *UseCase) MarkMachineSessionsLost(ctx context.Context, machineID string)
 // session with the given id exists.
 func (u *UseCase) Rename(ctx context.Context, id, title string) error {
 	return u.store.SetTitle(ctx, id, title)
+}
+
+// RecordActivity persists the per-session activity from a heartbeat.
+// Empty or unrecognised activity values are silently ignored.
+// A not-found session (agent reported before the hub has created it) is also
+// silently ignored — this must not break the heartbeat path.
+func (u *UseCase) RecordActivity(ctx context.Context, sessionID, activity string) error {
+	switch activity {
+	case session.ActivityActive, session.ActivityIdle,
+		session.ActivityAwaitingInput, session.ActivityUnknown:
+	default:
+		return nil
+	}
+
+	var lastActiveAt int64
+	if activity == session.ActivityActive {
+		lastActiveAt = u.clock.Now()
+	}
+
+	if err := u.store.SetActivity(ctx, sessionID, activity, lastActiveAt); err != nil {
+		if errors.Is(err, session.ErrNotFound) {
+			u.log.Debug("sessions: RecordActivity: session not found (agent may precede hub record)", "sessionID", sessionID)
+			return nil
+		}
+		return err
+	}
+	return nil
 }

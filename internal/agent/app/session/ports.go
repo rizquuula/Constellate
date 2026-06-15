@@ -49,4 +49,12 @@ type Screen interface {
 	Rev() uint64
 	// Render returns a full deep-copy of the current screen and the revision.
 	Render() (terminal.Screen, uint64)
+	// PromptState returns the current shell-integration prompt state derived
+	// from OSC 133 markers. Returns terminal.PromptUnknown when no markers
+	// have been seen.
+	PromptState() terminal.PromptState
+	// TailText returns the text of the cursor row (trimmed); if that row is
+	// blank, the last non-blank row is returned instead. Cheap: reads the
+	// grid directly without a full Render/copy.
+	TailText() string
 }

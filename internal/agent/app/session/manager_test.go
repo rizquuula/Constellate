@@ -504,6 +504,14 @@ func (s *fakeScreen) Render() (terminal.Screen, uint64) {
 	return s.screen, s.rev
 }
 
+func (s *fakeScreen) PromptState() terminal.PromptState {
+	return terminal.PromptUnknown
+}
+
+func (s *fakeScreen) TailText() string {
+	return ""
+}
+
 func (s *fakeScreen) allWrites() []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -621,6 +629,106 @@ func TestManagerResizePropagatesScreen(t *testing.T) {
 	}
 	if resizes[0] != [2]int{120, 40} {
 		t.Errorf("screen Resize args: got %v, want [120 40]", resizes[0])
+	}
+
+	_ = fake.Close()
+}
+
+// fakeActivityScreen is a fakeScreen with configurable PromptState / TailText.
+type fakeActivityScreen struct {
+	fakeScreen
+	promptState terminal.PromptState
+	tailText    string
+}
+
+func (s *fakeActivityScreen) PromptState() terminal.PromptState { return s.promptState }
+func (s *fakeActivityScreen) TailText() string                  { return s.tailText }
+
+type fakeActivityScreenFactory struct {
+	screen *fakeActivityScreen
+}
+
+func (f *fakeActivityScreenFactory) NewScreen(_, _ int) Screen { return f.screen }
+
+// TestManagerActivities verifies Activities returns the right Activity values
+// based on lastOutputAt, PromptState, and TailText.
+func TestManagerActivities(t *testing.T) {
+	fake := newFakePTY(20)
+	factory := &fakeFactory{pty: fake}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := NewManager(factory, 64*1024, log)
+
+	scr := &fakeActivityScreen{
+		promptState: terminal.PromptUnknown,
+		tailText:    "",
+	}
+	m.SetScreenFactory(&fakeActivityScreenFactory{screen: scr})
+
+	if _, err := m.Open("act-sess", PTYSpec{Shell: "/bin/sh"}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	now := int64(1000)
+
+	// No output yet → ActivityUnknown.
+	acts := m.Activities(now)
+	if len(acts) != 1 {
+		t.Fatalf("Activities: got %d entries, want 1", len(acts))
+	}
+	if acts[0].Activity != terminal.ActivityUnknown {
+		t.Errorf("no output: got %q, want %q", acts[0].Activity, terminal.ActivityUnknown)
+	}
+
+	// Simulate recent output (lastOutputAt within active window).
+	m.mu.Lock()
+	ls := m.sessions["act-sess"]
+	m.mu.Unlock()
+	ls.lastOutputAt.Store(now - 1)
+
+	acts = m.Activities(now)
+	if acts[0].Activity != terminal.ActivityActive {
+		t.Errorf("recent output: got %q, want %q", acts[0].Activity, terminal.ActivityActive)
+	}
+
+	// Stale output + PromptAtPrompt → Idle.
+	ls.lastOutputAt.Store(now - 10)
+	scr.promptState = terminal.PromptAtPrompt
+	acts = m.Activities(now)
+	if acts[0].Activity != terminal.ActivityIdle {
+		t.Errorf("at-prompt: got %q, want %q", acts[0].Activity, terminal.ActivityIdle)
+	}
+
+	// Stale output + PromptRunning + question tail → AwaitingInput.
+	scr.promptState = terminal.PromptRunning
+	scr.tailText = "are you sure? (y/n)"
+	acts = m.Activities(now)
+	if acts[0].Activity != terminal.ActivityAwaitingInput {
+		t.Errorf("running+question: got %q, want %q", acts[0].Activity, terminal.ActivityAwaitingInput)
+	}
+
+	// Stale output + PromptRunning + no question → Active (quiet task).
+	scr.tailText = ""
+	acts = m.Activities(now)
+	if acts[0].Activity != terminal.ActivityActive {
+		t.Errorf("running+quiet: got %q, want %q", acts[0].Activity, terminal.ActivityActive)
+	}
+
+	_ = fake.Close()
+}
+
+// TestManagerActivitiesNoScreen verifies that sessions without a screen
+// are omitted from Activities (no panic on nil screen).
+func TestManagerActivitiesNoScreen(t *testing.T) {
+	fake := newFakePTY(21)
+	m, _ := newTestManager(fake)
+
+	if _, err := m.Open("no-screen-sess", PTYSpec{Shell: "/bin/sh"}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	acts := m.Activities(1000)
+	if len(acts) != 0 {
+		t.Errorf("expected 0 activities without screen, got %d", len(acts))
 	}
 
 	_ = fake.Close()

@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/rizquuula/Constellate/internal/agent/domain/terminal"
 )
@@ -14,6 +16,10 @@ type liveSession struct {
 	pty    PTY
 	sb     *terminal.Scrollback
 	screen Screen // nil when no ScreenFactory was set; see Manager.SetScreenFactory
+
+	// lastOutputAt is the unix-second timestamp of the most recent PTY output
+	// chunk. Updated atomically by readPump; read by Activities.
+	lastOutputAt atomic.Int64
 }
 
 // noopNotifier is the default Notifier used until SetNotifier is called.
@@ -262,6 +268,46 @@ func (m *Manager) RenderScreen(id string) (terminal.SessionScreen, bool) {
 	return terminal.SessionScreen{ID: id, Screen: scr, Rev: rev}, true
 }
 
+// activeWindowSec is the recency threshold used by Activities: output within
+// this many seconds counts as "active".
+const activeWindowSec int64 = 2
+
+// Activities returns per-session activity signals for every running session
+// that has a screen emulator. Sessions without a screen are omitted.
+// now is the current unix-second timestamp (passed in to allow unit testing
+// without real-time dependency). The session map is snapshotted under the
+// manager lock; computation happens outside the lock, mirroring RunningScreens.
+func (m *Manager) Activities(now int64) []terminal.SessionActivity {
+	type entry struct {
+		id           string
+		screen       Screen
+		lastOutputAt int64
+	}
+
+	m.mu.Lock()
+	entries := make([]entry, 0, len(m.sessions))
+	for id, ls := range m.sessions {
+		if ls.screen != nil {
+			entries = append(entries, entry{
+				id:           id,
+				screen:       ls.screen,
+				lastOutputAt: ls.lastOutputAt.Load(),
+			})
+		}
+	}
+	m.mu.Unlock()
+
+	result := make([]terminal.SessionActivity, 0, len(entries))
+	for _, e := range entries {
+		prompt := e.screen.PromptState()
+		tail := e.screen.TailText()
+		question := terminal.TailLooksLikeQuestion(tail)
+		act := terminal.ComputeActivity(now, e.lastOutputAt, activeWindowSec, prompt, question)
+		result = append(result, terminal.SessionActivity{ID: e.id, Activity: act})
+	}
+	return result
+}
+
 // lookup returns the liveSession for sessionID or terminal.ErrNotFound.
 func (m *Manager) lookup(sessionID string) (*liveSession, error) {
 	m.mu.Lock()
@@ -281,6 +327,7 @@ func (m *Manager) readPump(sessionID string, ls *liveSession) {
 	for {
 		n, err := ls.pty.Read(buf)
 		if n > 0 {
+			ls.lastOutputAt.Store(time.Now().Unix())
 			ls.sb.Write(buf[:n])
 			if ls.screen != nil {
 				ls.screen.Write(buf[:n])

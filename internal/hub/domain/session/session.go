@@ -12,6 +12,7 @@ type Session struct {
 	exitCode     int
 	createdAt    int64
 	lastActiveAt int64
+	activity     string
 }
 
 // New creates a Session at open time. status is StatusRunning; lastActiveAt equals createdAt.
@@ -53,6 +54,7 @@ func (s Session) Status() Status       { return s.status }
 func (s Session) ExitCode() int        { return s.exitCode }
 func (s Session) CreatedAt() int64     { return s.createdAt }
 func (s Session) LastActiveAt() int64  { return s.lastActiveAt }
+func (s Session) Activity() string     { return s.activity }
 
 // SetStatus updates the session status.
 func (s *Session) SetStatus(st Status) {
@@ -74,4 +76,9 @@ func (s *Session) Touch(ts int64) {
 // SetTitle updates the session title.
 func (s *Session) SetTitle(t string) {
 	s.title = t
+}
+
+// SetActivity updates the session activity state.
+func (s *Session) SetActivity(a string) {
+	s.activity = a
 }

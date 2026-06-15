@@ -95,6 +95,12 @@ both in-process (`test/integration/terminal_test.go`) and in a real browser (`te
 (`.github/workflows/ci.yaml`). The heavy tiers (Playwright browser + Docker topology) are
 **manual-trigger only** (`e2e.yaml`, run from the Actions tab) to conserve Actions minutes.
 
+## Shell integration (activity badges)
+
+Constellate shows per-session activity (`active` / `idle` / `awaiting input`) in the sidebar,
+overview grid, and dashboard. Accuracy improves with optional OSC 133 prompt markers — see
+[`docs/shell-integration.md`](docs/shell-integration.md) for setup snippets (bash + zsh).
+
 ## Layout
 
 Two bounded contexts in one module, each its own hexagon (`internal/hub`, `internal/agent`), sharing

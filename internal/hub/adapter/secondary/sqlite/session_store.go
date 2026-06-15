@@ -52,7 +52,7 @@ func (s *SessionStore) Create(ctx context.Context, ss session.Session) error {
 // Returns session.ErrNotFound (wrapped) if no row matches.
 func (s *SessionStore) ByID(ctx context.Context, id string) (session.Session, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at
+		SELECT id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at, activity
 		FROM sessions WHERE id = ?
 	`, id)
 	ss, err := scanSession(row)
@@ -68,7 +68,7 @@ func (s *SessionStore) ByID(ctx context.Context, id string) (session.Session, er
 // List returns all session records.
 func (s *SessionStore) List(ctx context.Context) ([]session.Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at
+		SELECT id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at, activity
 		FROM sessions
 	`)
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *SessionStore) List(ctx context.Context) ([]session.Session, error) {
 // ListByMachine returns all sessions for the given machine.
 func (s *SessionStore) ListByMachine(ctx context.Context, machineID string) ([]session.Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at
+		SELECT id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at, activity
 		FROM sessions WHERE machine_id = ?
 	`, machineID)
 	if err != nil {
@@ -146,6 +146,36 @@ func (s *SessionStore) SetTitle(ctx context.Context, id, title string) error {
 	return nil
 }
 
+// SetActivity updates the session's activity column. When lastActiveAt > 0,
+// last_active_at is also updated (only when the session is "active").
+// Returns session.ErrNotFound (wrapped) if 0 rows are affected.
+func (s *SessionStore) SetActivity(ctx context.Context, id, activity string, lastActiveAt int64) error {
+	var (
+		res sql.Result
+		err error
+	)
+	if lastActiveAt > 0 {
+		res, err = s.db.ExecContext(ctx, `
+			UPDATE sessions SET activity = ?, last_active_at = ? WHERE id = ?
+		`, activity, lastActiveAt, id)
+	} else {
+		res, err = s.db.ExecContext(ctx, `
+			UPDATE sessions SET activity = ? WHERE id = ?
+		`, activity, id)
+	}
+	if err != nil {
+		return fmt.Errorf("sqlite: set activity %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: set activity %q: %w", id, session.ErrNotFound)
+	}
+	return nil
+}
+
 func collectSessions(rows *sql.Rows) ([]session.Session, error) {
 	var out []session.Session
 	for rows.Next() {
@@ -163,16 +193,17 @@ func collectSessions(rows *sql.Rows) ([]session.Session, error) {
 
 func scanSession(s scanner) (session.Session, error) {
 	var (
-		id, machineID       string
-		statusStr           string
-		projectID           sql.NullString
-		title               sql.NullString
-		shell               sql.NullString
-		exitCode            sql.NullInt64
-		lastActiveAt        sql.NullInt64
-		createdAt           int64
+		id, machineID string
+		statusStr     string
+		projectID     sql.NullString
+		title         sql.NullString
+		shell         sql.NullString
+		exitCode      sql.NullInt64
+		lastActiveAt  sql.NullInt64
+		createdAt     int64
+		activity      sql.NullString
 	)
-	if err := s.Scan(&id, &projectID, &machineID, &title, &shell, &statusStr, &exitCode, &createdAt, &lastActiveAt); err != nil {
+	if err := s.Scan(&id, &projectID, &machineID, &title, &shell, &statusStr, &exitCode, &createdAt, &lastActiveAt, &activity); err != nil {
 		return session.Session{}, err
 	}
 	var code int
@@ -183,7 +214,7 @@ func scanSession(s scanner) (session.Session, error) {
 	if lastActiveAt.Valid {
 		lat = lastActiveAt.Int64
 	}
-	return session.Rehydrate(
+	ss := session.Rehydrate(
 		id,
 		projectID.String,
 		machineID,
@@ -193,5 +224,9 @@ func scanSession(s scanner) (session.Session, error) {
 		code,
 		createdAt,
 		lat,
-	), nil
+	)
+	if activity.Valid && activity.String != "" {
+		ss.SetActivity(activity.String)
+	}
+	return ss, nil
 }

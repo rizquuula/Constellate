@@ -29,6 +29,7 @@ export interface Session {
   exitCode: number
   createdAt: number
   lastActiveAt: number
+  activity: string
 }
 
 export interface DashboardTotals {
@@ -39,6 +40,9 @@ export interface DashboardTotals {
   sessionsLost: number
   sessionsTotal: number
   projectsTotal: number
+  sessionsActive: number
+  sessionsIdle: number
+  sessionsAwaitingInput: number
 }
 
 export interface MachineRollup {
@@ -63,7 +67,7 @@ export interface ProjectRollup {
 }
 
 export interface AttentionItem {
-  kind: 'lost_session' | 'offline_with_running'
+  kind: 'lost_session' | 'offline_with_running' | 'awaiting_input'
   machineID: string
   sessionID: string
   label: string

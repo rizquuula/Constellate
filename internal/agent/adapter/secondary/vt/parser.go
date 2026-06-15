@@ -45,6 +45,7 @@ type action struct {
 	final        byte   // for actESC / actCSI
 	intermediate []byte // for actESC / actCSI
 	params       []int  // for actCSI (parsed; 0 means "omitted")
+	oscPayload   []byte // for actOSC: the accumulated OSC string (without the ESC] introducer or terminator)
 }
 
 // parser holds the mutable state machine state.
@@ -234,8 +235,9 @@ func (p *parser) feedByte(b byte) (action, parserState) {
 	case stOSCString:
 		switch b {
 		case 0x07: // BEL terminates OSC
+			a := p.buildOSC()
 			p.state = stGround
-			return action{kind: actOSC}, stGround
+			return a, stGround
 		case 0x5C: // if preceded by ESC this is ST; handled via C0 ESC path
 			// Bare 0x5C inside OSC just accumulates.
 		}
@@ -268,8 +270,9 @@ func (p *parser) feedByte(b byte) (action, parserState) {
 func (p *parser) handleC0(b byte) (action, parserState) {
 	// BEL terminates an OSC string regardless of other logic.
 	if b == 0x07 && p.state == stOSCString {
+		a := p.buildOSC()
 		p.state = stGround
-		return action{kind: actOSC}, stGround
+		return a, stGround
 	}
 	// BEL inside DCS passthrough: discard and keep accumulating.
 	if b == 0x07 && p.state == stDCSPassthrough {
@@ -288,8 +291,9 @@ func (p *parser) handleC0(b byte) (action, parserState) {
 		return action{}, stGround
 	case 0x9C: // ST (8-bit) — terminate OSC/DCS
 		if p.state == stOSCString {
+			a := p.buildOSC()
 			p.state = stGround
-			return action{kind: actOSC}, stGround
+			return a, stGround
 		}
 		if p.state == stDCSPassthrough {
 			p.state = stGround
@@ -314,6 +318,15 @@ func (p *parser) handleC0(b byte) (action, parserState) {
 	return action{}, p.state
 }
 
+// buildOSC returns an actOSC action containing the accumulated OSC payload,
+// then resets the OSC accumulator.
+func (p *parser) buildOSC() action {
+	payload := make([]byte, p.nOSC)
+	copy(payload, p.oscBuf[:p.nOSC])
+	p.nOSC = 0
+	return action{kind: actOSC, oscPayload: payload}
+}
+
 func (p *parser) resetCSI() {
 	p.nInter = 0
 	p.nParam = 0
@@ -326,8 +339,9 @@ func (p *parser) buildESC(final byte) action {
 	// ESC \ is ST — if we're terminating an OSC that was interrupted by ESC:
 	// just return actOSC (the caller's state machine will handle it).
 	if final == 0x5C {
+		a := p.buildOSC()
 		p.nInter = 0
-		return action{kind: actOSC}
+		return a
 	}
 
 	p.nInter = 0

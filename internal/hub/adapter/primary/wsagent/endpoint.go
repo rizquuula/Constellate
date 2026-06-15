@@ -16,6 +16,7 @@ import (
 type SessionEvents interface {
 	MarkExited(ctx context.Context, sessionID string, exitCode int) error
 	MarkMachineSessionsLost(ctx context.Context, machineID string) error
+	RecordActivity(ctx context.Context, sessionID, activity string) error
 }
 
 // OverviewSink is the consumer-side port for overview snapshot ingress.

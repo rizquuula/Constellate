@@ -11,7 +11,9 @@
 package vt
 
 import (
+	"bytes"
 	"sync"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/rizquuula/Constellate/internal/agent/domain/terminal"
@@ -45,6 +47,10 @@ type Emulator struct {
 	// revision tracking
 	rev   uint64
 	dirty bool
+
+	// promptState is updated by OSC 133 shell-integration markers.
+	// It is metadata only and does not affect the rendered grid.
+	promptState terminal.PromptState
 
 	// utf8Buf holds an incomplete multibyte UTF-8 sequence that arrived at
 	// the end of a Write call. Up to 3 bytes can be buffered (max UTF-8 = 4).
@@ -345,8 +351,10 @@ func (e *Emulator) dispatch(a action, remaining []byte) {
 		e.dispatchCSI(a.final, a.params, a.intermediate)
 	case actESC:
 		e.dispatchESC(a.final, a.intermediate)
-	case actOSC, actDCS:
-		// Discard: OSC/DCS strings are parsed and ignored.
+	case actOSC:
+		e.handleOSC(a.oscPayload)
+	case actDCS:
+		// Discard: DCS strings are parsed and ignored.
 	}
 }
 
@@ -518,7 +526,89 @@ func (e *Emulator) hardReset() {
 		e.cur = &e.primary
 	}
 	e.cursorVisible = true
+	e.promptState = terminal.PromptUnknown
 	e.dirty = true
+}
+
+// ---------- OSC handling ----------
+
+// handleOSC inspects the OSC payload. OSC 133 (FinalTerm / iTerm2 / VS Code
+// shell-integration) updates the internal prompt state. All other OSC payloads
+// are silently discarded; none affect the rendered grid or revision counter.
+//
+// OSC 133 command codes:
+//
+//	133;A — prompt start      → PromptAtPrompt
+//	133;B — command-line start (prompt end) → PromptAtPrompt
+//	133;C — pre-execution     → PromptRunning
+//	133;D[;<exit>] — command finished → PromptAtPrompt
+func (e *Emulator) handleOSC(payload []byte) {
+	if !bytes.HasPrefix(payload, []byte("133;")) {
+		return
+	}
+	// payload is "133;<cmd>[;<rest>]"; cmd is a single ASCII letter.
+	cmd := payload[4:]
+	if len(cmd) == 0 {
+		return
+	}
+	switch cmd[0] {
+	case 'A', 'B', 'D':
+		e.promptState = terminal.PromptAtPrompt
+	case 'C':
+		e.promptState = terminal.PromptRunning
+	}
+}
+
+// PromptState returns the latest shell-integration prompt state inferred from
+// OSC 133 markers. Returns terminal.PromptUnknown until the first marker is
+// seen. Concurrency-safe.
+func (e *Emulator) PromptState() terminal.PromptState {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.promptState
+}
+
+// TailText returns the text of the cursor row (trimmed of trailing spaces).
+// If the cursor row is blank, the last non-blank row above it is returned
+// instead. If the screen is entirely blank, an empty string is returned.
+// Cheap: reads the grid directly without allocating a full screen copy.
+// Concurrency-safe.
+func (e *Emulator) TailText() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	s := e.cur
+
+	// Helper: extract trimmed text from a row.
+	rowText := func(y int) string {
+		row := s.cells[y]
+		var sb strings.Builder
+		for _, c := range row {
+			r := c.Rune
+			if r == 0 {
+				r = ' '
+			}
+			sb.WriteRune(r)
+		}
+		return strings.TrimRight(sb.String(), " ")
+	}
+
+	// Try the cursor row first.
+	cursorRow := s.cy
+	if cursorRow < 0 || cursorRow >= s.rows {
+		cursorRow = s.rows - 1
+	}
+	if t := rowText(cursorRow); t != "" {
+		return t
+	}
+
+	// Cursor row is blank — find the last non-blank row above it.
+	for y := cursorRow - 1; y >= 0; y-- {
+		if t := rowText(y); t != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 // ---------- CSI sequences ----------

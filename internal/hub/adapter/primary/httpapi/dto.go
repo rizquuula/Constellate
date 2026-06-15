@@ -31,6 +31,7 @@ type SessionDTO struct {
 	ExitCode     int    `json:"exitCode"`
 	CreatedAt    int64  `json:"createdAt"`
 	LastActiveAt int64  `json:"lastActiveAt"`
+	Activity     string `json:"activity"`
 }
 
 func sessionToDTO(s session.Session) SessionDTO {
@@ -44,6 +45,7 @@ func sessionToDTO(s session.Session) SessionDTO {
 		ExitCode:     s.ExitCode(),
 		CreatedAt:    s.CreatedAt(),
 		LastActiveAt: s.LastActiveAt(),
+		Activity:     s.Activity(),
 	}
 }
 
