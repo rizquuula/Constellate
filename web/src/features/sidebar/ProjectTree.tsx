@@ -518,9 +518,10 @@ function formatMem(mb: number | undefined): string {
 
 interface MachineGroupProps {
   machine: Machine
+  revoked?: boolean
 }
 
-function MachineGroup({ machine }: MachineGroupProps) {
+function MachineGroup({ machine, revoked }: MachineGroupProps) {
   const projects = useStore((s) => s.projects.filter((p) => p.machineID === machine.id))
   const sessions = useStore((s) => s.sessions.filter((s) => s.machineID === machine.id))
   const focusedPaneId = useStore((s) => s.focusedPaneId)
@@ -564,7 +565,7 @@ function MachineGroup({ machine }: MachineGroupProps) {
   )
 
   return (
-    <div className="machine-group">
+    <div className={`machine-group${revoked ? ' machine-group-revoked' : ''}`}>
       <div className="machine-item">
         <div className="machine-info">
           <span
@@ -572,6 +573,7 @@ function MachineGroup({ machine }: MachineGroupProps) {
             aria-label={machine.online ? 'online' : 'offline'}
           />
           <span className="machine-name">{machine.name}</span>
+          {revoked && <span className="machine-revoked-badge" aria-label="revoked">revoked</span>}
           {machine.online && (
             <div className="machine-actions">
               <button
@@ -654,6 +656,11 @@ function MachineGroup({ machine }: MachineGroupProps) {
 
 export function ProjectTree() {
   const machines = useStore((s) => s.machines)
+  const showRevokedMachines = useStore((s) => s.showRevokedMachines)
+  const setShowRevokedMachines = useStore((s) => s.setShowRevokedMachines)
+
+  const revokedCount = machines.filter((m) => m.revoked).length
+  const visibleMachines = showRevokedMachines ? machines : machines.filter((m) => !m.revoked)
 
   return (
     <div className="sidebar">
@@ -666,9 +673,22 @@ export function ProjectTree() {
             <p className="empty-state-hint">Run <code>constellate-agent enroll</code> on a machine to connect it.</p>
           </div>
         )}
-        {machines.map((m) => (
-          <MachineGroup key={m.id} machine={m} />
+        {visibleMachines.map((m) => (
+          <MachineGroup key={m.id} machine={m} revoked={m.revoked} />
         ))}
+        {revokedCount > 0 && (
+          <div className="sidebar-revoked-toggle">
+            <label className="sidebar-toggle">
+              <input
+                type="checkbox"
+                checked={showRevokedMachines}
+                onChange={(e) => setShowRevokedMachines(e.target.checked)}
+                aria-label={`Show revoked machines (${revokedCount})`}
+              />
+              Show revoked ({revokedCount})
+            </label>
+          </div>
+        )}
       </div>
     </div>
   )

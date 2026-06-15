@@ -257,6 +257,51 @@ body {
   color: var(--text-faint);
 }
 
+/* ── Revoked machine — dimmed row + badge ─────────────────────────────────── */
+
+.machine-group-revoked {
+  opacity: 0.55;
+}
+
+.machine-revoked-badge {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  background: #2a1a2a;
+  color: #c080c0;
+  border: 1px solid #4a2a4a;
+  flex-shrink: 0;
+}
+
+/* ── Show-revoked toggle ──────────────────────────────────────────────────── */
+
+.sidebar-revoked-toggle {
+  padding: 8px 12px 4px;
+}
+
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sidebar-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+  color: var(--text-primary);
+}
+
 .btn-shell {
   align-self: flex-start;
   background: var(--accent-bg);

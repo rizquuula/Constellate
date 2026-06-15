@@ -8,6 +8,7 @@ export interface Machine {
   lastSeenAt: number
   online: boolean
   status: string
+  revoked: boolean
   cpuPercent?: number
   memUsedMB?: number
   memTotalMB?: number

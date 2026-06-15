@@ -25,12 +25,31 @@ import {
   splitPaneWithSession as treeSplitPaneWithSession,
 } from '../features/terminal/paneTree'
 
+// Safe localStorage accessor — guards against SSR or restricted environments.
+function lsGet(key: string, fallback: string): string {
+  try {
+    return typeof window !== 'undefined' ? (window.localStorage.getItem(key) ?? fallback) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function lsSet(key: string, value: string): void {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.setItem(key, value)
+  } catch {
+    // ignore
+  }
+}
+
 interface Store {
   // ── view mode ─────────────────────────────────────────────────────────────
   viewMode: 'workspace' | 'overview' | 'dashboard'
   setViewMode: (mode: 'workspace' | 'overview' | 'dashboard') => void
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
+  showRevokedMachines: boolean
+  setShowRevokedMachines: (v: boolean) => void
 
   // ── dashboard ─────────────────────────────────────────────────────────────
   dashboard: Dashboard | null
@@ -76,6 +95,11 @@ export const useStore = create<Store>((set, get) => ({
   setViewMode: (mode) => set({ viewMode: mode }),
   sidebarOpen: false,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  showRevokedMachines: lsGet('constellate.showRevokedMachines', 'false') === 'true',
+  setShowRevokedMachines: (v) => {
+    lsSet('constellate.showRevokedMachines', String(v))
+    set({ showRevokedMachines: v })
+  },
 
   dashboard: null,
   dashboardError: false,

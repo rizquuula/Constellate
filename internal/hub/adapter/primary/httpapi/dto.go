@@ -18,6 +18,7 @@ type MachineDTO struct {
 	LastSeenAt   int64    `json:"lastSeenAt"`
 	Online       bool     `json:"online"`
 	Status       string   `json:"status"`
+	Revoked      bool     `json:"revoked"`
 	CPUPercent   *float64 `json:"cpuPercent,omitempty"`
 	MemUsedMB    *int64   `json:"memUsedMB,omitempty"`
 	MemTotalMB   *int64   `json:"memTotalMB,omitempty"`
@@ -88,6 +89,7 @@ func machineToDTO(v registry.MachineView) MachineDTO {
 		LastSeenAt:   v.Machine.LastSeenAt(),
 		Online:       v.Online,
 		Status:       status,
+		Revoked:      v.Machine.Revoked(),
 	}
 	if v.Metrics != nil {
 		if v.Metrics.CPUPercent >= 0 {
