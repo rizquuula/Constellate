@@ -1167,15 +1167,80 @@ body {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
-/* ── Header inline message ───────────────────────────────────────────────── */
+/* ── Snackbar ────────────────────────────────────────────────────────────── */
 
-.header-msg {
-  font-size: 11px;
-  color: var(--text-secondary);
+.snackbar-region {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1000;
 }
 
-.header-msg-error {
-  color: #e06c75;
+.snackbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 12px 10px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-muted);
+  background: var(--surface-raised, #1e2128);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  animation: snackbar-in 160ms ease-out;
+}
+
+@keyframes snackbar-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snackbar { animation: none; }
+}
+
+.snackbar-success {
+  border-left: 3px solid #98c379;
+}
+
+.snackbar-error {
+  border-left: 3px solid #e06c75;
+}
+
+.snackbar-info {
+  border-left: 3px solid var(--accent);
+}
+
+.snackbar-msg {
+  flex: 1;
+}
+
+.snackbar-close {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.snackbar-close:hover {
+  color: var(--text-primary);
+}
+
+.snackbar-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: 4px;
 }
 
 /* ── Dashboard shell ─────────────────────────────────────────────────────── */

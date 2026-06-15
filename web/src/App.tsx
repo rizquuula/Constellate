@@ -4,12 +4,26 @@ import { TerminalView } from './features/terminal/TerminalView'
 import { OverviewGrid } from './features/overview/OverviewGrid'
 import { DashboardView } from './features/dashboard/DashboardView'
 import { Login } from './features/auth/Login'
+import { Snackbar, type SnackbarVariant } from './components/Snackbar'
 import { useStore } from './store'
 import { authStatus, logout, passkeyRegister } from './api/rest'
 
 const hasPasskeySupport = typeof window !== 'undefined' && !!window.PublicKeyCredential
 
 type AuthState = 'loading' | 'setup' | 'login' | 'authed'
+
+/** Map a passkey-registration failure to a concise, user-facing message. */
+function passkeyErrorMessage(err: unknown): string {
+  // Cancelling or letting the prompt time out throws NotAllowedError with a
+  // verbose spec URL — show something readable instead.
+  if (err instanceof DOMException && err.name === 'NotAllowedError') {
+    return 'Passkey registration was cancelled.'
+  }
+  if (err instanceof DOMException && err.name === 'InvalidStateError') {
+    return 'A passkey is already registered for this device.'
+  }
+  return err instanceof Error ? err.message : 'Registration failed.'
+}
 
 export function App() {
   const refreshMachines = useStore((s) => s.refreshMachines)
@@ -57,8 +71,8 @@ export function App() {
     return () => clearInterval(id)
   }, [authState, viewMode, refreshMachines, refreshProjects, refreshSessions, refreshDashboard])
 
-  const [registerMsg, setRegisterMsg] = useState('')
-  const [registerErr, setRegisterErr] = useState(false)
+  const [snackMsg, setSnackMsg] = useState('')
+  const [snackVariant, setSnackVariant] = useState<SnackbarVariant>('info')
 
   async function handleLogout() {
     await logout().catch(console.error)
@@ -66,17 +80,14 @@ export function App() {
   }
 
   async function handleAddPasskey() {
-    setRegisterMsg('')
-    setRegisterErr(false)
+    setSnackMsg('')
     try {
       await passkeyRegister()
-      setRegisterMsg('Passkey added.')
-      setRegisterErr(false)
-      setTimeout(() => setRegisterMsg(''), 3000)
+      setSnackVariant('success')
+      setSnackMsg('Passkey added.')
     } catch (err) {
-      setRegisterMsg(err instanceof Error ? err.message : 'Registration failed')
-      setRegisterErr(true)
-      setTimeout(() => { setRegisterMsg(''); setRegisterErr(false) }, 5000)
+      setSnackVariant('error')
+      setSnackMsg(passkeyErrorMessage(err))
     }
   }
 
@@ -141,15 +152,17 @@ export function App() {
             Add passkey
           </button>
         )}
-        <span
-          className={`header-msg${registerErr ? ' header-msg-error' : ''}`}
-          role="status"
-          aria-live="polite"
-        >{registerMsg}</span>
         <button className="logout-btn" onClick={handleLogout} title="Sign out">
           Sign out
         </button>
       </header>
+
+      <Snackbar
+        message={snackMsg}
+        variant={snackVariant}
+        duration={snackVariant === 'error' ? 6000 : 3000}
+        onDismiss={() => setSnackMsg('')}
+      />
 
       {viewMode === 'overview' ? (
         <div className="overview-shell">
