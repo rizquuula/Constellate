@@ -14,11 +14,29 @@ LDFLAGS_AGENT := -ldflags "-X $(VERSION_PKG).Version=$(AGENT_VERSION) \
 	-X $(VERSION_PKG).Commit=$(COMMIT) \
 	-X $(VERSION_PKG).BuildTime=$(BUILDTIME)"
 
-.PHONY: build build-hub build-agent web test test-web test-docker test-e2e lint image-hub
+.DEFAULT_GOAL := help
 
-build: web build-hub build-agent
+.PHONY: help build build-hub build-agent web test test-web test-docker test-e2e lint image-hub
 
-web:
+##@ General
+
+help: ## Show this help
+	@awk 'BEGIN {FS = ":.*##"; printf "\nConstellate — hub $(HUB_VERSION) · agent $(AGENT_VERSION)\n\nUsage:\n  make \033[36m<target>\033[0m\n"} \
+		/^[a-zA-Z0-9_-]+:.*?##/ { printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2 } \
+		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
+	@echo ""
+
+##@ Build (prod)
+
+build: web build-hub build-agent ## Build everything: web assets + both binaries
+
+build-hub: ## Build the hub binary (bin/constellate-hub)
+	go build $(LDFLAGS_HUB) -o bin/constellate-hub ./cmd/hub
+
+build-agent: ## Build the agent binary (bin/constellate-agent)
+	go build $(LDFLAGS_AGENT) -o bin/constellate-agent ./cmd/agent
+
+web: ## Build the embedded frontend into web/dist
 	@if [ ! -f web/package-lock.json ]; then \
 		cd web && npm install; \
 	else \
@@ -27,26 +45,22 @@ web:
 	cd web && npm run build
 	@touch web/dist/.gitkeep   # vite emptyOutDir wipes it; keep the embed placeholder tracked
 
-build-hub:
-	go build $(LDFLAGS_HUB) -o bin/constellate-hub ./cmd/hub
+image-hub: ## Build the hub Docker image (tagged with the hub version)
+	docker build -f deploy/hub.Dockerfile -t constellate-hub:$(HUB_VERSION) .
 
-build-agent:
-	go build $(LDFLAGS_AGENT) -o bin/constellate-agent ./cmd/agent
+##@ Test & lint (dev)
 
-test:
+test: ## Run Go unit + integration + in-proc E2E tests
 	go test ./...
 
-test-web:
+test-web: ## Run frontend unit tests
 	cd web && npm run test:run
 
-test-docker:
-	./test/docker/run.sh
-
-test-e2e:
+test-e2e: ## Run single-machine Playwright E2E suite
 	./test/e2e/run.sh
 
-lint:
-	golangci-lint run
+test-docker: ## Run dockerized E2E (hub + 2 agent containers)
+	./test/docker/run.sh
 
-image-hub:
-	docker build -f deploy/hub.Dockerfile -t constellate-hub:$(HUB_VERSION) .
+lint: ## Run golangci-lint (v2 config)
+	golangci-lint run
