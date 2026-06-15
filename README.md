@@ -91,6 +91,18 @@ operator, enrolls two agent "machines", and prints a login code:
 open http://localhost:8080      # log in with the printed code → pick an agent → "New shell"
 ```
 
+To install just the **agent** on a remote machine, use the one-line installer — it downloads the
+binary for your OS/arch from the latest release, verifies its SHA-256, and drops it in
+`/usr/local/bin` (override with `BIN_DIR=`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rizquuula/Constellate/main/install.sh | sh
+
+# …then enroll + connect. Or enroll in one step by passing the hub + token:
+curl -fsSL https://raw.githubusercontent.com/rizquuula/Constellate/main/install.sh \
+  | CONSTELLATE_HUB=https://your-hub.example CONSTELLATE_TOKEN=<token> sh
+```
+
 To run the **binaries directly** (two terminals), the flow is: build, start the hub, bootstrap an
 operator, mint an enrollment token, enroll the agent, then run it:
 
