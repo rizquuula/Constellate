@@ -523,11 +523,22 @@ function MachineGroup({ machine }: MachineGroupProps) {
     <div className="machine-group">
       <div className="machine-item">
         <div className="machine-info">
-          <span className={`dot ${machine.online ? 'dot-online' : 'dot-offline'}`} />
+          <span
+            className={`dot ${machine.online ? 'dot-online' : 'dot-offline'}`}
+            aria-label={machine.online ? 'online' : 'offline'}
+          />
           <span className="machine-name">{machine.name}</span>
+        </div>
+        <div className="machine-submeta">
           <span className="machine-meta">{machine.os}/{machine.arch}</span>
           {machine.online && machine.memTotalMB != null && (
-            <span className="machine-stats">
+            <span
+              className="machine-stats"
+              aria-label={
+                (machine.cpuPercent != null ? `CPU ${Math.round(machine.cpuPercent)}%, ` : '') +
+                `RAM ${formatMem(machine.memUsedMB)} of ${formatMem(machine.memTotalMB)} used`
+              }
+            >
               {machine.cpuPercent != null && <>{Math.round(machine.cpuPercent)}% · </>}
               {formatMem(machine.memUsedMB)}/{formatMem(machine.memTotalMB)}
             </span>

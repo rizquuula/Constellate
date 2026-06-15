@@ -165,14 +165,27 @@ body {
 }
 
 .machine-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Secondary metadata line, indented to sit under the machine name
+   (past the status dot: 7px dot + 6px gap). */
+.machine-submeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 2px;
+  padding-left: 13px;
+}
+
 .machine-meta {
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-size: var(--text-xs);
   white-space: nowrap;
 }
@@ -182,6 +195,13 @@ body {
   font-size: var(--text-xs);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* Faint divider between the os/arch tag and the live metrics. */
+.machine-submeta .machine-stats::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--text-faint);
 }
 
 .btn-shell {
