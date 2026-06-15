@@ -1,8 +1,10 @@
-# Using Constellate
+# Using Constellate — from binaries
 
-This is the end-user guide for running Constellate: standing up the **hub**, enrolling **agents**
-on your machines, and driving everything from the **web UI**. For the architecture and design
-rationale, see [`DESIGN.md`](../DESIGN.md).
+This is the end-user guide for running Constellate **from the prebuilt binaries**: standing up the
+**hub**, enrolling **agents** on your machines, and driving everything from the **web UI**. If you'd
+rather run everything in containers, see the Docker guide,
+[`usage.docker.md`](usage.docker.md). For the architecture and design rationale, see
+[`DESIGN.md`](../DESIGN.md).
 
 ---
 
