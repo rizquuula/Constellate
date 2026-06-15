@@ -9,8 +9,38 @@ permissions:
   contents: read
 
 jobs:
+  # Detect which parts of the tree changed so the heavy jobs below only run
+  # when their inputs actually moved. Skipped jobs still report a (skipped)
+  # status, so this stays compatible with required status checks.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - '.golangci.yml'
+              - '.golangci.yaml'
+              - '.github/workflows/ci.yaml'
+            web:
+              - 'web/**'
+              - '.github/workflows/ci.yaml'
+
   build-test:
     name: lint · unit · integration · in-proc E2E
+    needs: changes
+    if: ${{ needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: auto
@@ -40,6 +70,8 @@ jobs:
 
   frontend:
     name: frontend typecheck + build
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
