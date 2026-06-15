@@ -8,6 +8,9 @@ export interface Machine {
   lastSeenAt: number
   online: boolean
   status: string
+  cpuPercent?: number
+  memUsedMB?: number
+  memTotalMB?: number
 }
 
 export interface Project {

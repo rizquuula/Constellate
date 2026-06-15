@@ -61,7 +61,8 @@ func (s *fakeStore) ByID(_ context.Context, id string) (machine.Machine, error) 
 }
 
 type fakeLive struct {
-	online map[string]bool
+	online  map[string]bool
+	metrics map[string]registry.Metrics
 }
 
 func (f *fakeLive) IsOnline(id string) bool { return f.online[id] }
@@ -73,6 +74,10 @@ func (f *fakeLive) OnlineIDs() []string {
 		}
 	}
 	return ids
+}
+func (f *fakeLive) Metrics(id string) (registry.Metrics, bool) {
+	m, ok := f.metrics[id]
+	return m, ok
 }
 
 type fakeClock struct{ ts int64 }
@@ -179,6 +184,68 @@ func TestReRegister_PreservesEnrolledAt(t *testing.T) {
 	}
 	if m.Name() != "box1-renamed" {
 		t.Errorf("re-register should update name: got %q", m.Name())
+	}
+}
+
+func TestList_MetricsPopulatedForOnlineMachine(t *testing.T) {
+	store := newFakeStore()
+	met := registry.Metrics{CPUPercent: 30.0, MemUsedMB: 1024, MemTotalMB: 16384}
+	live := &fakeLive{
+		online:  map[string]bool{"m1": true},
+		metrics: map[string]registry.Metrics{"m1": met},
+	}
+	clk := &fakeClock{ts: 1000}
+	uc := registry.New(store, live, clk, discardLogger())
+	ctx := context.Background()
+
+	_, _, err := uc.Register(ctx, registry.RegisterInput{MachineID: "m1", Name: "box1"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	views, err := uc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("List: got %d views, want 1", len(views))
+	}
+	v := views[0]
+	if v.Metrics == nil {
+		t.Fatal("MachineView.Metrics: got nil, want non-nil for online machine")
+	}
+	if v.Metrics.CPUPercent != met.CPUPercent {
+		t.Errorf("CPUPercent: got %v, want %v", v.Metrics.CPUPercent, met.CPUPercent)
+	}
+	if v.Metrics.MemTotalMB != met.MemTotalMB {
+		t.Errorf("MemTotalMB: got %d, want %d", v.Metrics.MemTotalMB, met.MemTotalMB)
+	}
+}
+
+func TestList_MetricsNilForOfflineMachine(t *testing.T) {
+	store := newFakeStore()
+	live := &fakeLive{
+		online:  map[string]bool{},
+		metrics: map[string]registry.Metrics{},
+	}
+	clk := &fakeClock{ts: 1000}
+	uc := registry.New(store, live, clk, discardLogger())
+	ctx := context.Background()
+
+	_, _, err := uc.Register(ctx, registry.RegisterInput{MachineID: "m1", Name: "box1"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	views, err := uc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("List: got %d views, want 1", len(views))
+	}
+	if views[0].Metrics != nil {
+		t.Errorf("MachineView.Metrics: got %+v, want nil for offline machine", views[0].Metrics)
 	}
 }
 

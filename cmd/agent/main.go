@@ -25,6 +25,7 @@ import (
 
 	"github.com/rizquuula/Constellate/internal/agent/adapter/primary/hubclient"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/pty"
+	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/sysmetrics"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/vt"
 	"github.com/rizquuula/Constellate/internal/agent/app/session"
 	"github.com/rizquuula/Constellate/internal/agent/app/snapshot"
@@ -166,6 +167,7 @@ func cmdConnect(args []string) {
 		HeartbeatInterval: 5 * time.Second,
 		Log:               log,
 		Sessions:          mgr,
+		Metrics:           sysmetrics.Collector{},
 	})
 
 	prod := snapshot.New(mgr, client, snapshot.DefaultInterval, log)

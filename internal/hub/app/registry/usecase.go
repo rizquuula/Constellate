@@ -24,10 +24,11 @@ type RegisterInput struct {
 	AgentVersion string
 }
 
-// MachineView pairs a Machine with its current online status.
+// MachineView pairs a Machine with its current online status and host metrics.
 type MachineView struct {
 	Machine machine.Machine
 	Online  bool
+	Metrics *Metrics
 }
 
 // UseCase orchestrates machine registration, heartbeats, and listing.
@@ -75,7 +76,7 @@ func (u *UseCase) Heartbeat(ctx context.Context, id string) error {
 	return u.store.UpdateLastSeen(ctx, id, u.clock.Now())
 }
 
-// List returns all machines with their online status overlaid.
+// List returns all machines with their online status and host metrics overlaid.
 func (u *UseCase) List(ctx context.Context) ([]MachineView, error) {
 	machines, err := u.store.List(ctx)
 	if err != nil {
@@ -83,10 +84,17 @@ func (u *UseCase) List(ctx context.Context) ([]MachineView, error) {
 	}
 	views := make([]MachineView, len(machines))
 	for i, m := range machines {
-		views[i] = MachineView{
+		online := u.live.IsOnline(m.ID())
+		v := MachineView{
 			Machine: m,
-			Online:  u.live.IsOnline(m.ID()),
+			Online:  online,
 		}
+		if online {
+			if met, ok := u.live.Metrics(m.ID()); ok {
+				v.Metrics = &met
+			}
+		}
+		views[i] = v
 	}
 	return views, nil
 }

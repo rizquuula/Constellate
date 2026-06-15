@@ -466,6 +466,12 @@ function NewProjectForm({ machineID, onDone }: NewProjectFormProps) {
   )
 }
 
+function formatMem(mb: number | undefined): string {
+  if (mb == null) return ''
+  if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB'
+  return mb + ' MB'
+}
+
 interface MachineGroupProps {
   machine: Machine
 }
@@ -520,6 +526,12 @@ function MachineGroup({ machine }: MachineGroupProps) {
           <span className={`dot ${machine.online ? 'dot-online' : 'dot-offline'}`} />
           <span className="machine-name">{machine.name}</span>
           <span className="machine-meta">{machine.os}/{machine.arch}</span>
+          {machine.online && machine.memTotalMB != null && (
+            <span className="machine-stats">
+              {machine.cpuPercent != null && <>{Math.round(machine.cpuPercent)}% · </>}
+              {formatMem(machine.memUsedMB)}/{formatMem(machine.memTotalMB)}
+            </span>
+          )}
         </div>
         {machine.online && (
           <div className="machine-actions">

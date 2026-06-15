@@ -31,6 +31,12 @@ type SessionManager interface {
 	Activities(now int64) []terminal.SessionActivity
 }
 
+// MetricsSampler is the consumer-side interface for sampling host metrics.
+// sysmetrics.Collector satisfies this structurally.
+type MetricsSampler interface {
+	Sample() (transport.Metrics, bool)
+}
+
 // errNotConnected is returned by sendControl when no encoder is set.
 var errNotConnected = errors.New("hubclient: not connected")
 
@@ -62,6 +68,7 @@ type Config struct {
 	HTTPClient        *http.Client
 	Log               *slog.Logger
 	Sessions          SessionManager
+	Metrics           MetricsSampler
 }
 
 // snapshotToggle is a consumer-side interface for enabling/disabling the
@@ -81,6 +88,7 @@ type Client struct {
 	heartbeatInterval time.Duration
 	log               *slog.Logger
 	sessions          SessionManager
+	metrics           MetricsSampler
 
 	mu      sync.Mutex
 	ctrlEnc *transport.Encoder
@@ -121,6 +129,7 @@ func New(cfg Config) *Client {
 		heartbeatInterval: cfg.HeartbeatInterval,
 		log:               cfg.Log,
 		sessions:          cfg.Sessions,
+		metrics:           cfg.Metrics,
 	}
 }
 
@@ -390,7 +399,13 @@ func (c *Client) serve(ctx context.Context, sess *yamux.Session, ctrl net.Conn, 
 						}
 					}
 				}
-				if err := enc.Encode(transport.NewHeartbeat(now, stats)); err != nil {
+				var m *transport.Metrics
+				if c.metrics != nil {
+					if sampled, ok := c.metrics.Sample(); ok {
+						m = &sampled
+					}
+				}
+				if err := enc.Encode(transport.NewHeartbeat(now, stats, m)); err != nil {
 					errc <- err
 					return
 				}

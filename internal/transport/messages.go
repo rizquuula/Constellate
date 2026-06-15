@@ -40,11 +40,21 @@ type SessionStat struct {
 	Activity string `json:"activity,omitempty"`
 }
 
+// Metrics carries host-level resource usage sampled by the agent.
+// CPUPercent is the host CPU utilisation over the last heartbeat interval.
+// It is set to -1 when unavailable. MemUsedMB and MemTotalMB are in mebibytes.
+type Metrics struct {
+	CPUPercent float64 `json:"cpuPercent"`
+	MemUsedMB  int64   `json:"memUsedMB"`
+	MemTotalMB int64   `json:"memTotalMB"`
+}
+
 // Heartbeat is sent periodically by the agent to confirm liveness.
 type Heartbeat struct {
 	Type     MessageType   `json:"type"`
 	TS       int64         `json:"ts"`
 	Sessions []SessionStat `json:"sessions"`
+	Metrics  *Metrics      `json:"metrics,omitempty"`
 }
 
 // SessionOpened is sent by the agent when a requested session is ready.
@@ -125,11 +135,13 @@ func NewHello(machineID, instanceID, name, os, arch, agentVersion string, protoc
 }
 
 // NewHeartbeat constructs a Heartbeat message with the Type field pre-set.
-func NewHeartbeat(ts int64, sessions []SessionStat) Heartbeat {
+// metrics may be nil when host sampling is unavailable or not wired.
+func NewHeartbeat(ts int64, sessions []SessionStat, metrics *Metrics) Heartbeat {
 	return Heartbeat{
 		Type:     TypeHeartbeat,
 		TS:       ts,
 		Sessions: sessions,
+		Metrics:  metrics,
 	}
 }
 

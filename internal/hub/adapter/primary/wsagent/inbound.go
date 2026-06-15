@@ -107,11 +107,14 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 			} else {
 				e.log.Debug("wsagent: heartbeat", "machineID", hello.MachineID)
 			}
-			if e.events != nil {
-				hb, err := transport.Unmarshal[transport.Heartbeat](frame)
-				if err != nil {
-					e.log.Warn("wsagent: unmarshal Heartbeat failed", "machineID", hello.MachineID, "err", err)
-				} else {
+			hb, hbErr := transport.Unmarshal[transport.Heartbeat](frame)
+			if hbErr != nil {
+				e.log.Warn("wsagent: unmarshal Heartbeat failed", "machineID", hello.MachineID, "err", hbErr)
+			} else {
+				if hb.Metrics != nil {
+					e.links.UpdateMetrics(hello.MachineID, *hb.Metrics)
+				}
+				if e.events != nil {
 					for _, stat := range hb.Sessions {
 						if stat.Activity == "" {
 							continue

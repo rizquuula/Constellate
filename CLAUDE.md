@@ -25,6 +25,11 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 - Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
 
 ## Status
+Protocol is now **4** (window [1,4]): `Heartbeat` carries an optional `metrics` object
+(`cpuPercent`, `memUsedMB`, `memTotalMB`) sampled via gopsutil; hub stashes it in-memory on
+the live `Conn` and surfaces it on the machine DTO; sidebar shows `12% · 5.4/16 GB` under the
+machine name while online. Additive; older peers ignore it.
+
 M7 done (AI-session awareness): the agent derives per-session **activity** (active/idle/
 awaiting-input) from output timing (~2 s window), **OSC 133** shell-integration prompt markers
 parsed by the vt emulator, and a short-line screen-tail question heuristic; it ships in each

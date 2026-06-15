@@ -9,15 +9,18 @@ import (
 
 // MachineDTO is the HTTP representation of a machine's view.
 type MachineDTO struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	OS           string `json:"os"`
-	Arch         string `json:"arch"`
-	AgentVersion string `json:"agentVersion"`
-	EnrolledAt   int64  `json:"enrolledAt"`
-	LastSeenAt   int64  `json:"lastSeenAt"`
-	Online       bool   `json:"online"`
-	Status       string `json:"status"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	OS           string   `json:"os"`
+	Arch         string   `json:"arch"`
+	AgentVersion string   `json:"agentVersion"`
+	EnrolledAt   int64    `json:"enrolledAt"`
+	LastSeenAt   int64    `json:"lastSeenAt"`
+	Online       bool     `json:"online"`
+	Status       string   `json:"status"`
+	CPUPercent   *float64 `json:"cpuPercent,omitempty"`
+	MemUsedMB    *int64   `json:"memUsedMB,omitempty"`
+	MemTotalMB   *int64   `json:"memTotalMB,omitempty"`
 }
 
 // SessionDTO is the HTTP representation of a session.
@@ -75,7 +78,7 @@ func machineToDTO(v registry.MachineView) MachineDTO {
 	if v.Online {
 		status = string(machine.StatusOnline)
 	}
-	return MachineDTO{
+	dto := MachineDTO{
 		ID:           v.Machine.ID(),
 		Name:         v.Machine.Name(),
 		OS:           v.Machine.OS(),
@@ -86,4 +89,15 @@ func machineToDTO(v registry.MachineView) MachineDTO {
 		Online:       v.Online,
 		Status:       status,
 	}
+	if v.Metrics != nil {
+		if v.Metrics.CPUPercent >= 0 {
+			cpu := v.Metrics.CPUPercent
+			dto.CPUPercent = &cpu
+		}
+		used := v.Metrics.MemUsedMB
+		total := v.Metrics.MemTotalMB
+		dto.MemUsedMB = &used
+		dto.MemTotalMB = &total
+	}
+	return dto
 }

@@ -215,7 +215,7 @@ touching use cases.
 Agent → Hub:
 ```
 Hello         { machineID, name, os, arch, agentVersion, protocolVersion }
-Heartbeat     { ts, sessions: [{ id, status, bytesOut }] }
+Heartbeat     { ts, sessions: [{ id, status, bytesOut }], metrics? }   // metrics: { cpuPercent, memUsedMB, memTotalMB } — added in protocol v4
 SessionOpened { sessionID, pid }
 SessionExited { sessionID, exitCode }
 Error         { sessionID?, code, message }
@@ -725,10 +725,12 @@ Two axes, deliberately separate:
   `1.4.0` and agent `0.9.2` talk fine as long as their protocols are in range. M4 bumped the protocol
   to **2** (adds `EnableSnaps` + the snapshot stream) with the window held open at **[1, 2]**: the
   additions are backward compatible, so a v1 and a v2 peer still interoperate — just without the
-  overview feed.
+  overview feed. Protocol is now **4** (window **[1, 4]**): v4 adds `Heartbeat.metrics` (host
+  CPU/RAM via gopsutil); host metrics live in-memory on the live `Conn` and are absent when the
+  agent is offline. All additions are additive; older peers ignore unknown fields.
 
 Both `version` commands print all three for skew debugging, e.g.
-`constellate-agent 0.9.2 (commit a1b2c3d, proto 3)`.
+`constellate-agent 0.9.2 (commit a1b2c3d, proto 4)`.
 
 ## 14. Configuration
 

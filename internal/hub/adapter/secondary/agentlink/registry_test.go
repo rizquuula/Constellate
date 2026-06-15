@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
+	"github.com/rizquuula/Constellate/internal/transport"
 )
 
 func TestRegistry_AddGetRemove(t *testing.T) {
@@ -64,6 +65,48 @@ func TestRegistry_OnlineIDs(t *testing.T) {
 	}
 	if ids[0] != "m2" {
 		t.Errorf("OnlineIDs: got %q, want m2", ids[0])
+	}
+}
+
+func TestRegistry_UpdateMetrics(t *testing.T) {
+	r := agentlink.NewRegistry()
+
+	// Before any connection: Metrics returns not-found.
+	_, ok := r.Metrics("m1")
+	if ok {
+		t.Error("Metrics before Add: expected ok=false")
+	}
+
+	c := agentlink.NewConn("m1", nil, nil, 0)
+	r.Add("m1", c)
+
+	// After Add but before any UpdateMetrics: still not found.
+	_, ok = r.Metrics("m1")
+	if ok {
+		t.Error("Metrics after Add (no update yet): expected ok=false")
+	}
+
+	// After UpdateMetrics: values round-trip.
+	r.UpdateMetrics("m1", transport.Metrics{CPUPercent: 12.5, MemUsedMB: 512, MemTotalMB: 4096})
+	got, ok := r.Metrics("m1")
+	if !ok {
+		t.Fatal("Metrics after UpdateMetrics: expected ok=true")
+	}
+	if got.CPUPercent != 12.5 {
+		t.Errorf("CPUPercent: got %v, want 12.5", got.CPUPercent)
+	}
+	if got.MemUsedMB != 512 {
+		t.Errorf("MemUsedMB: got %d, want 512", got.MemUsedMB)
+	}
+	if got.MemTotalMB != 4096 {
+		t.Errorf("MemTotalMB: got %d, want 4096", got.MemTotalMB)
+	}
+
+	// After Remove: not found again.
+	r.Remove("m1")
+	_, ok = r.Metrics("m1")
+	if ok {
+		t.Error("Metrics after Remove: expected ok=false")
 	}
 }
 

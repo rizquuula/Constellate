@@ -59,7 +59,7 @@ func TestEncodeDecodeHeartbeat(t *testing.T) {
 	sessions := []SessionStat{
 		{ID: "sess-1", Status: "running", BytesOut: 1024},
 	}
-	want := NewHeartbeat(now, sessions)
+	want := NewHeartbeat(now, sessions, nil)
 	if err := enc.Encode(want); err != nil {
 		t.Fatalf("Encode Heartbeat: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestMultipleFrames(t *testing.T) {
 	dec := NewDecoder(&buf)
 
 	hello := NewHello("m1", "", "box", "linux", "arm64", "0.1.0", 1)
-	hb := NewHeartbeat(12345, nil)
+	hb := NewHeartbeat(12345, nil, nil)
 
 	if err := enc.Encode(hello); err != nil {
 		t.Fatalf("Encode Hello: %v", err)
@@ -124,5 +124,76 @@ func TestMultipleFrames(t *testing.T) {
 	_, err = dec.Next()
 	if !errors.Is(err, io.EOF) {
 		t.Errorf("expected io.EOF after last frame, got %v", err)
+	}
+}
+
+func TestHeartbeatWithMetrics(t *testing.T) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	dec := NewDecoder(&buf)
+
+	m := &Metrics{CPUPercent: 42.5, MemUsedMB: 1024, MemTotalMB: 8192}
+	want := NewHeartbeat(9999, nil, m)
+	if err := enc.Encode(want); err != nil {
+		t.Fatalf("Encode Heartbeat with Metrics: %v", err)
+	}
+
+	f, err := dec.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	got, err := Unmarshal[Heartbeat](f)
+	if err != nil {
+		t.Fatalf("Unmarshal Heartbeat: %v", err)
+	}
+	if got.Metrics == nil {
+		t.Fatal("Metrics: got nil, want non-nil")
+	}
+	if got.Metrics.CPUPercent != m.CPUPercent {
+		t.Errorf("CPUPercent: got %v, want %v", got.Metrics.CPUPercent, m.CPUPercent)
+	}
+	if got.Metrics.MemUsedMB != m.MemUsedMB {
+		t.Errorf("MemUsedMB: got %d, want %d", got.Metrics.MemUsedMB, m.MemUsedMB)
+	}
+	if got.Metrics.MemTotalMB != m.MemTotalMB {
+		t.Errorf("MemTotalMB: got %d, want %d", got.Metrics.MemTotalMB, m.MemTotalMB)
+	}
+}
+
+func TestHeartbeatWithoutMetrics(t *testing.T) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	dec := NewDecoder(&buf)
+
+	want := NewHeartbeat(1234, nil, nil)
+	if err := enc.Encode(want); err != nil {
+		t.Fatalf("Encode Heartbeat without Metrics: %v", err)
+	}
+
+	f, err := dec.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	got, err := Unmarshal[Heartbeat](f)
+	if err != nil {
+		t.Fatalf("Unmarshal Heartbeat: %v", err)
+	}
+	if got.Metrics != nil {
+		t.Errorf("Metrics: got %+v, want nil", got.Metrics)
+	}
+}
+
+func TestProtocolSupported4(t *testing.T) {
+	if !ProtocolSupported(4) {
+		t.Error("ProtocolSupported(4): got false, want true")
+	}
+	if !ProtocolSupported(1) {
+		t.Error("ProtocolSupported(1): got false, want true (min boundary)")
+	}
+	if ProtocolSupported(0) {
+		t.Error("ProtocolSupported(0): got true, want false (below min)")
+	}
+	if ProtocolSupported(5) {
+		t.Error("ProtocolSupported(5): got true, want false (above max)")
 	}
 }

@@ -177,6 +177,13 @@ body {
   white-space: nowrap;
 }
 
+.machine-stats {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .btn-shell {
   align-self: flex-start;
   background: var(--accent-bg);

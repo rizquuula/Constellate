@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/hashicorp/yamux"
+	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/internal/transport"
 )
 
@@ -22,6 +23,7 @@ type Conn struct {
 	ctrlEnc     *transport.Encoder
 	mu          sync.Mutex
 	pending     map[string]chan openResult
+	metrics     *transport.Metrics
 }
 
 // NewConn constructs a Conn for machineID backed by sess and ctrlEnc.
@@ -68,6 +70,24 @@ func (c *Conn) ResolveOpen(sessionID string, pid int, err error) {
 	if ok {
 		ch <- openResult{pid: pid, err: err}
 	}
+}
+
+// SetMetrics stores the latest host metrics for this connection.
+func (c *Conn) SetMetrics(m transport.Metrics) {
+	c.mu.Lock()
+	mc := m
+	c.metrics = &mc
+	c.mu.Unlock()
+}
+
+// connMetrics returns the stored metrics and whether any have been received.
+func (c *Conn) connMetrics() (transport.Metrics, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.metrics == nil {
+		return transport.Metrics{}, false
+	}
+	return *c.metrics, true
 }
 
 // EnableSnaps sends an EnableSnaps control message to this agent.
@@ -143,4 +163,35 @@ func (r *Registry) OnlineIDs() []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// UpdateMetrics stores the latest host metrics for machineID.
+// No-op when the machine is not currently connected.
+func (r *Registry) UpdateMetrics(machineID string, m transport.Metrics) {
+	r.mu.RLock()
+	c, ok := r.conns[machineID]
+	r.mu.RUnlock()
+	if ok {
+		c.SetMetrics(m)
+	}
+}
+
+// Metrics returns the latest host metrics for machineID.
+// Satisfies registry.LiveAgents.
+func (r *Registry) Metrics(machineID string) (registry.Metrics, bool) {
+	r.mu.RLock()
+	c, ok := r.conns[machineID]
+	r.mu.RUnlock()
+	if !ok {
+		return registry.Metrics{}, false
+	}
+	tm, ok := c.connMetrics()
+	if !ok {
+		return registry.Metrics{}, false
+	}
+	return registry.Metrics{
+		CPUPercent: tm.CPUPercent,
+		MemUsedMB:  tm.MemUsedMB,
+		MemTotalMB: tm.MemTotalMB,
+	}, true
 }
