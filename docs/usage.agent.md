@@ -38,7 +38,7 @@ belongs under a service supervisor.
 | You need | Example | Where it comes from |
 |---|---|---|
 | The `constellate-agent` binary | `./bin/constellate-agent` | `make build`, or copy a prebuilt binary onto the machine |
-| The hub's base URL | `https://hub.example.com` or `https://1.2.3.4:44081` | from whoever runs the hub |
+| The hub's base URL | `https://hub.example.com` or `https://1.2.3.4:443` | from whoever runs the hub |
 | A one-time enrollment token | `ae0fab0226…` | hub operator runs `constellate-hub enroll-token` |
 | (sometimes) the hub's CA/cert PEM | `hub-ca.pem` | only if the hub uses a self-signed / private cert |
 
@@ -66,7 +66,7 @@ Edit `~/.constellate/agent.yaml`:
 # Use the WebSocket dial-home path, NOT the plain hub URL.
 # https://host:port   ->   wss://host:port/ws/agent
 # http://host:port    ->   ws://host:port/ws/agent
-hub_url: "wss://1.2.3.4:44081/ws/agent"
+hub_url: "wss://1.2.3.4:443/ws/agent"
 
 name: ""                 # blank = use this machine's hostname
 default_shell: "/bin/bash"
@@ -76,7 +76,7 @@ default_shell: "/bin/bash"
 ```
 
 > **`hub_url` is a WebSocket URL, not the enroll URL.** You enroll against the hub's *HTTP* base
-> (`https://…:44081`), but you connect against its *WebSocket* path (`wss://…:44081/ws/agent`).
+> (`https://…:443`), but you connect against its *WebSocket* path (`wss://…:443/ws/agent`).
 > Mixing these up is the #1 reason `connect` fails right after a successful enroll.
 
 | Field | Purpose | Default |
@@ -101,7 +101,7 @@ the hub, and writes your machine ID + private key locally. The hub never holds a
 
 ```bash
 ./bin/constellate-agent enroll \
-  --hub https://1.2.3.4:44081 \
+  --hub https://1.2.3.4:443 \
   --token <one-time-token> \
   --config ~/.constellate/agent.yaml
 ```
@@ -132,7 +132,7 @@ You can confirm the local identity any time (this does **not** check connectivit
 enrolled:   yes
 machine id: 01KV5SH8NRYQYZ9ZFEYETJTP1Q
 name:       debian
-hub:        wss://1.2.3.4:44081/ws/agent
+hub:        wss://1.2.3.4:443/ws/agent
 (live connectivity requires a running agent daemon — not checked here)
 ```
 
