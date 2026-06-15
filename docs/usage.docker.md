@@ -78,6 +78,13 @@ export CONSTELLATE_DOMAIN=example.com
 make docker-up             # docker compose -f deploy/compose.yaml up -d
 ```
 
+> **Custom host ports.** Caddy publishes host `80`/`443` by default; override with `CADDY_HTTP` /
+> `CADDY_HTTPS` (the *container* ports stay 80/443). The app is served over **HTTPS only** — the HTTP
+> port does nothing but redirect. **Caveat:** Caddy's auto HTTP→HTTPS redirect targets the standard
+> port `443` (it can't see your host remap), so when `CADDY_HTTPS` is non-standard the redirect lands
+> on the wrong port. Just open the HTTPS URL with its port directly, e.g.
+> `CADDY_HTTPS=44081 → https://$CONSTELLATE_DOMAIN:44081`.
+
 Then bootstrap auth and enroll agents (the hub binary lives inside the `hub` container):
 
 ```bash
@@ -150,8 +157,14 @@ make docker-up
 ```
 
 Caddy detects that the site address is an IP, **skips Let's Encrypt**, and issues a cert from its
-built-in CA with an IP SAN for `1.2.3.4`. No Caddyfile edit is needed — `{$CONSTELLATE_DOMAIN}` just
-expands to the IP. The hub's `public_url` becomes `https://1.2.3.4`.
+built-in CA with an IP SAN for `1.2.3.4`. No Caddyfile edit is needed — `{$CONSTELLATE_DOMAIN}`
+expands to the IP, and the shipped Caddyfile sets `default_sni {$CONSTELLATE_DOMAIN}` so the cert is
+served even when the client sends no SNI. The hub's `public_url` becomes `https://1.2.3.4`.
+
+> **Why `default_sni` matters here.** Browsers and `curl` send no TLS SNI when you connect to a bare
+> IP (SNI carries hostnames only). Without a default SNI, Caddy wouldn't know which cert to present
+> and the handshake would fail with `tlsv1 alert internal error`. With it, reach the UI at
+> **`https://1.2.3.4`** (the IP, *not* `localhost`) and click through the private-CA warning.
 
 ### 2. Export Caddy's internal root and trust it on each agent
 

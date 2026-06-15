@@ -12,7 +12,16 @@
 #     CONSTELLATE_DOMAIN=example.com docker compose -f deploy/compose.yaml up -d
 #
 # Caddy will obtain and renew TLS certificates automatically.
+#
+# Bare IP note: if CONSTELLATE_DOMAIN is an IP address, Caddy issues a cert
+# from its internal CA (Let's Encrypt won't sign IPs). Browsers and curl send
+# no SNI for an IP literal, so `default_sni` below tells Caddy which cert to
+# present in that case — without it the TLS handshake fails outright. For a
+# real domain the client always sends SNI, so this line is a harmless no-op.
+{
+	default_sni {$CONSTELLATE_DOMAIN}
+}
 
 {$CONSTELLATE_DOMAIN} {
-    reverse_proxy hub:8080
+	reverse_proxy hub:8080
 }
