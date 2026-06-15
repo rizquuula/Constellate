@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -28,7 +29,10 @@ func (Factory) Open(spec session.PTYSpec) (session.PTY, error) {
 	cmd := exec.Command(shell)
 
 	if spec.Cwd != "" {
-		cmd.Dir = spec.Cwd
+		// The UI sends "~" (and "~/sub") to mean the home directory; the shell
+		// would expand it, but exec.Cmd chdirs to Dir verbatim *before* the shell
+		// runs, so a literal "~" fails with ENOENT. Expand it here.
+		cmd.Dir = expandHome(spec.Cwd)
 	}
 
 	env := append(os.Environ(), spec.Env...)
@@ -50,6 +54,24 @@ func (Factory) Open(spec session.PTYSpec) (session.PTY, error) {
 	}
 
 	return &PTY{f: f, cmd: cmd}, nil
+}
+
+// expandHome replaces a leading "~" (alone or as "~/...") with the user's home
+// directory. Any other path is returned unchanged. If the home directory cannot
+// be determined, the original path is returned so the caller's own error
+// handling applies.
+func expandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
 }
 
 // hasTERM reports whether env already contains a TERM= entry.

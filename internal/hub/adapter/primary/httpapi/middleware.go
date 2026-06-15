@@ -10,8 +10,13 @@ import (
 )
 
 // unauthenticatedPaths lists exact paths (or prefixes ending in a slash) that
-// bypass the session gate. The WebAuthn register/* routes are intentionally NOT
-// here — they require an active operator session.
+// bypass the operator session gate. The WebAuthn register/* routes are
+// intentionally NOT here — they require an active operator session.
+//
+// /ws/agent is the headless agent dial-home endpoint: it authenticates with a
+// machine-signed bearer assertion validated by the wsagent endpoint itself, not
+// with the operator session cookie, so it must bypass this gate (the endpoint
+// enforces machine identity before accepting the connection).
 var unauthenticatedPaths = []string{
 	"/api/enroll",
 	"/api/auth/totp",
@@ -20,6 +25,7 @@ var unauthenticatedPaths = []string{
 	"/api/auth/logout",
 	"/api/auth/webauthn/login/begin",
 	"/api/auth/webauthn/login/finish",
+	"/ws/agent",
 }
 
 // authMiddleware gates /api/* and /ws/* except the explicit allowlist above.

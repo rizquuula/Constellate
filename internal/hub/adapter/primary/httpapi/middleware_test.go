@@ -132,6 +132,25 @@ func TestMiddleware_NoCookie_WS_Returns401(t *testing.T) {
 	}
 }
 
+func TestMiddleware_NoCookie_WSAgent_BypassesGate(t *testing.T) {
+	ts, _ := buildMiddlewareTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/ws/agent")
+	if err != nil {
+		t.Fatalf("GET /ws/agent: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// /ws/agent authenticates via the machine-signed bearer assertion handled by
+	// the wsagent endpoint, not the operator session cookie, so it must bypass
+	// the operator gate. No agent handler is wired in this test, so the request
+	// falls through to the SPA handler — the point is only that the middleware
+	// does not 401 it before the endpoint can run its own machine auth.
+	if resp.StatusCode == http.StatusUnauthorized {
+		t.Errorf("expected /ws/agent to bypass operator auth gate, got 401")
+	}
+}
+
 func TestMiddleware_ValidCookie_Passes(t *testing.T) {
 	ts, sid := buildMiddlewareTestServer(t)
 	defer ts.Close()
