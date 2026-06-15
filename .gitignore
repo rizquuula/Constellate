@@ -23,3 +23,6 @@ vendor/
 /test/e2e/test-results/
 /test/e2e/playwright-report/
 /test/e2e/playwright/
+
+# Local dev stack secrets (dev-up.sh)
+/deploy/.dev/
