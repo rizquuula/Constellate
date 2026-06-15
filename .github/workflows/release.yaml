@@ -149,8 +149,11 @@ jobs:
           if [ -n "$PREV" ]; then RANGE="${PREV}..${TAG}"; else RANGE="${TAG}"; fi
           echo "Changelog range: ${RANGE}"
 
-          # Subject as a bullet, body indented 2 spaces beneath it.
-          LOG="$(git log --no-merges --pretty=format:'- %s%n%w(0,2,2)%b' ${RANGE})"
+          # Subject as a bullet, body indented 2 spaces beneath it. The commit
+          # text is untrusted, so it goes to a file and is appended verbatim
+          # below — never interpolated into the heredoc, where a "$(...)" or
+          # backtick in a commit message would be evaluated by the shell.
+          git log --no-merges --pretty=format:'- %s%n%w(0,2,2)%b' ${RANGE} > commits.txt
           HUB_VERSION="$(cat cmd/hub/VERSION)"
           AGENT_VERSION="$(cat cmd/agent/VERSION)"
 
@@ -169,8 +172,8 @@ jobs:
           indented beneath it when present. Use the bodies for detail and accuracy.
 
           Commits:
-          ${LOG}
           EOF
+          cat commits.txt >> prompt.txt
 
           REQ="$(jq -n --arg model "$MODEL" --rawfile prompt prompt.txt \
             '{model: $model, messages: [{role: "user", content: $prompt}]}')"
@@ -208,6 +211,7 @@ jobs:
   # Build and push amd64 Linux images to GHCR.
   images:
     name: ghcr images
+    needs: binaries # don't publish :latest if the binary build failed
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
