@@ -97,6 +97,23 @@ export function App() {
     checkAuth()
   }, [])
 
+  // Alt/Cmd + 1/2/3 jump straight to a view. Use e.code (physical key) so it
+  // works regardless of the character Alt produces on some keyboard layouts.
+  useEffect(() => {
+    if (authState !== 'authed') return
+    const views = { Digit1: 'workspace', Digit2: 'overview', Digit3: 'dashboard' } as const
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.shiftKey) return
+      if (!e.altKey && !e.metaKey) return
+      const mode = views[e.code as keyof typeof views]
+      if (!mode) return
+      e.preventDefault()
+      setViewMode(mode)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [authState, setViewMode])
+
   useEffect(() => {
     if (authState !== 'authed') return
     const tick = () => {
@@ -181,6 +198,7 @@ export function App() {
             className={`view-toggle-btn${viewMode === 'workspace' ? ' view-toggle-active' : ''}`}
             onClick={() => setViewMode('workspace')}
             aria-pressed={viewMode === 'workspace'}
+            title="Workspace (Alt/⌘+1)"
           >
             Workspace
           </button>
@@ -188,6 +206,7 @@ export function App() {
             className={`view-toggle-btn${viewMode === 'overview' ? ' view-toggle-active' : ''}`}
             onClick={() => setViewMode('overview')}
             aria-pressed={viewMode === 'overview'}
+            title="Overview (Alt/⌘+2)"
           >
             Overview
           </button>
@@ -195,6 +214,7 @@ export function App() {
             className={`view-toggle-btn${viewMode === 'dashboard' ? ' view-toggle-active' : ''}`}
             onClick={() => setViewMode('dashboard')}
             aria-pressed={viewMode === 'dashboard'}
+            title="Dashboard (Alt/⌘+3)"
           >
             Dashboard
           </button>
