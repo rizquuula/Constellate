@@ -14,7 +14,7 @@ id_file: "~/.constellate/agent-id"
 default_shell: "/bin/bash"
 scrollback_bytes: 262144              # 256 KiB per session
 
-# M5 fields — long-lived agent credential and hub CA verification.
+# Long-lived agent credential and hub CA verification.
 # cred_file: "~/.constellate/cred"   # path to the agent's enrolled credential (default shown)
 # hub_ca: ""                         # path to a PEM CA/cert to verify the hub; empty = system roots
 

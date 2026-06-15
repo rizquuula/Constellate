@@ -25,7 +25,7 @@ type vtScreenFactory struct{}
 
 func (vtScreenFactory) NewScreen(cols, rows int) session.Screen { return vt.New(cols, rows) }
 
-// TestOverviewSnapshotPipeline proves the full M4 pipeline end-to-end in one
+// TestOverviewSnapshotPipeline proves the full overview pipeline end-to-end in one
 // process: agent produces snapshots → hub ingests and fans out → browser WS
 // subscriber receives a snapshot containing the expected text and colour.
 func TestOverviewSnapshotPipeline(t *testing.T) {

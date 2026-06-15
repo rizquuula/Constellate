@@ -1,4 +1,4 @@
-# Constellate — production deploy stack (M5)
+# Constellate — production deploy stack
 #
 # Usage:
 #   export CONSTELLATE_DOMAIN=example.com

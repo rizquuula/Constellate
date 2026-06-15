@@ -1,10 +1,10 @@
-# docker-compose.dev.yaml — local dev / demo stack for trying Constellate (M5).
+# docker-compose.dev.yaml — local dev / demo stack for trying Constellate.
 #
 # Brings up the hub (with the embedded web UI) + two agent "machines" you can
 # open a live shell into from the browser.
 #
 # Use the launcher — it builds the images, bootstraps the operator account
-# (M5 auth), enrolls both agents, and prints a ready-to-use login code:
+# account, enrolls both agents, and prints a ready-to-use login code:
 #
 #   ./deploy/dev-up.sh
 #   open http://localhost:8080   → log in → pick an agent → "New shell"
@@ -17,7 +17,7 @@
 # those Debian containers — not your host. To get a terminal on your actual
 # machine, run the agent as a host binary instead (see the README quickstart).
 #
-# M5: dev-token removed. dev-up.sh mints one single-use enrollment token per
+# dev-up.sh mints one single-use enrollment token per
 # agent (against the hub's own DB) and injects it via CONSTELLATE_ENROLL_TOKEN.
 # Plain ws://, bound to localhost — not for the public internet (use deploy/compose.yaml).
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy/dev-up.sh — one-command local dev stack for Constellate (M5).
+# deploy/dev-up.sh — one-command local dev stack for Constellate.
 #
 # Builds the images (picking up local changes), starts the hub + two agents,
 # bootstraps the operator account (TOTP), enrolls both agents, and prints how

@@ -9,7 +9,7 @@ trap '$COMPOSE down -v --remove-orphans >/dev/null 2>&1 || true' EXIT
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 #
-# M5 gated /api/* behind the operator session cookie, so we can no longer poll
+# /api/* is gated behind the operator session cookie, so we can no longer poll
 # /api/machines anonymously. Instead we count the hub's structured connection
 # logs: each agent attach logs `agent online`, each drop logs `agent offline`.
 # Net (online − offline) is the number of agents currently connected.

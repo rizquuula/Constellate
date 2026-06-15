@@ -96,7 +96,7 @@ CONSTELLATE_HUB_URL="ws://${HUB_HOST}:${HUB_PORT}/ws/agent" \
 AGENT_PID=$!
 
 # ── Wait for agent online ─────────────────────────────────────────────────────
-# /api/machines is gated behind the operator session cookie (M5), so we watch the
+# /api/machines is gated behind the operator session cookie, so we watch the
 # hub's structured connection log instead — it emits `agent online` on attach.
 
 echo "==> Waiting for agent to come online (up to 30s)..."

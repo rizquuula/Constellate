@@ -10,7 +10,7 @@ CREATE TABLE machines (
     revoked_at    INTEGER
 );
 
--- long-lived agent credential (M5)
+-- long-lived agent credential: the agent's Ed25519 public key
 CREATE TABLE machine_credentials (
     machine_id TEXT PRIMARY KEY REFERENCES machines(id),
     public_key BLOB    NOT NULL,
@@ -44,7 +44,7 @@ CREATE TABLE sessions (
 CREATE INDEX idx_sessions_machine ON sessions(machine_id);
 CREATE INDEX idx_sessions_project ON sessions(project_id);
 
--- security-relevant actions (M5)
+-- security-relevant actions (audit log)
 CREATE TABLE audit_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     ts         INTEGER NOT NULL,
@@ -56,7 +56,7 @@ CREATE TABLE audit_log (
 );
 CREATE INDEX idx_audit_ts ON audit_log(ts);
 
--- operator auth (M5): passkey + TOTP + recovery
+-- operator auth: passkey + TOTP + recovery
 CREATE TABLE operator_credentials (
     id           TEXT    PRIMARY KEY,
     kind         TEXT    NOT NULL,

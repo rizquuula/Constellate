@@ -12,20 +12,20 @@ addr: "127.0.0.1:8080"
 public_url: "http://localhost:8080"
 db_path: "./constellate.db"
 
-# M5 fields — enrollment token lifetime (parsed as Go duration, e.g. "15m", "1h").
+# Enrollment token lifetime (parsed as Go duration, e.g. "15m", "1h").
 enroll_token_ttl: "15m"
 
 log:
   level: "info"    # debug | info | warn | error
   format: "text"   # text | json
 
-# M5 TLS — paths to a PEM certificate and key for the hub's HTTPS listener.
+# TLS — paths to a PEM certificate and key for the hub's HTTPS listener.
 # Leave empty to run plain HTTP behind a TLS-terminating reverse proxy (e.g. Caddy).
 # tls:
 #   cert: "/etc/constellate/cert.pem"
 #   key:  "/etc/constellate/key.pem"
 
-# M5 WebAuthn — optional passkey / FIDO2 login settings.
+# WebAuthn — optional passkey / FIDO2 login settings.
 # By default these values are derived from public_url:
 #   rp_id  = host of public_url (e.g. "example.com")
 #   origins = [public_url] (e.g. ["https://example.com"])

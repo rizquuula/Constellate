@@ -361,8 +361,8 @@ func (e *Emulator) dispatch(a action, remaining []byte) {
 // ---------- printable character ----------
 
 func (e *Emulator) printRune(r rune) {
-	// Note: wide-rune (CJK, emoji) width is treated as 1 for M4 simplicity.
-	// Correctness of East-Asian Width is not required for M4.
+	// Note: wide-rune (CJK, emoji) width is treated as 1 for simplicity.
+	// Correctness of East-Asian Width is not required for the overview.
 	s := e.cur
 	if s.cx >= s.cols {
 		// Autowrap: move to the next line.
