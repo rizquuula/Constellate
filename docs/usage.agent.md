@@ -166,9 +166,29 @@ The agent **reconnects automatically** with backoff if the network blips or the 
 
 For an always-on machine, supervise `connect` so it starts at boot and restarts on crash.
 
-### Linux — systemd
+### Linux — systemd (one command)
 
-Create `/etc/systemd/system/constellate-agent.service` (adjust the user and paths):
+After enrolling, let the agent install and start its own service:
+
+```bash
+sudo constellate-agent install --config /home/rizquuula/.constellate/agent.yaml
+```
+
+This requires the machine to be **enrolled** already (it refuses otherwise), writes
+`/etc/systemd/system/constellate-agent.service`, runs `daemon-reload`, then `enable --now`. The
+generated `ExecStart` carries the same `--config` you pass here. It runs the service as the user
+behind `sudo` (`$SUDO_USER`); override with `--user <name>`, or pass `--no-start` to write the unit
+without starting it. Then:
+
+```bash
+systemctl status constellate-agent          # should be "active (running)"
+journalctl -u constellate-agent -f          # follow logs
+```
+
+### Linux — systemd (manual)
+
+If you prefer to write the unit yourself (this is what `install` generates), create
+`/etc/systemd/system/constellate-agent.service` (adjust the user and paths):
 
 ```ini
 [Unit]

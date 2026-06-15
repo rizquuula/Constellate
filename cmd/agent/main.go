@@ -16,7 +16,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -75,6 +77,8 @@ func main() {
 		cmdEnroll(args)
 	case "reset":
 		cmdReset(args)
+	case "install":
+		cmdInstall(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", sub)
 		usage()
@@ -93,6 +97,7 @@ Commands:
   enroll    Enroll this machine with the hub (--hub, --token)
   status    Show local enrollment status
   reset     Remove local enrollment (id + credential)
+  install   Install + start a systemd service (Linux; requires enrollment)
   version   Print version and protocol info
 
 Flags:
@@ -439,4 +444,152 @@ func cmdReset(args []string) {
 		}
 	}
 	fmt.Println("reset done")
+}
+
+// unitServiceName is the systemd unit installed by `install`.
+const unitServiceName = "constellate-agent.service"
+
+// unitPath is where the systemd unit is written.
+const unitPath = "/etc/systemd/system/" + unitServiceName
+
+// unitParams holds the values rendered into the systemd unit template.
+type unitParams struct {
+	ExecBin    string // absolute path to the agent binary
+	ConfigPath string // absolute config path; empty omits the --config flag
+	User       string // system user the service runs as
+}
+
+// renderUnit renders a systemd service unit from p. It is pure (no I/O) so it
+// can be unit-tested without root or a running systemd.
+func renderUnit(p unitParams) string {
+	execLine := p.ExecBin + " connect"
+	if p.ConfigPath != "" {
+		execLine += " --config " + p.ConfigPath
+	}
+	return fmt.Sprintf(`[Unit]
+Description=Constellate agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%s
+ExecStart=%s
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+`, p.User, execLine)
+}
+
+func cmdInstall(args []string) {
+	fs := flag.NewFlagSet("install", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config file (passed through to the service's connect command)")
+	userFlag := fs.String("user", "", "system user to run the service as (default: $SUDO_USER, else current user)")
+	noStart := fs.Bool("no-start", false, "write + reload the unit but do not enable/start it")
+	_ = fs.Parse(args)
+
+	// systemd is Linux-only; macOS (launchd) / Windows stay documented-manual.
+	if runtime.GOOS != "linux" {
+		fmt.Fprintf(os.Stderr, "install: only supported on Linux (systemd); see docs/usage.agent.md for %s\n", runtime.GOOS)
+		os.Exit(1)
+	}
+
+	// Writing to /etc/systemd/system and running systemctl require root.
+	if os.Geteuid() != 0 {
+		fmt.Fprintln(os.Stderr, "install: must run as root — re-run with sudo")
+		os.Exit(1)
+	}
+
+	cfg, err := platconfig.LoadAgent(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "install: load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Enrollment gate: refuse to install a service that can't connect. Mirrors
+	// the credential checks in cmdConnect.
+	if _, err := readMachineID(cfg.IDFile); err != nil {
+		fmt.Fprintln(os.Stderr, "install: not enrolled — run `constellate-agent enroll --hub <url> --token <token>` first")
+		os.Exit(1)
+	}
+	if _, err := loadPrivateKey(cfg.CredFile); err != nil {
+		fmt.Fprintln(os.Stderr, "install: not enrolled — credential missing; run `constellate-agent enroll --hub <url> --token <token>` first")
+		os.Exit(1)
+	}
+
+	// Resolve the absolute binary path so ExecStart survives a $PATH/cwd change.
+	execBin, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "install: locate binary: %v\n", err)
+		os.Exit(1)
+	}
+	if resolved, err := filepath.EvalSymlinks(execBin); err == nil {
+		execBin = resolved
+	}
+
+	// Pass the same --config through to the service, absolutized.
+	absConfig := ""
+	if *configPath != "" {
+		if abs, err := filepath.Abs(*configPath); err == nil {
+			absConfig = abs
+		} else {
+			absConfig = *configPath
+		}
+	}
+
+	runAs := resolveServiceUser(*userFlag)
+	if runAs == "" {
+		fmt.Fprintln(os.Stderr, "install: could not determine a user to run as — pass --user")
+		os.Exit(1)
+	}
+
+	unit := renderUnit(unitParams{ExecBin: execBin, ConfigPath: absConfig, User: runAs})
+	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "install: write %s: %v\n", unitPath, err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s (User=%s)\n", unitPath, runAs)
+
+	if err := runSystemctl("daemon-reload"); err != nil {
+		fmt.Fprintf(os.Stderr, "install: systemctl daemon-reload: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *noStart {
+		fmt.Printf("installed (not started). Start with: systemctl enable --now %s\n", unitServiceName)
+		return
+	}
+
+	if err := runSystemctl("enable", "--now", unitServiceName); err != nil {
+		fmt.Fprintf(os.Stderr, "install: systemctl enable --now: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("started %s\n", unitServiceName)
+	fmt.Printf("  systemctl status %s\n", unitServiceName)
+	fmt.Printf("  journalctl -u %s -f\n", unitServiceName)
+}
+
+// resolveServiceUser picks the user the service runs as: the --user override,
+// else the real user behind sudo ($SUDO_USER), else the current user.
+func resolveServiceUser(override string) string {
+	if override != "" {
+		return override
+	}
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && sudoUser != "root" {
+		return sudoUser
+	}
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
+}
+
+// runSystemctl runs `systemctl <args...>`, streaming output to the operator.
+func runSystemctl(args ...string) error {
+	cmd := exec.Command("systemctl", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
