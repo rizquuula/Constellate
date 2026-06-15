@@ -2,6 +2,7 @@ package pty
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,45 @@ func TestFactoryCwdTilde(t *testing.T) {
 
 	if !strings.Contains(out.String(), home) {
 		t.Errorf("expected pwd output to contain home %q, got: %q", home, out.String())
+	}
+}
+
+// TestFactoryCwdMissing verifies a missing working directory yields the
+// distinct ErrCwdNotFound (so the hub/UI can offer to create it) rather than a
+// cryptic fork/exec ENOENT, and that the shell is never started.
+func TestFactoryCwdMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does", "not", "exist")
+
+	_, err := Factory{}.Open(session.PTYSpec{
+		Shell: "/bin/sh",
+		Cwd:   missing,
+		Cols:  80,
+		Rows:  24,
+	})
+	if !errors.Is(err, session.ErrCwdNotFound) {
+		t.Fatalf("Open with missing cwd: got %v, want ErrCwdNotFound", err)
+	}
+}
+
+// TestFactoryCwdCreateDir verifies CreateDir makes the factory create a missing
+// working directory (recursively) and start the shell there.
+func TestFactoryCwdCreateDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "a", "b", "c")
+
+	p, err := Factory{}.Open(session.PTYSpec{
+		Shell:     "/bin/sh",
+		Cwd:       dir,
+		Cols:      80,
+		Rows:      24,
+		CreateDir: true,
+	})
+	if err != nil {
+		t.Fatalf("Open with CreateDir: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("expected %q to be created as a directory: stat err=%v", dir, err)
 	}
 }
 

@@ -55,6 +55,12 @@ export function TerminalPane({
 
   const handlePaneKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Only treat Enter/Space as "activate this pane" when the key was pressed
+      // while the pane wrapper itself holds focus (keyboard navigation). When the
+      // terminal is focused, keystrokes bubble up from xterm's textarea — we must
+      // NOT preventDefault there, or the user can never type a space. See bug: PTY
+      // swallows space.
+      if (e.target !== e.currentTarget) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         onFocus()
@@ -122,19 +128,19 @@ export function TerminalPane({
         <div className="pane-controls">
           <button
             className="pane-btn"
-            title="Split horizontal"
+            title="Split horizontal (side by side)"
             aria-label="Split pane horizontally"
             onClick={onSplitH}
           >
-            ⊟
+            ▥
           </button>
           <button
             className="pane-btn"
-            title="Split vertical"
+            title="Split vertical (stacked)"
             aria-label="Split pane vertically"
             onClick={onSplitV}
           >
-            ⊞
+            ▤
           </button>
           <button
             className="pane-btn pane-btn-close"

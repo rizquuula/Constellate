@@ -1,5 +1,19 @@
 import type { Machine, Project, Session, Dashboard } from '../types'
 
+// ApiError preserves the HTTP status and the server's structured error code
+// (from `{"error":{"code":...}}`) so callers can branch on it — e.g. detecting
+// "cwd_not_found" to offer creating a missing project directory.
+export class ApiError extends Error {
+  status: number
+  code?: string
+  constructor(message: string, status: number, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
@@ -9,7 +23,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`${method} ${path}: ${res.status} ${text}`)
+    let code: string | undefined
+    try {
+      code = (JSON.parse(text) as { error?: { code?: string } })?.error?.code
+    } catch {
+      // non-JSON error body; leave code undefined
+    }
+    throw new ApiError(`${method} ${path}: ${res.status} ${text}`, res.status, code)
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
@@ -40,6 +60,7 @@ export function createSession(input: {
   cols: number
   rows: number
   title?: string
+  createDir?: boolean
 }): Promise<Session> {
   return request<Session>('POST', '/api/sessions', input)
 }

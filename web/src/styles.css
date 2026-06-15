@@ -446,6 +446,35 @@ body {
   text-overflow: ellipsis;
 }
 
+/* ── Create-missing-directory confirm ─────────────────────────────────────── */
+
+.project-create-dir {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  margin: 4px 0;
+  background: #1c1c28;
+  border: 1px solid #3a3a4a;
+  border-radius: 4px;
+}
+
+.project-create-dir-msg {
+  font-size: 12px;
+  color: #d0d0da;
+}
+
+.project-create-dir-msg code {
+  font-size: 11px;
+  color: #f0c674;
+  word-break: break-all;
+}
+
+.project-create-dir-actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* ── New project form ─────────────────────────────────────────────────────── */
 
 .new-project-form {

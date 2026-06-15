@@ -24,6 +24,9 @@ type OpenInput struct {
 	Shell     string
 	Cols      int
 	Rows      int
+	// CreateDir asks the agent to create Cwd (recursively) if missing instead of
+	// rejecting the open with cwd_not_found.
+	CreateDir bool
 }
 
 // UseCase orchestrates session lifecycle.
@@ -60,7 +63,7 @@ func (u *UseCase) Open(ctx context.Context, in OpenInput) (session.Session, erro
 	}
 
 	id := u.newID()
-	pid, err := u.gateway.OpenSession(ctx, in.MachineID, id, in.Cwd, in.Shell, cols, rows)
+	pid, err := u.gateway.OpenSession(ctx, in.MachineID, id, in.Cwd, in.Shell, cols, rows, in.CreateDir)
 	if err != nil {
 		return session.Session{}, err
 	}

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useStore } from '../../store'
 import type { Machine, Project, Session } from '../../types'
+import { ApiError } from '../../api/rest'
 import { findLeaf } from '../terminal/paneTree'
 import { ActivityBadge } from '../activity/ActivityBadge'
 
@@ -189,24 +190,38 @@ interface ProjectSectionProps {
   project: Project
   sessions: Session[]
   focusedSessionId: string | null
-  onOpenShell: (projectID: string, cwd: string) => Promise<void>
+  onOpenShell: (projectID: string, cwd: string, createDir?: boolean) => Promise<void>
   onAssign: (sessionId: string) => void
 }
 
 function ProjectSection({ project, sessions, focusedSessionId, onOpenShell, onAssign }: ProjectSectionProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [confirmCreateDir, setConfirmCreateDir] = useState(false)
+  const [shellError, setShellError] = useState<string | null>(null)
   const projectSessions = sessions.filter((s) => s.projectID === project.id)
 
-  const handleOpenShell = useCallback(async () => {
-    if (busy) return
-    setBusy(true)
-    try {
-      await onOpenShell(project.id, project.path)
-    } finally {
-      setBusy(false)
-    }
-  }, [busy, onOpenShell, project.id, project.path])
+  const openShell = useCallback(
+    async (createDir: boolean) => {
+      if (busy) return
+      setBusy(true)
+      setShellError(null)
+      try {
+        await onOpenShell(project.id, project.path, createDir)
+        setConfirmCreateDir(false)
+      } catch (err) {
+        if (err instanceof ApiError && err.code === 'cwd_not_found') {
+          // Recoverable: offer to create the missing directory and retry.
+          setConfirmCreateDir(true)
+        } else {
+          setShellError(err instanceof Error ? err.message : 'Failed to open shell')
+        }
+      } finally {
+        setBusy(false)
+      }
+    },
+    [busy, onOpenShell, project.id, project.path],
+  )
 
   return (
     <div className="project-section">
@@ -224,12 +239,35 @@ function ProjectSection({ project, sessions, focusedSessionId, onOpenShell, onAs
         <button
           className="btn-shell"
           title={`New shell in ${project.path}`}
-          onClick={handleOpenShell}
+          onClick={() => openShell(false)}
           disabled={busy}
         >
           {busy ? '…' : '＋'}
         </button>
       </div>
+
+      {confirmCreateDir && (
+        <div className="project-create-dir" role="alert">
+          <span className="project-create-dir-msg">
+            Folder <code>{project.path}</code> doesn't exist. Create it?
+          </span>
+          <div className="project-create-dir-actions">
+            <button className="btn-shell" onClick={() => openShell(true)} disabled={busy}>
+              {busy ? '…' : 'Create & open'}
+            </button>
+            <button
+              className="btn-cancel"
+              onClick={() => { setConfirmCreateDir(false); setShellError(null) }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {shellError && !confirmCreateDir && (
+        <p className="inline-error" role="alert">{shellError}</p>
+      )}
       {!collapsed && (
         <div className="project-sessions">
           {projectSessions.length === 0 && (
@@ -332,12 +370,13 @@ function MachineGroup({ machine }: MachineGroupProps) {
   const ungroupedSessions = sessions.filter((s) => !s.projectID)
 
   const handleOpenShell = useCallback(
-    async (projectID: string | undefined, cwd: string): Promise<void> => {
+    async (projectID: string | undefined, cwd: string, createDir?: boolean): Promise<void> => {
       if (!machine.online) return
       await openSessionInPane(focusedPaneId, {
         machineID: machine.id,
         projectID,
         cwd,
+        createDir,
       })
     },
     [machine.id, machine.online, focusedPaneId, openSessionInPane],
@@ -400,7 +439,7 @@ function MachineGroup({ machine }: MachineGroupProps) {
           project={p}
           sessions={sessions}
           focusedSessionId={focusedSessionId}
-          onOpenShell={(projectID, cwd) => handleOpenShell(projectID, cwd)}
+          onOpenShell={(projectID, cwd, createDir) => handleOpenShell(projectID, cwd, createDir)}
           onAssign={handleAssign}
         />
       ))}

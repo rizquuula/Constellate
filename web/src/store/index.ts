@@ -52,7 +52,7 @@ interface Store {
   assignSessionToPane: (paneId: string, sessionId: string) => void
   openSessionInPane: (
     paneId: string,
-    opts: { machineID: string; projectID?: string; cwd: string },
+    opts: { machineID: string; projectID?: string; cwd: string; createDir?: boolean },
   ) => Promise<void>
 }
 
@@ -108,8 +108,12 @@ export const useStore = create<Store>((set, get) => ({
 
   closeSession: async (id) => {
     await apiCloseSession(id)
-    const sessions = await listSessions()
-    set({ sessions })
+    // Optimistically flip the row to "exited": the agent reports the real exit
+    // (and exit code) asynchronously via heartbeat, so re-fetching the list here
+    // would race and often read a stale "running". The periodic poll reconciles.
+    set((s) => ({
+      sessions: s.sessions.map((x) => (x.id === id ? { ...x, status: 'exited' } : x)),
+    }))
   },
 
   // ── workspace ──────────────────────────────────────────────────────────────
@@ -133,8 +137,8 @@ export const useStore = create<Store>((set, get) => ({
     set({ paneRoot: newRoot, focusedPaneId: paneId })
   },
 
-  openSessionInPane: async (paneId, { machineID, projectID, cwd }) => {
-    const session = await createSession({ machineID, projectID, cwd, cols: 80, rows: 24 })
+  openSessionInPane: async (paneId, { machineID, projectID, cwd, createDir }) => {
+    const session = await createSession({ machineID, projectID, cwd, createDir, cols: 80, rows: 24 })
     const sessions = await listSessions()
     const newRoot = assignSession(get().paneRoot, paneId, session.id)
     set({ sessions, paneRoot: newRoot, focusedPaneId: paneId })

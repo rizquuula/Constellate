@@ -3,6 +3,7 @@ package agentlink
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"time"
@@ -12,6 +13,18 @@ import (
 
 // ErrAgentOffline is returned when the target machine is not connected.
 var ErrAgentOffline = errors.New("agentlink: agent offline")
+
+// AgentError carries a structured error reported by an agent (e.g. an
+// OpenSession rejection), preserving the agent-supplied Code so the HTTP layer
+// can map it to a status and the UI can branch on it (e.g. "cwd_not_found").
+type AgentError struct {
+	Code    string
+	Message string
+}
+
+func (e *AgentError) Error() string {
+	return fmt.Sprintf("agent error %s: %s", e.Code, e.Message)
+}
 
 // Gateway sends control commands to agents via the agentlink Registry.
 type Gateway struct {
@@ -27,14 +40,14 @@ func NewGateway(reg *Registry) *Gateway {
 // OpenSession instructs the agent identified by machineID to start a new PTY session.
 // It blocks until the agent replies with SessionOpened or an error, the context is
 // cancelled, or a 10-second timeout expires.
-func (g *Gateway) OpenSession(ctx context.Context, machineID, sessionID, cwd, shell string, cols, rows int) (pid int, err error) {
+func (g *Gateway) OpenSession(ctx context.Context, machineID, sessionID, cwd, shell string, cols, rows int, createDir bool) (pid int, err error) {
 	conn, ok := g.reg.Get(machineID)
 	if !ok {
 		return 0, ErrAgentOffline
 	}
 
 	ch := conn.awaitOpen(sessionID)
-	if err := conn.sendControl(transport.NewOpenSession(sessionID, cwd, shell, cols, rows)); err != nil {
+	if err := conn.sendControl(transport.NewOpenSession(sessionID, cwd, shell, cols, rows, createDir)); err != nil {
 		conn.cancelOpen(sessionID)
 		return 0, err
 	}

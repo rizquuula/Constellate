@@ -79,6 +79,10 @@ type OpenSession struct {
 	Shell     string      `json:"shell"`
 	Cols      int         `json:"cols"`
 	Rows      int         `json:"rows"`
+	// CreateDir asks the agent to create Cwd (recursively) if it is missing
+	// before starting the shell. Additive/optional field — older agents ignore
+	// it and report cwd_not_found, so no protocol bump is required.
+	CreateDir bool `json:"createDir,omitempty"`
 }
 
 // Resize instructs the agent to resize an existing session's PTY.
@@ -158,7 +162,7 @@ func NewSessionExited(sessionID string, exitCode int) SessionExited {
 }
 
 // NewOpenSession constructs an OpenSession message with the Type field pre-set.
-func NewOpenSession(sessionID, cwd, shell string, cols, rows int) OpenSession {
+func NewOpenSession(sessionID, cwd, shell string, cols, rows int, createDir bool) OpenSession {
 	return OpenSession{
 		Type:      TypeOpenSession,
 		SessionID: sessionID,
@@ -166,6 +170,7 @@ func NewOpenSession(sessionID, cwd, shell string, cols, rows int) OpenSession {
 		Shell:     shell,
 		Cols:      cols,
 		Rows:      rows,
+		CreateDir: createDir,
 	}
 }
 

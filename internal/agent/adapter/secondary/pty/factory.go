@@ -32,7 +32,22 @@ func (Factory) Open(spec session.PTYSpec) (session.PTY, error) {
 		// The UI sends "~" (and "~/sub") to mean the home directory; the shell
 		// would expand it, but exec.Cmd chdirs to Dir verbatim *before* the shell
 		// runs, so a literal "~" fails with ENOENT. Expand it here.
-		cmd.Dir = expandHome(spec.Cwd)
+		dir := expandHome(spec.Cwd)
+		if _, err := os.Stat(dir); err != nil {
+			if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("pty: stat cwd: %w", err)
+			}
+			// Directory is missing: either create it on request, or surface a
+			// distinct error so the hub/UI can offer to create it (rather than a
+			// cryptic fork/exec ENOENT from the shell launch).
+			if !spec.CreateDir {
+				return nil, session.ErrCwdNotFound
+			}
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, fmt.Errorf("pty: create cwd: %w", err)
+			}
+		}
+		cmd.Dir = dir
 	}
 
 	env := append(os.Environ(), spec.Env...)

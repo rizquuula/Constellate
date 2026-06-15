@@ -1,10 +1,16 @@
 package session
 
 import (
+	"errors"
 	"io"
 
 	"github.com/rizquuula/Constellate/internal/agent/domain/terminal"
 )
+
+// ErrCwdNotFound is returned by a PTYFactory when the requested working
+// directory does not exist and CreateDir was not set. The hub maps it to a
+// distinct "cwd_not_found" code so the UI can offer to create the directory.
+var ErrCwdNotFound = errors.New("session: working directory does not exist")
 
 // PTYSpec describes how to start a new PTY session.
 type PTYSpec struct {
@@ -13,6 +19,9 @@ type PTYSpec struct {
 	Cols  int
 	Rows  int
 	Env   []string
+	// CreateDir, when true, asks the factory to create Cwd (recursively) if it
+	// is missing instead of failing with ErrCwdNotFound.
+	CreateDir bool
 }
 
 // PTY is the interface the session manager uses to interact with a running PTY.

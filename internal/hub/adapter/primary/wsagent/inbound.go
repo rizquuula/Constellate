@@ -3,7 +3,6 @@ package wsagent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"time"
@@ -139,7 +138,7 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 				continue
 			}
 			if msg.SessionID != "" {
-				conn.ResolveOpen(msg.SessionID, 0, fmt.Errorf("agent error %s: %s", msg.Code, msg.Message))
+				conn.ResolveOpen(msg.SessionID, 0, &agentlink.AgentError{Code: msg.Code, Message: msg.Message})
 			} else {
 				e.log.Warn("wsagent: agent error", "code", msg.Code, "message", msg.Message, "machineID", hello.MachineID)
 			}

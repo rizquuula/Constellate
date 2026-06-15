@@ -100,7 +100,7 @@ func TestGateway_OpenSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	pid, err := g.OpenSession(ctx, "m1", "s1", "", "", 80, 24)
+	pid, err := g.OpenSession(ctx, "m1", "s1", "", "", 80, 24, false)
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestGateway_OpenSession_AgentOffline(t *testing.T) {
 	g := agentlink.NewGateway(reg)
 
 	ctx := context.Background()
-	_, err := g.OpenSession(ctx, "unknown", "s1", "", "", 80, 24)
+	_, err := g.OpenSession(ctx, "unknown", "s1", "", "", 80, 24, false)
 	if err != agentlink.ErrAgentOffline {
 		t.Errorf("expected ErrAgentOffline, got %v", err)
 	}

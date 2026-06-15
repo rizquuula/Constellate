@@ -21,7 +21,7 @@ type SessionStore interface {
 
 // AgentGateway is the outbound port for controlling agent PTY sessions.
 type AgentGateway interface {
-	OpenSession(ctx context.Context, machineID, sessionID, cwd, shell string, cols, rows int) (pid int, err error)
+	OpenSession(ctx context.Context, machineID, sessionID, cwd, shell string, cols, rows int, createDir bool) (pid int, err error)
 	CloseSession(ctx context.Context, machineID, sessionID string) error
 }
 

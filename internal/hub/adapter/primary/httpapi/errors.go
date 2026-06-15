@@ -51,6 +51,11 @@ func statusFor(err error) int {
 	if errors.Is(err, agentlink.ErrAgentOffline) {
 		return http.StatusServiceUnavailable
 	}
+	var ae *agentlink.AgentError
+	if errors.As(err, &ae) && ae.Code == "cwd_not_found" {
+		// Recoverable: the UI offers to create the directory and retry.
+		return http.StatusUnprocessableEntity
+	}
 	if errors.Is(err, enroll.ErrInvalidToken) {
 		return http.StatusUnauthorized
 	}

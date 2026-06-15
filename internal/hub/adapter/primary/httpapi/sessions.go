@@ -3,9 +3,11 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 )
@@ -28,6 +30,7 @@ type openSessionRequest struct {
 	Shell     string `json:"shell"`
 	Cols      int    `json:"cols"`
 	Rows      int    `json:"rows"`
+	CreateDir bool   `json:"createDir"`
 }
 
 func (s *Server) handleOpenSession(w http.ResponseWriter, r *http.Request) {
@@ -49,9 +52,17 @@ func (s *Server) handleOpenSession(w http.ResponseWriter, r *http.Request) {
 		Shell:     req.Shell,
 		Cols:      req.Cols,
 		Rows:      req.Rows,
+		CreateDir: req.CreateDir,
 	})
 	if err != nil {
-		writeError(w, statusFor(err), "open_failed", err.Error())
+		// Preserve the agent-supplied code (e.g. "cwd_not_found") so the UI can
+		// branch on it; fall back to "open_failed" for anything else.
+		code := "open_failed"
+		var ae *agentlink.AgentError
+		if errors.As(err, &ae) && ae.Code != "" {
+			code = ae.Code
+		}
+		writeError(w, statusFor(err), code, err.Error())
 		return
 	}
 

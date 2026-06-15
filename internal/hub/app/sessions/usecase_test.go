@@ -120,7 +120,7 @@ type fakeGateway struct {
 	pidReturn  int
 }
 
-func (g *fakeGateway) OpenSession(_ context.Context, _, sessionID, _, _ string, _, _ int) (int, error) {
+func (g *fakeGateway) OpenSession(_ context.Context, _, sessionID, _, _ string, _, _ int, _ bool) (int, error) {
 	g.openCalls++
 	return g.pidReturn, g.openErr
 }

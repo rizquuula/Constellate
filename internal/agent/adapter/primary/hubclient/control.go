@@ -1,6 +1,7 @@
 package hubclient
 
 import (
+	"errors"
 	"runtime"
 
 	"github.com/rizquuula/Constellate/internal/agent/app/session"
@@ -31,15 +32,20 @@ func (c *Client) handleControlFrame(enc *transport.Encoder, frame transport.Fram
 			return
 		}
 		pid, err := c.sessions.Open(msg.SessionID, session.PTYSpec{
-			Shell: msg.Shell,
-			Cwd:   msg.Cwd,
-			Cols:  msg.Cols,
-			Rows:  msg.Rows,
+			Shell:     msg.Shell,
+			Cwd:       msg.Cwd,
+			Cols:      msg.Cols,
+			Rows:      msg.Rows,
+			CreateDir: msg.CreateDir,
 		})
 		if err != nil {
 			c.log.Warn("control: open session failed",
 				"machineID", c.machineID, "sessionID", msg.SessionID, "err", err)
-			_ = enc.Encode(transport.NewError(msg.SessionID, "open_failed", err.Error()))
+			code := "open_failed"
+			if errors.Is(err, session.ErrCwdNotFound) {
+				code = "cwd_not_found"
+			}
+			_ = enc.Encode(transport.NewError(msg.SessionID, code, err.Error()))
 			return
 		}
 		c.log.Info("control: session opened",
