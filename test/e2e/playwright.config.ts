@@ -11,9 +11,18 @@ export default defineConfig({
     headless: true,
   },
   projects: [
+    // Logs in once via TOTP and saves the operator session to storageState.
+    {
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+    },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: 'playwright/.auth/operator.json',
+      },
+      dependencies: ['setup'],
     },
   ],
 });

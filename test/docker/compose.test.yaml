@@ -1,6 +1,8 @@
 # Constellate M5 topology test: 1 hub + 2 agents on a bridge network.
 # Agents only ever dial the hub (modelling dial-home behind NAT).
-# M5: dev-token removed. Agents enroll via the shared entrypoint wrapper.
+# M5: dev-token removed. run.sh mints one single-use enrollment token per agent
+# (via `docker compose exec hub constellate-hub enroll-token`, against the hub's
+# own DB) and injects it through CONSTELLATE_ENROLL_TOKEN at agent start.
 
 services:
   hub:
@@ -13,36 +15,10 @@ services:
       # No CONSTELLATE_DEV_TOKEN — agents must use enrollment credentials.
     tmpfs:
       - /data
-    volumes:
-      - token-share:/run/enroll
     ports:
       - "127.0.0.1:18080:8080"
     networks:
       - constellate
-
-  # hub-init mints an enrollment token and writes it to the shared volume.
-  hub-init:
-    build:
-      context: ../..
-      dockerfile: deploy/hub.Dockerfile
-    environment:
-      CONSTELLATE_DB_PATH: "/data/constellate.db"
-    tmpfs:
-      - /data
-    volumes:
-      - token-share:/run/enroll
-    networks:
-      - constellate
-    depends_on:
-      - hub
-    command: >
-      sh -c "
-        sleep 2 &&
-        TOKEN=$$(constellate-hub enroll-token --ttl=1h) &&
-        echo \"$$TOKEN\" > /run/enroll/token &&
-        echo \"Token written: $$TOKEN\"
-      "
-    restart: "no"
 
   agent1:
     build:
@@ -52,12 +28,12 @@ services:
       CONSTELLATE_HUB_URL: "ws://hub:8080/ws/agent"
       CONSTELLATE_HUB_BASE: "http://hub:8080"
       CONSTELLATE_NAME: "agent-1"
+      CONSTELLATE_ENROLL_TOKEN: "${AGENT1_TOKEN:-}"
     volumes:
       - agent1-cred:/root/.constellate
-      - token-share:/run/enroll:ro
     entrypoint: ["/usr/local/bin/agent-entrypoint.sh"]
     depends_on:
-      - hub-init
+      - hub
     networks:
       - constellate
 
@@ -69,12 +45,12 @@ services:
       CONSTELLATE_HUB_URL: "ws://hub:8080/ws/agent"
       CONSTELLATE_HUB_BASE: "http://hub:8080"
       CONSTELLATE_NAME: "agent-2"
+      CONSTELLATE_ENROLL_TOKEN: "${AGENT2_TOKEN:-}"
     volumes:
       - agent2-cred:/root/.constellate
-      - token-share:/run/enroll:ro
     entrypoint: ["/usr/local/bin/agent-entrypoint.sh"]
     depends_on:
-      - hub-init
+      - hub
     networks:
       - constellate
 
@@ -83,6 +59,5 @@ networks:
     driver: bridge
 
 volumes:
-  token-share:
   agent1-cred:
   agent2-cred:

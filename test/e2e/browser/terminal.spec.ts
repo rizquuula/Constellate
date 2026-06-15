@@ -6,7 +6,7 @@ test('terminal: two markers + resize', async ({ page }) => {
   // Wait for the machine named e2e-box to appear and be online
   const newShellBtn = page.locator('.machine-item').filter({
     has: page.locator('.machine-name', { hasText: 'e2e-box' }),
-  }).locator('button.btn-shell');
+  }).locator('button.btn-shell[title="New shell (ungrouped)"]');
 
   await expect(newShellBtn).toBeVisible({ timeout: 15_000 });
 
@@ -47,7 +47,7 @@ test('terminal: scrollback replay on session switch', async ({ page }) => {
 
   const newShellBtn = page.locator('.machine-item').filter({
     has: page.locator('.machine-name', { hasText: 'e2e-box' }),
-  }).locator('button.btn-shell');
+  }).locator('button.btn-shell[title="New shell (ungrouped)"]');
 
   await expect(newShellBtn).toBeVisible({ timeout: 15_000 });
 
@@ -73,7 +73,7 @@ test('terminal: scrollback replay on session switch', async ({ page }) => {
   // Wait for exactly one new session to appear, then grab its truncated ID.
   await expect(sessionItems).toHaveCount(initialCount + 1, { timeout: 5_000 });
   // Session A is the last item added (new sessions append at the end).
-  const sessionAId = await sessionItems.last().locator('.session-id').textContent();
+  const sessionAId = await sessionItems.last().locator('.session-label').textContent();
 
   // --- Open session B (becomes active; xterm now shows B) ---
   await newShellBtn.click();
@@ -86,7 +86,7 @@ test('terminal: scrollback replay on session switch', async ({ page }) => {
 
   // --- Switch back to session A by clicking its sidebar row ---
   const sessionARow = page.locator('.session-item').filter({
-    has: page.locator('.session-id', { hasText: sessionAId ?? '' }),
+    has: page.locator('.session-label', { hasText: sessionAId ?? '' }),
   });
   await sessionARow.click();
 

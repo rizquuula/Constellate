@@ -62,10 +62,9 @@ fi
 
 # ── Bootstrap operator account ────────────────────────────────────────────────
 # Mint a TOTP secret for the operator. The secret is printed to stdout by
-# `constellate-hub operator add`; we parse it for use in Playwright tests.
-# TODO (Playwright test authors): use TOTP_SECRET to compute a login code via
-# a library (e.g. @otplib/preset-default) in the test setup. The secret is
-# exported as E2E_TOTP_SECRET below so specs can read it from process.env.
+# `constellate-hub operator add`; the Playwright global setup (browser/auth.setup.ts)
+# reads it from E2E_TOTP_SECRET to compute a login code and establish a session
+# before the gated UI tests run.
 
 echo "==> Adding operator account..."
 OPERATOR_OUTPUT=$(CONSTELLATE_DB_PATH="$TMP_DB" ./bin/constellate-hub operator add 2>&1 || true)
@@ -97,12 +96,13 @@ CONSTELLATE_HUB_URL="ws://${HUB_HOST}:${HUB_PORT}/ws/agent" \
 AGENT_PID=$!
 
 # ── Wait for agent online ─────────────────────────────────────────────────────
+# /api/machines is gated behind the operator session cookie (M5), so we watch the
+# hub's structured connection log instead — it emits `agent online` on attach.
 
 echo "==> Waiting for agent to come online (up to 30s)..."
 WAIT_ELAPSED=0
 until [ "$WAIT_ELAPSED" -ge 30 ]; do
-  RESPONSE=$(wget -q -O- "${HUB_BASE}/api/machines" 2>/dev/null || echo "")
-  if echo "$RESPONSE" | grep -q '"online":true'; then
+  if grep -q 'agent online' "$HUB_LOG" 2>/dev/null; then
     echo "  ok: agent is online"
     break
   fi
@@ -120,9 +120,9 @@ if [ "$WAIT_ELAPSED" -ge 30 ]; then
 fi
 
 # ── Run Playwright tests ──────────────────────────────────────────────────────
-# E2E_TOTP_SECRET is available to Playwright specs via process.env.E2E_TOTP_SECRET.
-# TODO (Playwright test authors): add a login step in spec setup using the TOTP
-# secret to authenticate before testing operator-gated routes.
+# E2E_TOTP_SECRET is available to the Playwright global setup via process.env;
+# the `setup` project (browser/auth.setup.ts) logs in once and saves the session
+# as storageState, which the chromium project reuses for the gated UI tests.
 
 echo "==> Installing npm dependencies and running Playwright tests..."
 cd test/e2e
