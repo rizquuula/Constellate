@@ -920,6 +920,9 @@ body {
 }
 
 .view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -930,6 +933,26 @@ body {
   border-radius: var(--radius-sm);
   line-height: 1.4;
   transition: background 0.1s, color 0.1s;
+}
+
+/* Keyboard-shortcut hint badge inside each view-toggle button. */
+.view-toggle-kbd {
+  font-family: inherit;
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-base);
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.view-toggle .view-toggle-active .view-toggle-kbd {
+  border-color: transparent;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--accent-on);
+  opacity: 0.9;
 }
 
 .view-toggle-btn:hover {
@@ -2153,6 +2176,10 @@ body {
 
   .view-toggle-btn {
     padding: 4px 8px;
+  }
+
+  .view-toggle-kbd {
+    display: none;
   }
 
   .logout-btn {

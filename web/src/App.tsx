@@ -201,6 +201,7 @@ export function App() {
             title="Workspace (Alt/⌘+1)"
           >
             Workspace
+            <kbd className="view-toggle-kbd" aria-hidden="true">1</kbd>
           </button>
           <button
             className={`view-toggle-btn${viewMode === 'overview' ? ' view-toggle-active' : ''}`}
@@ -209,6 +210,7 @@ export function App() {
             title="Overview (Alt/⌘+2)"
           >
             Overview
+            <kbd className="view-toggle-kbd" aria-hidden="true">2</kbd>
           </button>
           <button
             className={`view-toggle-btn${viewMode === 'dashboard' ? ' view-toggle-active' : ''}`}
@@ -217,6 +219,7 @@ export function App() {
             title="Dashboard (Alt/⌘+3)"
           >
             Dashboard
+            <kbd className="view-toggle-kbd" aria-hidden="true">3</kbd>
           </button>
         </div>
         {hasPasskeySupport && (
