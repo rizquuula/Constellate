@@ -4,6 +4,11 @@
 #   export CONSTELLATE_DOMAIN=example.com
 #   docker compose -f deploy/compose.yaml up -d
 #
+# Optional env:
+#   CONSTELLATE_VERSION   hub image tag to run (default: latest)
+#   CADDY_HTTP            host HTTP port  (default: 80)
+#   CADDY_HTTPS           host HTTPS port (default: 443, TCP + QUIC/UDP)
+#
 # Prerequisites:
 #   1. DNS for $CONSTELLATE_DOMAIN must point to this host before starting.
 #   2. Enroll each agent after first boot:
@@ -20,9 +25,12 @@
 
 services:
   hub:
-    build:
-      context: ..
-      dockerfile: deploy/hub.Dockerfile
+    # Uses the published prod image by default. Pin a release with
+    # CONSTELLATE_VERSION=v0.1.0, or build locally by uncommenting `build:` below.
+    image: "ghcr.io/rizquuula/constellate-hub:${CONSTELLATE_VERSION:-latest}"
+    # build:
+    #   context: ..
+    #   dockerfile: deploy/hub.Dockerfile
     environment:
       CONSTELLATE_ADDR: "0.0.0.0:8080"
       CONSTELLATE_DB_PATH: "/data/constellate.db"
@@ -38,9 +46,10 @@ services:
   caddy:
     image: caddy:2
     ports:
-      - "80:80"     # HTTP → HTTPS redirect (Caddy automatic)
-      - "443:443"   # HTTPS (Caddy manages TLS certificates automatically)
-      - "443:443/udp"  # HTTP/3 (QUIC)
+      # Host ports are overridable (CADDY_HTTP/CADDY_HTTPS); container ports stay 80/443.
+      - "${CADDY_HTTP:-80}:80"       # HTTP → HTTPS redirect (Caddy automatic)
+      - "${CADDY_HTTPS:-443}:443"    # HTTPS (Caddy manages TLS certificates automatically)
+      - "${CADDY_HTTPS:-443}:443/udp"  # HTTP/3 (QUIC)
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data    # ACME certs + Caddy state
