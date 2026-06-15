@@ -941,6 +941,13 @@ body {
   line-height: 1.15;
   margin: 0;
   padding: 4px;
+  box-sizing: border-box;
+  height: 100%;
+  /* Anchor rows to the bottom so the newest output stays visible and older
+     rows scroll off the top, rather than clipping the bottom of the screen. */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   overflow: hidden;
   white-space: pre;
   color: var(--text-primary);
