@@ -23,8 +23,13 @@
 #   Caddy (ports 80/443) → hub:8080 (internal only)
 #   Agents dial wss://$CONSTELLATE_DOMAIN/ws/agent (through Caddy TLS).
 
+# Project name brands the network/volumes (constellate_*) regardless of the
+# directory this file lives in; container_name brands the running containers.
+name: constellate
+
 services:
   hub:
+    container_name: constellate-hub
     # Uses the published prod image by default. Pin a release with
     # CONSTELLATE_VERSION=v0.1.0, or build locally by uncommenting `build:` below.
     image: "ghcr.io/rizquuula/constellate-hub:${CONSTELLATE_VERSION:-latest}"
@@ -44,6 +49,7 @@ services:
     restart: unless-stopped
 
   caddy:
+    container_name: constellate-caddy
     image: caddy:2
     ports:
       # Host ports are overridable (CADDY_HTTP/CADDY_HTTPS); container ports stay 80/443.
@@ -62,6 +68,7 @@ services:
 
 networks:
   constellate:
+    name: constellate-net
     driver: bridge
 
 volumes:
