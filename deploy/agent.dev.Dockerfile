@@ -19,7 +19,10 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Install opencode (https://opencode.ai) and put it on PATH for interactive shells.
-RUN curl -fsSL https://opencode.ai/install | bash \
+# Pin the version (see deploy/agent.Dockerfile): VERSION set => download the release
+# directly and skip the rate-limited GitHub "latest" API lookup.
+ARG OPENCODE_VERSION=1.17.7
+RUN curl -fsSL https://opencode.ai/install | VERSION="${OPENCODE_VERSION}" bash \
  && ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode \
  && opencode --version
 

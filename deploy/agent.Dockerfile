@@ -22,7 +22,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Install opencode (https://opencode.ai) and put it on PATH for interactive shells.
-RUN curl -fsSL https://opencode.ai/install | bash \
+# Pin the version: with VERSION set, the installer downloads the release directly
+# and skips resolving "latest" via the unauthenticated GitHub API, which is
+# rate-limited on CI runners and intermittently fails the build. Bump to update.
+ARG OPENCODE_VERSION=1.17.7
+RUN curl -fsSL https://opencode.ai/install | VERSION="${OPENCODE_VERSION}" bash \
  && ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode \
  && opencode --version
 
