@@ -198,3 +198,10 @@ export function findLeafBySession(root: PaneNode, sessionId: string): LeafPane |
     findLeafBySession(root.children[1], sessionId)
   )
 }
+
+// firstEmptyLeafId returns the id of the first leaf with no session bound, or
+// null if every leaf is occupied. Traversal is left-to-right, depth-first.
+export function firstEmptyLeafId(root: PaneNode): string | null {
+  if (root.kind === 'leaf') return root.sessionId === null ? root.id : null
+  return firstEmptyLeafId(root.children[0]) ?? firstEmptyLeafId(root.children[1])
+}

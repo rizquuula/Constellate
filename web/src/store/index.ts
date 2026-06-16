@@ -21,7 +21,9 @@ import {
   assignSession,
   clearSession,
   collectSessionIds,
+  findLeaf,
   findLeafBySession,
+  firstEmptyLeafId,
   splitPaneWithSession as treeSplitPaneWithSession,
 } from '../features/terminal/paneTree'
 
@@ -231,10 +233,36 @@ export const useStore = create<Store>((set, get) => ({
     set({ paneRoot: newRoot, focusedPaneId: newLeafId })
   },
 
+  // New Shell mirrors the sidebar gate, but for the active pane only: a new
+  // shell must never clobber a live (running) terminal in the focused pane.
+  // If the focused pane is free (empty or holding a dead session) it opens
+  // there as before. If the focused pane is live, the shell lands in the first
+  // empty pane instead; if there is none, the session is created but left
+  // unbound — it surfaces in the sidebar and the layout is untouched, so no
+  // live terminal is ever replaced.
   openSessionInPane: async (paneId, { machineID, projectID, cwd, createDir }) => {
     const session = await createSession({ machineID, projectID, cwd, createDir, cols: 80, rows: 24 })
     const sessions = await listSessions()
-    const newRoot = assignSession(get().paneRoot, paneId, session.id)
-    set({ sessions, paneRoot: newRoot, focusedPaneId: paneId })
+    const root = get().paneRoot
+
+    const activeLeaf = findLeaf(root, paneId)
+    const activeIsLive =
+      !!activeLeaf?.sessionId &&
+      sessions.some((s) => s.id === activeLeaf.sessionId && s.status === 'running')
+
+    if (!activeIsLive) {
+      set({ sessions, paneRoot: assignSession(root, paneId, session.id), focusedPaneId: paneId })
+      return
+    }
+
+    const emptyPaneId = firstEmptyLeafId(root)
+    if (emptyPaneId) {
+      set({ sessions, paneRoot: assignSession(root, emptyPaneId, session.id), focusedPaneId: emptyPaneId })
+      return
+    }
+
+    // Active pane is live and no empty pane exists — keep the new session
+    // unplaced rather than overwrite a running terminal.
+    set({ sessions })
   },
 }))
