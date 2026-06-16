@@ -22,7 +22,7 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
 ## Commands
 - `make build` · `make test` (unit + integration + in-proc E2E) · `make test-docker` (hub + 2 agent
   containers) · `make lint` (golangci-lint **v2** config).
-- Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
+- Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|update|version`.
 
 ## Releasing
 The hub and agent **version independently** via `cmd/hub/VERSION` and `cmd/agent/VERSION` (plain semver,

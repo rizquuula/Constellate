@@ -285,6 +285,54 @@ re-enroll with a new token to come back.
 
 ---
 
+## Updating
+
+`constellate-agent update` downloads the latest release, verifies it, atomically replaces the
+binary, and restarts the systemd service (if it is running).
+
+```bash
+sudo constellate-agent update
+```
+
+The command requires root (or sudo) when the binary lives in a root-owned directory such as
+`/usr/local/bin`. After updating, if `constellate-agent.service` is active, `systemctl restart` is
+called automatically; pass `--no-restart` to skip this.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--version <tag>` | Pin a specific release tag (e.g. `v20260615-0830`). Default: latest. |
+| `--check` | Report current vs available version and exit without downloading. |
+| `--force` | Reinstall even if already at the latest version. |
+| `--no-restart` | Skip the systemd service restart after the binary is replaced. |
+| `--bin <path>` | Override the target binary path (default: the running binary). |
+
+### How it works
+
+The Go bootstrapper (`cmdUpdate`) fetches `SHA256SUMS` from the release, locates the `update.sh`
+entry, downloads `update.sh`, and verifies its checksum before executing anything. Only a
+checksum-verified script is ever run — network interception cannot substitute an unverified payload.
+The script itself performs the atomic swap: it downloads the tarball, verifies its hash, installs
+the new binary via a same-filesystem `mv` (with `.bak` rollback on failure), and optionally
+restarts the service.
+
+### Standalone one-liner
+
+You can also run the updater directly without the Go bootstrapper:
+
+```bash
+curl -fsSL https://github.com/rizquuula/Constellate/releases/latest/download/update.sh | sudo sh
+```
+
+To pin a version:
+
+```bash
+curl -fsSL https://github.com/rizquuula/Constellate/releases/download/v20260615-0830/update.sh | sudo sh
+```
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause & fix |

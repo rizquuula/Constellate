@@ -79,6 +79,8 @@ func main() {
 		cmdReset(args)
 	case "install":
 		cmdInstall(args)
+	case "update":
+		cmdUpdate(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", sub)
 		usage()
@@ -98,6 +100,7 @@ Commands:
   status    Show local enrollment status
   reset     Remove local enrollment (id + credential)
   install   Install + start a systemd service (Linux; requires enrollment)
+  update    Download + install the latest agent release, then restart the service
   version   Print version and protocol info
 
 Flags:
