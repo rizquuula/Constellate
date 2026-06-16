@@ -1,4 +1,4 @@
-# docker-compose.dev.yaml — local dev / demo stack for trying Constellate.
+# deploy/compose.dev.yaml — local dev / demo stack for trying Constellate.
 #
 # Brings up the hub (with the embedded web UI) + two agent "machines" you can
 # open a live shell into from the browser.
@@ -10,8 +10,8 @@
 #   open http://localhost:8080   → log in → pick an agent → "New shell"
 #   ./deploy/dev-totp.sh         # print a fresh 6-digit login code anytime
 #
-#   docker compose -f docker-compose.dev.yaml down      # stop (keeps data)
-#   docker compose -f docker-compose.dev.yaml down -v   # stop + wipe data
+#   docker compose -f deploy/compose.dev.yaml down      # stop (keeps data)
+#   docker compose -f deploy/compose.dev.yaml down -v   # stop + wipe data
 #
 # NOTE: the agents run *inside containers*, so the shells you open are shells in
 # those Debian containers — not your host. To get a terminal on your actual
@@ -24,7 +24,7 @@
 services:
   hub:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/hub.Dockerfile
     environment:
       CONSTELLATE_ADDR: "0.0.0.0:8080"
@@ -40,7 +40,7 @@ services:
 
   agent-alpha:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/agent.dev.Dockerfile
     environment:
       CONSTELLATE_HUB_URL: "ws://hub:8080/ws/agent"
@@ -56,7 +56,7 @@ services:
 
   agent-beta:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/agent.dev.Dockerfile
     environment:
       CONSTELLATE_HUB_URL: "ws://hub:8080/ws/agent"

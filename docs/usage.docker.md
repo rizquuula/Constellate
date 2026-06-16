@@ -4,7 +4,7 @@ This is the guide for running Constellate **in containers**. Two compose stacks 
 
 | Stack | File | Make targets | TLS | For |
 |---|---|---|---|---|
-| **Dev** | [`docker-compose.dev.yaml`](../docker-compose.dev.yaml) | `ddocker-*` | none (plain `http://localhost`) | trying it locally / demo |
+| **Dev** | [`deploy/compose.dev.yaml`](../deploy/compose.dev.yaml) | `ddocker-*` | none (plain `http://localhost`) | trying it locally / demo |
 | **Prod** | [`deploy/compose.yaml`](../deploy/compose.yaml) | `docker-*` | Caddy auto-HTTPS | a public VPS |
 
 Run `make` (or `make help`) to see every target. For running from the binaries instead of

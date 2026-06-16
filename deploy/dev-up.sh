@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-COMPOSE="docker compose -f docker-compose.dev.yaml"
+COMPOSE="docker compose -f deploy/compose.dev.yaml"
 HUB_BIN="/usr/local/bin/constellate-hub"
 BASE="http://localhost:8080"
 DEV_DIR="deploy/.dev"
@@ -97,6 +97,6 @@ fi
 echo ""
 echo " Then: pick agent-alpha or agent-beta → \"New shell\" → type away."
 echo ""
-echo " Stop:        docker compose -f docker-compose.dev.yaml down"
-echo " Reset all:   docker compose -f docker-compose.dev.yaml down -v"
+echo " Stop:        docker compose -f deploy/compose.dev.yaml down"
+echo " Reset all:   docker compose -f deploy/compose.dev.yaml down -v"
 echo "─────────────────────────────────────────────────────────────────────"

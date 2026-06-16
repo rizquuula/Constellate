@@ -14,7 +14,7 @@ LDFLAGS_AGENT := -ldflags "-X $(VERSION_PKG).Version=$(AGENT_VERSION) \
 	-X $(VERSION_PKG).Commit=$(COMMIT) \
 	-X $(VERSION_PKG).BuildTime=$(BUILDTIME)"
 
-DEV_COMPOSE  := docker compose -f docker-compose.dev.yaml
+DEV_COMPOSE  := docker compose -f deploy/compose.dev.yaml
 PROD_COMPOSE := docker compose -f deploy/compose.yaml
 
 # Pin golangci-lint so `make lint` matches CI exactly (.github/workflows/ci.yaml).
