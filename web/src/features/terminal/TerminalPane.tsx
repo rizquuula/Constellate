@@ -148,7 +148,7 @@ export function TerminalPane({
         <div className="pane-controls">
           <button
             className="pane-btn"
-            title="Split horizontal (side by side)"
+            title="Split horizontal (side by side) — Shift+Alt+−"
             aria-label="Split pane horizontally"
             onClick={onSplitH}
           >
@@ -156,7 +156,7 @@ export function TerminalPane({
           </button>
           <button
             className="pane-btn"
-            title="Split vertical (stacked)"
+            title="Split vertical (stacked) — Shift+Alt+="
             aria-label="Split pane vertically"
             onClick={onSplitV}
           >
@@ -165,7 +165,7 @@ export function TerminalPane({
           {sessionId && (
             <button
               className="pane-btn"
-              title="Detach session (keep it running in the sidebar, blank this pane)"
+              title="Detach session (keep it running in the sidebar, blank this pane) — Shift+Alt+E"
               aria-label="Detach session from pane"
               onClick={onDetach}
             >
@@ -174,7 +174,7 @@ export function TerminalPane({
           )}
           <button
             className="pane-btn pane-btn-close"
-            title="Close pane"
+            title="Close pane — Shift+Alt+W"
             aria-label="Close pane"
             onClick={onClose}
           >
