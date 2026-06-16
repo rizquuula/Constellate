@@ -106,6 +106,58 @@ default_shell: "/bin/bash"
 Every field has an env override: `CONSTELLATE_HUB_URL`, `CONSTELLATE_NAME`, `CONSTELLATE_ID_FILE`,
 `CONSTELLATE_CRED_FILE`, `CONSTELLATE_HUB_CA`.
 
+> ### ⚠️ `~` follows the **invoking user** — run everything as the same user
+>
+> `id_file` and `cred_file` default under `~/.constellate`, and `~` expands from the invoking
+> user's `$HOME` (via `os.UserHomeDir()`). Every agent command — `enroll`, `connect`, `status`,
+> `update`, `reset` — resolves these paths *at the moment you run it*, so **who** runs the command
+> decides which identity it reads or writes.
+>
+> The classic symptom is two commands disagreeing:
+>
+> ```console
+> $ constellate-agent status          # runs as you → ~/.constellate = /home/you/.constellate
+> machine id: 01KV5SH8NRYQYZ9ZFEYETJTP1Q
+>
+> $ sudo constellate-agent status     # runs as root → ~/.constellate = /root/.constellate
+> machine id: 01KW9ABXNRYQYZ9ZFEYETJTP7H   # ← different file, different identity!
+> ```
+>
+> This is **not a bug**. `sudo` resets `$HOME` to `/root` (unless `sudo -E` / a sudoers
+> `env_keep += HOME`), so `~/.constellate` points at root's home — an entirely separate
+> `agent-id` + `cred` pair. If you ran `enroll` once as your user and once under `sudo`, you
+> performed **two enrollments**: the hub minted **two distinct machineIDs** (each enroll generates
+> its own Ed25519 keypair), and your one physical box now shows up as **two machines** in the UI.
+>
+> **Rules of thumb:**
+> - Pick one identity and run *every* command as that **same** user.
+>   - Rootless / user systemd service (`--rootless`, `systemctl --user`) → **never** prefix `sudo`.
+>   - System-wide service running as a named `User=` (or as root) → enroll and check `status` as
+>     **that** user (e.g. `sudo -u constellate constellate-agent status …`, or just `sudo …` if it
+>     runs as root). Don't mix in a bare-user command.
+> - If you already created a stray identity, clean it up: `constellate-hub machines` to list,
+>   `constellate-hub revoke <machine-id>` to revoke the unwanted one, and `constellate-agent reset`
+>   (as the matching user) to delete its local `id_file` + `cred_file`.
+>
+> **Make it user-independent.** To stop `$HOME` from mattering, point the files at an absolute,
+> shared path so the same identity is used no matter who invokes the agent:
+>
+> ```yaml
+> # in agent.yaml
+> id_file:   /etc/constellate/agent-id
+> cred_file: /etc/constellate/cred
+> ```
+>
+> ```bash
+> # …or via env (overrides config), e.g. in the systemd unit's Environment=
+> CONSTELLATE_ID_FILE=/etc/constellate/agent-id \
+> CONSTELLATE_CRED_FILE=/etc/constellate/cred \
+>   constellate-agent status
+> ```
+>
+> Whoever owns that path must have read/write on it (the dir is created `0700`, the id file `0600`,
+> the cred file `0600`), so keep it owned by the single user the agent runs as.
+
 ---
 
 ## Step 2 — Enroll (one time, registers the machine)
