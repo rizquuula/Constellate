@@ -4,7 +4,11 @@
 # (The dev/demo image is deploy/agent.dev.Dockerfile; automated topology tests
 # use test/docker/agent.test.Dockerfile.)
 
-FROM golang:1.25 AS build
+# Build on the native BUILDPLATFORM and cross-compile to TARGETARCH — with
+# CGO_ENABLED=0 this is a free, fast cross-build (no QEMU-emulated Go compile).
+# The runtime stage below still runs under emulation for arm64 (it executes
+# opencode), which is why the workflow sets up QEMU.
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
 ENV GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=auto CGO_ENABLED=0 GOOS=linux
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -12,7 +16,8 @@ RUN go mod download
 COPY . .
 ARG VERSION=0.1.0
 ARG COMMIT=docker
-RUN go build -trimpath -ldflags "-s -w -X github.com/rizquuula/Constellate/internal/platform/version.Version=${VERSION} -X github.com/rizquuula/Constellate/internal/platform/version.Commit=${COMMIT}" -o /out/constellate-agent ./cmd/agent
+ARG TARGETARCH
+RUN GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X github.com/rizquuula/Constellate/internal/platform/version.Version=${VERSION} -X github.com/rizquuula/Constellate/internal/platform/version.Commit=${COMMIT}" -o /out/constellate-agent ./cmd/agent
 
 FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive

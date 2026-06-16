@@ -3,13 +3,23 @@ name: release
 # Triggered by a datetime "release-train" tag, e.g. v20260615-0830.
 # The tag is a neutral umbrella: the real per-binary semver is read from
 # cmd/hub/VERSION and cmd/agent/VERSION (which version independently).
+#
+# The glob is deliberately narrow — v<8 digits>-<digits> — so a stray semver
+# tag (v1.0.0), a typo (vtest), or an imported tag can't fire a full production
+# release that publishes the floating :latest / :debian13 GHCR images.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9]*"]
 
 permissions:
   contents: write # create the GitHub Release + upload assets
   packages: write # push images to GHCR
+
+# One release per tag; never let a re-pushed or out-of-order tag race another
+# run and clobber the :latest image tags or the GitHub Release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   GOTOOLCHAIN: auto
@@ -106,9 +116,12 @@ jobs:
           path: dist/*.tar.gz
 
   # Gather all archives, checksum them, and cut the GitHub Release.
+  # Gated on `images` (not just `binaries`) so we never publish a Release whose
+  # version has no matching :latest GHCR image — the two ship together or not
+  # at all. `images` needs `binaries`, so the archive artifacts are present.
   release:
     name: github release
-    needs: binaries
+    needs: images
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -220,6 +233,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up QEMU # emulators for the linux/arm64 cross-build
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -247,7 +263,7 @@ jobs:
         with:
           context: .
           file: deploy/hub.Dockerfile
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
             VERSION=${{ steps.ver.outputs.hub }}
@@ -266,7 +282,7 @@ jobs:
         with:
           context: .
           file: deploy/agent.Dockerfile
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
             VERSION=${{ steps.ver.outputs.agent }}
