@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
@@ -217,13 +218,16 @@ func TestOpen_GeneratesNameWhenTitleEmpty(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 
+	// Generated names are "<adjective>-<noun>", both lowercase a–z, joined by a
+	// single hyphen (e.g. "brave-otter").
 	title := s.Title()
-	if len(title) != 5 {
-		t.Fatalf("generated title length: got %d (%q), want 5", len(title), title)
+	parts := strings.Split(title, "-")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		t.Fatalf("generated title %q: want exactly two non-empty hyphen-joined words", title)
 	}
 	for _, c := range title {
-		if !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') {
-			t.Errorf("generated title %q contains non [A-Z0-9] char %q", title, c)
+		if !(c >= 'a' && c <= 'z') && c != '-' {
+			t.Errorf("generated title %q contains unexpected char %q (want [a-z-])", title, c)
 		}
 	}
 }

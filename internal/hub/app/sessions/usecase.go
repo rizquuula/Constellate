@@ -2,7 +2,6 @@ package sessions
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"log/slog"
 	"time"
@@ -10,25 +9,6 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/domain/audit"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
 )
-
-// sessionNameCharset is the alphabet for auto-generated session names:
-// uppercase letters and digits only (no lowercase, no ambiguous punctuation).
-const sessionNameCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-
-// generateSessionName returns a random 5-character name drawn from A–Z and 0–9,
-// used as a session's default title when the caller supplies none. The name is
-// cosmetic (the ULID id remains the key), so on the unlikely CSPRNG failure it
-// returns "" and the UI falls back to the id.
-func generateSessionName() string {
-	b := make([]byte, 5)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-	for i, c := range b {
-		b[i] = sessionNameCharset[int(c)%len(sessionNameCharset)]
-	}
-	return string(b)
-}
 
 // SystemClock implements Clock using the real wall clock.
 type SystemClock struct{}
