@@ -14,6 +14,24 @@ export class ApiError extends Error {
   }
 }
 
+// errorFromResponse turns a failed Response into an ApiError carrying the
+// server's `{"error":{code,message}}` message when present, so the UI can render
+// a clean human-readable string instead of a raw "POST /path: 403 {json}" dump.
+// `fallback` is used when the body has no structured message (non-JSON, etc.).
+async function errorFromResponse(res: Response, fallback: string): Promise<ApiError> {
+  const text = await res.text()
+  let message: string | undefined
+  let code: string | undefined
+  try {
+    const parsed = JSON.parse(text) as { error?: { code?: string; message?: string } }
+    message = parsed?.error?.message
+    code = parsed?.error?.code
+  } catch {
+    // non-JSON error body; fall back below
+  }
+  return new ApiError(message || fallback, res.status, code)
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
@@ -22,14 +40,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
-    const text = await res.text()
-    let code: string | undefined
-    try {
-      code = (JSON.parse(text) as { error?: { code?: string } })?.error?.code
-    } catch {
-      // non-JSON error body; leave code undefined
-    }
-    throw new ApiError(`${method} ${path}: ${res.status} ${text}`, res.status, code)
+    throw await errorFromResponse(res, `${method} ${path}: ${res.status}`)
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
@@ -133,8 +144,7 @@ export async function passkeyLogin(): Promise<void> {
     credentials: 'same-origin',
   })
   if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`passkey login begin: ${res.status} ${text}`)
+    throw await errorFromResponse(res, `Passkey sign-in failed (${res.status})`)
   }
   const opts = await res.json()
   const pk = opts.publicKey
@@ -171,8 +181,7 @@ export async function passkeyLogin(): Promise<void> {
     body: JSON.stringify(body),
   })
   if (!finishRes.ok) {
-    const text = await finishRes.text()
-    throw new Error(`passkey login finish: ${finishRes.status} ${text}`)
+    throw await errorFromResponse(finishRes, `Passkey sign-in failed (${finishRes.status})`)
   }
 }
 
@@ -183,8 +192,7 @@ export async function passkeyRegister(): Promise<void> {
     credentials: 'same-origin',
   })
   if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`passkey register begin: ${res.status} ${text}`)
+    throw await errorFromResponse(res, `Passkey registration failed (${res.status})`)
   }
   const opts = await res.json()
   const pk = opts.publicKey
@@ -220,7 +228,6 @@ export async function passkeyRegister(): Promise<void> {
     body: JSON.stringify(body),
   })
   if (!finishRes.ok) {
-    const text = await finishRes.text()
-    throw new Error(`passkey register finish: ${finishRes.status} ${text}`)
+    throw await errorFromResponse(finishRes, `Passkey registration failed (${finishRes.status})`)
   }
 }
