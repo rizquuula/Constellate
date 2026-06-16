@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useCallback, memo } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { useStore } from '../../store'
 import { useTerminal } from './useTerminal'
@@ -16,7 +16,7 @@ interface TerminalPaneProps {
   onClose: () => void
 }
 
-export function TerminalPane({
+function TerminalPaneImpl({
   paneId,
   sessionId,
   focused,
@@ -100,11 +100,11 @@ export function TerminalPane({
       className={`terminal-pane${focused ? ' terminal-pane-focused' : ''}`}
       tabIndex={0}
       aria-label={paneAriaLabel}
-      onClick={onFocus}
+      onMouseDown={onFocus}
       onKeyDown={handlePaneKeyDown}
     >
       {/* Pane chrome: title + controls */}
-      <div className="pane-chrome" onClick={(e) => e.stopPropagation()}>
+      <div className="pane-chrome" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
         <div
           className={`pane-title${dragData ? ' pane-title-draggable' : ''}${isDragging ? ' pane-title-dragging' : ''}`}
           ref={dragData ? setDragRef : undefined}
@@ -187,7 +187,7 @@ export function TerminalPane({
       </div>
 
       {/* Terminal body */}
-      <div className="pane-body" onClick={onFocus}>
+      <div className="pane-body" onMouseDown={onFocus}>
         <PaneDropZones paneId={paneId} />
         {!sessionId && (
           <div className="pane-empty">
@@ -213,3 +213,5 @@ export function TerminalPane({
     </div>
   )
 }
+
+export const TerminalPane = memo(TerminalPaneImpl)

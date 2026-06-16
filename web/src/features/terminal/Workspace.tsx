@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, memo } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { useStore } from '../../store'
 import type { PaneNode, LeafPane } from './paneTree'
@@ -8,7 +8,7 @@ interface WorkspaceNodeProps {
   node: PaneNode
 }
 
-function WorkspaceNode({ node }: WorkspaceNodeProps) {
+const WorkspaceNode = memo(function WorkspaceNode({ node }: WorkspaceNodeProps) {
   const focusedPaneId = useStore((s) => s.focusedPaneId)
   const focusPane = useStore((s) => s.focusPane)
   const doSplitPane = useStore((s) => s.splitPane)
@@ -51,7 +51,7 @@ function WorkspaceNode({ node }: WorkspaceNodeProps) {
       {panels}
     </Group>
   )
-}
+})
 
 // On phones, side-by-side split panes are unusable; render only the focused
 // leaf full-screen. Session switching happens via the sidebar drawer.
