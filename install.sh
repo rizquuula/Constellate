@@ -117,6 +117,15 @@ tar -xzf "${tmp}/${asset}" -C "$tmp" || err "could not extract ${asset}"
 [ -f "${tmp}/${BIN}" ] || err "archive did not contain ${BIN}"
 
 # ---- install -----------------------------------------------------------------
+# Create the target dir up front, unprivileged, so the writability check below
+# reflects a directory that actually exists. This is what lets a first-time
+# --rootless install into a not-yet-existing ~/.local/bin work without sudo:
+# $HOME is writable, so we can create it ourselves. For a non-writable system
+# path the attempt fails harmlessly and we fall through to the sudo branch.
+if [ ! -d "$BIN_DIR" ] && [ "$(id -u)" -ne 0 ]; then
+  mkdir -p "$BIN_DIR" 2>/dev/null || true
+fi
+
 SUDO=
 if [ ! -w "$BIN_DIR" ] && [ "$(id -u)" -ne 0 ]; then
   command -v sudo >/dev/null 2>&1 || err "${BIN_DIR} is not writable and sudo is unavailable — set BIN_DIR to a writable path"

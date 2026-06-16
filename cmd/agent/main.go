@@ -513,7 +513,9 @@ WantedBy=multi-user.target
 
 func cmdInstall(args []string) {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
-	configPath := platcli.String(fs, "config", "c", "", "path to config file (passed through to the service's connect command)")
+	// Shared --config / -c (passed through to the service's connect command,
+	// absolutized below); use the common helper like every other command.
+	configPath := platcli.ConfigFlag(fs)
 	userFlag := fs.String("user", "", "system user to run the service as (default: $SUDO_USER, else current user)")
 	noStart := fs.Bool("no-start", false, "write + reload the unit but do not enable/start it")
 	rootless := platcli.Bool(fs, "rootless", "r", false, "install a rootless systemd *user* service (~/.config/systemd/user, systemctl --user) — no root required")

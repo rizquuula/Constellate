@@ -194,11 +194,19 @@ info "Updated ${B}${BIN}${N}"
 # ---- restart service (optional) ----------------------------------------------
 if [ -z "${CONSTELLATE_NO_RESTART:-}" ]; then
   if [ -n "$ROOTLESS" ]; then
-    # Rootless: check and restart the user service — no sudo needed.
+    # Rootless: restart the user service — no sudo needed. Gate on the unit file
+    # existing rather than `systemctl --user is-active`: when this script is
+    # piped from curl (non-interactive, no DBUS_SESSION_BUS_ADDRESS /
+    # XDG_RUNTIME_DIR), the is-active probe fails even for a running service, so
+    # we'd otherwise silently skip the restart. Attempt the restart and report a
+    # clear, actionable message if the user session bus can't be reached.
     USER_UNIT_PATH="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/${UNIT}"
-    if [ -f "$USER_UNIT_PATH" ] && systemctl --user is-active --quiet "$UNIT" 2>/dev/null; then
+    if [ -f "$USER_UNIT_PATH" ] && command -v systemctl >/dev/null 2>&1; then
       info "Restarting ${UNIT} (user service)"
-      systemctl --user restart "$UNIT" || warn "systemctl --user restart ${UNIT} failed"
+      if ! systemctl --user restart "$UNIT" 2>/dev/null; then
+        warn "could not restart ${UNIT} (no user session bus?) — restart it manually:"
+        printf '  systemctl --user restart %s\n' "$UNIT"
+      fi
     else
       printf '\n%sbinary updated%s; restart your agent manually:\n\n' "$B" "$N"
       printf '  systemctl --user restart %s\n' "$UNIT"

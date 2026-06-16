@@ -37,6 +37,13 @@ func TestRenderUnit(t *testing.T) {
 			wantExec:   "ExecStart=/home/bob/.local/bin/constellate-agent connect --config /home/bob/.constellate/agent.yaml",
 			rootless:   true,
 		},
+		{
+			name:       "rootless without config",
+			params:     unitParams{ExecBin: "/home/bob/.local/bin/constellate-agent", ConfigPath: "", Rootless: true},
+			wantConfig: false,
+			wantExec:   "ExecStart=/home/bob/.local/bin/constellate-agent connect",
+			rootless:   true,
+		},
 	}
 
 	for _, tc := range tests {

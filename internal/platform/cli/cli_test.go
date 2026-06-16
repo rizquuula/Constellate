@@ -34,6 +34,9 @@ func TestStringAlias(t *testing.T) {
 	}{
 		{[]string{"--log-level", "debug"}, "debug"},
 		{[]string{"-l", "debug"}, "debug"},
+		// Long and short share one target: last on the command line wins.
+		{[]string{"-l", "info", "--log-level", "debug"}, "debug"},
+		{[]string{"--log-level", "debug", "-l", "info"}, "info"},
 	}
 	for _, tc := range cases {
 		fs := flag.NewFlagSet("t", flag.ContinueOnError)
