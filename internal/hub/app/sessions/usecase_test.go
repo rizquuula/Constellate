@@ -206,6 +206,43 @@ func TestOpen_DefaultsDimensions(t *testing.T) {
 	}
 }
 
+func TestOpen_GeneratesNameWhenTitleEmpty(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 7}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+
+	s, err := uc.Open(context.Background(), sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	title := s.Title()
+	if len(title) != 5 {
+		t.Fatalf("generated title length: got %d (%q), want 5", len(title), title)
+	}
+	for _, c := range title {
+		if !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') {
+			t.Errorf("generated title %q contains non [A-Z0-9] char %q", title, c)
+		}
+	}
+}
+
+func TestOpen_KeepsProvidedTitle(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 7}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+
+	s, err := uc.Open(context.Background(), sessions.OpenInput{MachineID: "m1", Title: "my-shell"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if s.Title() != "my-shell" {
+		t.Errorf("Title: got %q, want my-shell", s.Title())
+	}
+}
+
 func TestOpen_GatewayError_DoesNotPersist(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{openErr: errors.New("agent refused")}

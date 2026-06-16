@@ -27,6 +27,7 @@ export function TerminalPane({
   onClose,
 }: TerminalPaneProps) {
   const session = useStore((s) => sessionId ? s.sessions.find((x) => x.id === sessionId) : undefined)
+  const machine = useStore((s) => session ? s.machines.find((m) => m.id === session.machineID) : undefined)
   const renameSession = useStore((s) => s.renameSession)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -37,9 +38,11 @@ export function TerminalPane({
   useTerminal(containerRef, sessionId)
   const sessionEnded = session !== undefined && session.status !== 'running'
 
-  const paneLabel = session
-    ? (session.title || session.id.slice(0, 8))
-    : 'empty'
+  // Shell name shown in full (no cropping); fall back to a short id only for
+  // legacy sessions that predate server-generated names. Prefix with the machine
+  // name as "<machine> | <shell>" so a pane is identifiable across machines.
+  const shellName = session ? (session.title || session.id.slice(0, 8)) : 'empty'
+  const paneLabel = session && machine ? `${machine.name} | ${shellName}` : shellName
 
   const dragData: SessionDragData | undefined = session && !sessionEnded
     ? { kind: 'session', sessionId: session.id, label: paneLabel }
