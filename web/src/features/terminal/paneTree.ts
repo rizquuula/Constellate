@@ -13,7 +13,9 @@ export interface SplitPane {
   kind: 'split'
   id: string
   direction: PaneDirection
-  children: [PaneNode, PaneNode]
+  // n-ary: always ≥2 children; same-direction splits flatten into this array
+  // so 3 horizontal splits produce one group of 3 (33/33/33), not nested 50/25/25.
+  children: PaneNode[]
 }
 
 export type PaneNode = LeafPane | SplitPane
@@ -31,7 +33,10 @@ export function makeLeaf(sessionId: string | null = null): LeafPane {
 function findNode(root: PaneNode, id: string): PaneNode | null {
   if (root.id === id) return root
   if (root.kind === 'split') {
-    return findNode(root.children[0], id) ?? findNode(root.children[1], id)
+    for (const child of root.children) {
+      const found = findNode(child, id)
+      if (found) return found
+    }
   }
   return null
 }
@@ -41,49 +46,67 @@ function mapNode(root: PaneNode, id: string, fn: (n: PaneNode) => PaneNode): Pan
   if (root.kind === 'split') {
     return {
       ...root,
-      children: [
-        mapNode(root.children[0], id, fn),
-        mapNode(root.children[1], id, fn),
-      ],
+      children: root.children.map((child) => mapNode(child, id, fn)),
     }
   }
   return root
 }
 
-// Remove a leaf by id. Returns [newRoot, siblingId | null].
-// If the removed leaf's parent split collapses, the sibling takes the parent's place.
+// findParent returns the direct SplitPane parent of the node with the given id,
+// or null if the node is the root or not found.
+function findParent(root: PaneNode, id: string, parent: SplitPane | null = null): SplitPane | null {
+  if (root.id === id) return parent
+  if (root.kind === 'split') {
+    for (const child of root.children) {
+      const found = findParent(child, id, root)
+      if (found !== null || child.id === id) {
+        // child.id === id means root is the parent
+        if (child.id === id) return root
+        return found
+      }
+    }
+  }
+  return null
+}
+
+// Remove a leaf by id. Returns [newRoot, focusId | null].
+// If the removed leaf's parent split collapses to 1 child, that child replaces the split.
+// If the parent has >2 children, the leaf is simply dropped (siblings redistribute).
 function removeLeaf(root: PaneNode, id: string): [PaneNode, string | null] {
   if (root.kind === 'leaf') {
     // Cannot remove the very root leaf; caller handles this.
     return [root, null]
   }
 
-  const [a, b] = root.children
-
   // Check if a direct child matches.
-  if (a.id === id) {
-    // Collapse: replace this split with the surviving sibling.
-    return [b, firstLeafId(b)]
-  }
-  if (b.id === id) {
-    return [a, firstLeafId(a)]
-  }
-
-  // Recurse into left child.
-  if (containsId(a, id)) {
-    const [newA, focusId] = removeLeaf(a, id)
-    return [{ ...root, children: [newA, b] }, focusId]
+  const directIdx = root.children.findIndex((c) => c.id === id)
+  if (directIdx !== -1) {
+    const remaining = root.children.filter((_, i) => i !== directIdx)
+    if (remaining.length === 1) {
+      // Collapse: replace this split with the sole surviving child.
+      return [remaining[0], firstLeafId(remaining[0])]
+    }
+    // Drop the child; focus the nearest sibling.
+    const focusSibling = directIdx > 0 ? remaining[directIdx - 1] : remaining[0]
+    return [{ ...root, children: remaining }, firstLeafId(focusSibling)]
   }
 
-  // Recurse into right child.
-  const [newB, focusId] = removeLeaf(b, id)
-  return [{ ...root, children: [a, newB] }, focusId]
+  // Recurse into whichever child contains the target.
+  for (let i = 0; i < root.children.length; i++) {
+    if (containsId(root.children[i], id)) {
+      const [newChild, focusId] = removeLeaf(root.children[i], id)
+      const newChildren = root.children.map((c, idx) => (idx === i ? newChild : c))
+      return [{ ...root, children: newChildren }, focusId]
+    }
+  }
+
+  return [root, null]
 }
 
 function containsId(node: PaneNode, id: string): boolean {
   if (node.id === id) return true
   if (node.kind === 'split') {
-    return containsId(node.children[0], id) || containsId(node.children[1], id)
+    return node.children.some((child) => containsId(child, id))
   }
   return false
 }
@@ -101,6 +124,22 @@ export function splitPane(
   direction: PaneDirection,
 ): [PaneNode, string] {
   const newLeaf = makeLeaf(null)
+  const parent = findParent(root, paneId, null)
+
+  // If the target's parent already splits in the same direction, insert the new
+  // leaf as a sibling immediately after the target (flatten into the group).
+  if (parent && parent.direction === direction) {
+    const targetIdx = parent.children.findIndex((c) => c.id === paneId)
+    const newChildren = [
+      ...parent.children.slice(0, targetIdx + 1),
+      newLeaf,
+      ...parent.children.slice(targetIdx + 1),
+    ]
+    const newRoot = mapNode(root, parent.id, () => ({ ...parent, children: newChildren }))
+    return [newRoot, newLeaf.id]
+  }
+
+  // No matching parent — wrap the target leaf in a new 2-child split.
   const newRoot = mapNode(root, paneId, (n) => {
     if (n.kind !== 'leaf') return n
     const split: SplitPane = {
@@ -144,11 +183,7 @@ export function clearSession(root: PaneNode, sessionId: string): PaneNode {
   if (root.kind === 'leaf') {
     return root.sessionId === sessionId ? { ...root, sessionId: null } : root
   }
-  const children: [PaneNode, PaneNode] = [
-    clearSession(root.children[0], sessionId),
-    clearSession(root.children[1], sessionId),
-  ]
-  return { ...root, children }
+  return { ...root, children: root.children.map((child) => clearSession(child, sessionId)) }
 }
 
 // assignSession enforces single-pane occupancy: clears sessionId from any other
@@ -162,8 +197,10 @@ export function assignSession(root: PaneNode, paneId: string, sessionId: string)
 }
 
 // splitPaneWithSession splits the target pane and places sessionId in the new
-// leaf. before=true puts the new leaf as children[0], else children[1].
+// leaf. before=true puts the new leaf before the target, else after.
 // Runs clearSession first so a move-via-edge-split vacates the source pane.
+// Applies the same parent-merge logic as splitPane: if the target's parent
+// already splits in the same direction, the new leaf is inserted as a sibling.
 export function splitPaneWithSession(
   root: PaneNode,
   paneId: string,
@@ -173,9 +210,25 @@ export function splitPaneWithSession(
 ): [PaneNode, string] {
   const cleared = clearSession(root, sessionId)
   const newLeaf = makeLeaf(sessionId)
+  const parent = findParent(cleared, paneId, null)
+
+  // If the target's parent already splits in the same direction, insert as sibling.
+  if (parent && parent.direction === direction) {
+    const targetIdx = parent.children.findIndex((c) => c.id === paneId)
+    const insertAt = before ? targetIdx : targetIdx + 1
+    const newChildren = [
+      ...parent.children.slice(0, insertAt),
+      newLeaf,
+      ...parent.children.slice(insertAt),
+    ]
+    const newRoot = mapNode(cleared, parent.id, () => ({ ...parent, children: newChildren }))
+    return [newRoot, newLeaf.id]
+  }
+
+  // No matching parent — wrap the target in a new 2-child split.
   const newRoot = mapNode(cleared, paneId, (n) => {
     if (n.kind !== 'leaf') return n
-    const children: [PaneNode, PaneNode] = before ? [newLeaf, n] : [n, newLeaf]
+    const children: PaneNode[] = before ? [newLeaf, n] : [n, newLeaf]
     const split: SplitPane = {
       kind: 'split',
       id: genId(),
@@ -196,22 +249,27 @@ export function findLeaf(root: PaneNode, id: string): LeafPane | null {
 // collectSessionIds returns every non-null sessionId currently bound in the tree.
 export function collectSessionIds(root: PaneNode): string[] {
   if (root.kind === 'leaf') return root.sessionId ? [root.sessionId] : []
-  return [...collectSessionIds(root.children[0]), ...collectSessionIds(root.children[1])]
+  return root.children.flatMap((child) => collectSessionIds(child))
 }
 
 // findLeafBySession returns the leaf currently bound to sessionId, or null.
 // (Occupancy is single-pane, so there is at most one such leaf.)
 export function findLeafBySession(root: PaneNode, sessionId: string): LeafPane | null {
   if (root.kind === 'leaf') return root.sessionId === sessionId ? root : null
-  return (
-    findLeafBySession(root.children[0], sessionId) ??
-    findLeafBySession(root.children[1], sessionId)
-  )
+  for (const child of root.children) {
+    const found = findLeafBySession(child, sessionId)
+    if (found) return found
+  }
+  return null
 }
 
 // firstEmptyLeafId returns the id of the first leaf with no session bound, or
 // null if every leaf is occupied. Traversal is left-to-right, depth-first.
 export function firstEmptyLeafId(root: PaneNode): string | null {
   if (root.kind === 'leaf') return root.sessionId === null ? root.id : null
-  return firstEmptyLeafId(root.children[0]) ?? firstEmptyLeafId(root.children[1])
+  for (const child of root.children) {
+    const found = firstEmptyLeafId(child)
+    if (found !== null) return found
+  }
+  return null
 }

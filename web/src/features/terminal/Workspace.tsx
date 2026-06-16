@@ -31,17 +31,24 @@ function WorkspaceNode({ node }: WorkspaceNodeProps) {
   }
 
   // Split node: "horizontal" pane direction = side-by-side panels.
+  // Map over n-ary children, interleaving a Separator between consecutive panels.
   const orientation = node.direction === 'horizontal' ? 'horizontal' : 'vertical'
+
+  const panels: JSX.Element[] = []
+  node.children.forEach((child, idx) => {
+    if (idx > 0) {
+      panels.push(<Separator key={`sep-${child.id}`} className="panel-resize-handle" />)
+    }
+    panels.push(
+      <Panel key={child.id} id={child.id} minSize="10">
+        <WorkspaceNode node={child} />
+      </Panel>,
+    )
+  })
 
   return (
     <Group orientation={orientation} style={{ height: '100%', width: '100%' }}>
-      <Panel id={node.children[0].id} minSize="10">
-        <WorkspaceNode key={node.children[0].id} node={node.children[0]} />
-      </Panel>
-      <Separator className="panel-resize-handle" />
-      <Panel id={node.children[1].id} minSize="10">
-        <WorkspaceNode key={node.children[1].id} node={node.children[1]} />
-      </Panel>
+      {panels}
     </Group>
   )
 }
@@ -63,7 +70,11 @@ function useIsNarrow(): boolean {
 
 function findLeaf(node: PaneNode, id: string): LeafPane | null {
   if (node.kind === 'leaf') return node.id === id ? node : null
-  return findLeaf(node.children[0], id) ?? findLeaf(node.children[1], id)
+  for (const child of node.children) {
+    const found = findLeaf(child, id)
+    if (found) return found
+  }
+  return null
 }
 
 function firstLeaf(node: PaneNode): LeafPane {

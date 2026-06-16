@@ -99,16 +99,61 @@ describe('splitPane', () => {
   it('can split a nested pane by its id', () => {
     const leaf = makeLeaf()
     const [root1, newId1] = splitPane(leaf, leaf.id, 'horizontal')
-    // Split the newly-created leaf
+    // Split the newly-created leaf in a different direction → nests
     const [root2, newId2] = splitPane(root1, newId1, 'vertical')
     expect(findLeaf(root2, newId2)).not.toBeNull()
+  })
+
+  // ── n-ary flattening: same-direction splits merge into the parent group ──
+
+  it('splitting a leaf in the same direction as its parent flattens into the parent group', () => {
+    // Start: single leaf → split horizontal → [A, B]
+    const leaf = makeLeaf()
+    const [root1, bId] = splitPane(leaf, leaf.id, 'horizontal')
+    // Split B horizontally again → should flatten: [A, B, C] in one group
+    const [root2, cId] = splitPane(root1, bId, 'horizontal')
+
+    // Root must still be a single split (not nested)
+    expect(root2.kind).toBe('split')
+    const split = root2 as SplitPane
+    expect(split.direction).toBe('horizontal')
+    expect(split.children.length).toBe(3)
+    expect(split.children[0].id).toBe(leaf.id)
+    expect(split.children[1].id).toBe(bId)
+    expect(split.children[2].id).toBe(cId)
+  })
+
+  it('a perpendicular split on a leaf nests (does NOT flatten)', () => {
+    const leaf = makeLeaf()
+    const [root1, bId] = splitPane(leaf, leaf.id, 'horizontal')
+    // Split B vertically → perpendicular → should nest inside children[1]
+    const [root2] = splitPane(root1, bId, 'vertical')
+
+    expect(root2.kind).toBe('split')
+    const outer = root2 as SplitPane
+    expect(outer.direction).toBe('horizontal')
+    expect(outer.children.length).toBe(2)
+    // children[1] is now a nested vertical split
+    expect(outer.children[1].kind).toBe('split')
+    expect((outer.children[1] as SplitPane).direction).toBe('vertical')
+  })
+
+  it('three same-direction splits produce one group of 3 equal siblings (not 50/25/25)', () => {
+    const leaf = makeLeaf()
+    const [root1, bId] = splitPane(leaf, leaf.id, 'vertical')
+    const [root2, cId] = splitPane(root1, bId, 'vertical')
+
+    expect(root2.kind).toBe('split')
+    const split = root2 as SplitPane
+    expect(split.children.length).toBe(3)
+    expect(split.children.map((c) => c.id)).toEqual([leaf.id, bId, cId])
   })
 })
 
 // ── closePane ─────────────────────────────────────────────────────────────────
 
 describe('closePane', () => {
-  it('closing one child of a split collapses to the sibling', () => {
+  it('closing one child of a 2-child split collapses to the sibling', () => {
     const leaf = makeLeaf()
     const [root1, newLeafId] = splitPane(leaf, leaf.id, 'horizontal')
     // Close the original leaf — should collapse to the new leaf
@@ -145,6 +190,44 @@ describe('closePane', () => {
     expect(newRoot.id).not.toBe(leaf.id)
     expect(focusId).toBe(newRoot.id)
   })
+
+  it('removing one leaf from a 3-child group drops it without collapsing the group', () => {
+    // Build a 3-child group: [A, B, C]
+    const leaf = makeLeaf()
+    const [root1, bId] = splitPane(leaf, leaf.id, 'horizontal')
+    const [root2, cId] = splitPane(root1, bId, 'horizontal')
+    // Close B (the middle child)
+    const [root3, focusId] = closePane(root2, bId)
+
+    // Root must still be a split (not collapsed) with 2 children: [A, C]
+    expect(root3.kind).toBe('split')
+    const split = root3 as SplitPane
+    expect(split.children.length).toBe(2)
+    expect(split.children[0].id).toBe(leaf.id)
+    expect(split.children[1].id).toBe(cId)
+    // Focus should land on a valid leaf
+    expect(findLeaf(root3, focusId)).not.toBeNull()
+  })
+
+  it('removing a leaf from a 3-child group to 2 children does NOT collapse further', () => {
+    const leaf = makeLeaf()
+    const [root1, bId] = splitPane(leaf, leaf.id, 'horizontal')
+    const [root2] = splitPane(root1, bId, 'horizontal')
+    // Close the first child
+    const [root3] = closePane(root2, leaf.id)
+    // Should remain a split with 2 children
+    expect(root3.kind).toBe('split')
+    expect((root3 as SplitPane).children.length).toBe(2)
+  })
+
+  it('collapse still happens when a group falls to exactly 1 child', () => {
+    // Two-child split: closing one leaves 1 → must collapse to a leaf
+    const leaf = makeLeaf()
+    const [root1, bId] = splitPane(leaf, leaf.id, 'horizontal')
+    const [root2] = closePane(root1, bId)
+    expect(root2.kind).toBe('leaf')
+    expect(root2.id).toBe(leaf.id)
+  })
 })
 
 // ── clearSession ──────────────────────────────────────────────────────────────
@@ -163,20 +246,6 @@ describe('clearSession', () => {
   })
 
   it('clears across a multi-level tree, only touching matching session', () => {
-    // Build: split into [A (ses-target), B (ses-other)]
-    //   then split B further into [B1 (ses-target), B2 (ses-other)]
-    const leafA = makeLeaf('ses-target')
-    const [root1] = splitPane(leafA, leafA.id, 'horizontal')
-    const split1 = root1 as SplitPane
-    const leafB = split1.children[1] as LeafPane
-
-    // Manually inject sessions into a copy (splitPane leaves children[1] null)
-    // We need to use assignSession to set up the multi-level tree properly.
-    // Assign ses-target to leafB to create a duplicate situation first.
-    const root2 = assignSession(root1, leafB.id, 'ses-target')
-    // Now both leafA and leafB hold 'ses-target' (assignSession cleared A and set B,
-    // so actually only B has it). Let's build a custom tree manually.
-
     // Build a proper multi-level tree with sessions at multiple nodes:
     const la = makeLeaf('ses-target')
     const lb = makeLeaf('ses-other')
@@ -201,9 +270,22 @@ describe('clearSession', () => {
     const clearedInner = clearedOuter.children[1] as SplitPane
     expect((clearedInner.children[0] as LeafPane).sessionId).toBe('ses-other')
     expect((clearedInner.children[1] as LeafPane).sessionId).toBeNull()
+  })
 
-    // suppress unused-var warnings
-    void root2
+  it('clears from an n-ary group (>2 children)', () => {
+    const la = makeLeaf('ses-x')
+    const lb = makeLeaf('ses-y')
+    const lc = makeLeaf('ses-x')
+    const group: SplitPane = {
+      kind: 'split',
+      id: 'grp',
+      direction: 'horizontal',
+      children: [la, lb, lc],
+    }
+    const cleared = clearSession(group, 'ses-x') as SplitPane
+    expect((cleared.children[0] as LeafPane).sessionId).toBeNull()
+    expect((cleared.children[1] as LeafPane).sessionId).toBe('ses-y')
+    expect((cleared.children[2] as LeafPane).sessionId).toBeNull()
   })
 })
 
@@ -232,7 +314,7 @@ describe('assignSession', () => {
     // Count how many leaves hold 'ses-1'
     function countSession(node: PaneNode, sid: string): number {
       if (node.kind === 'leaf') return node.sessionId === sid ? 1 : 0
-      return countSession(node.children[0], sid) + countSession(node.children[1], sid)
+      return node.children.reduce((acc, c) => acc + countSession(c, sid), 0)
     }
     expect(countSession(result, 'ses-1')).toBe(1)
   })
@@ -301,6 +383,37 @@ describe('splitPaneWithSession', () => {
     expect(leaf.id).toBe(origId)
     expect(leaf.kind).toBe(origKind)
   })
+
+  // ── n-ary flattening for splitPaneWithSession ──
+
+  it('same-direction parent: before=false inserts new leaf after target in the group', () => {
+    // [A, B] horizontal; split B horizontally with session → [A, B, new]
+    const la = makeLeaf()
+    const [root1, bId] = splitPane(la, la.id, 'horizontal')
+    const [root2, newId] = splitPaneWithSession(root1, bId, 'horizontal', 'ses-q', false)
+
+    expect(root2.kind).toBe('split')
+    const split = root2 as SplitPane
+    expect(split.children.length).toBe(3)
+    expect(split.children[0].id).toBe(la.id)
+    expect(split.children[1].id).toBe(bId)
+    expect(split.children[2].id).toBe(newId)
+    expect((split.children[2] as LeafPane).sessionId).toBe('ses-q')
+  })
+
+  it('same-direction parent: before=true inserts new leaf before target in the group', () => {
+    // [A, B] horizontal; split B horizontally before=true → [A, new, B]
+    const la = makeLeaf()
+    const [root1, bId] = splitPane(la, la.id, 'horizontal')
+    const [root2, newId] = splitPaneWithSession(root1, bId, 'horizontal', 'ses-p', true)
+
+    expect(root2.kind).toBe('split')
+    const split = root2 as SplitPane
+    expect(split.children.length).toBe(3)
+    expect(split.children[0].id).toBe(la.id)
+    expect(split.children[1].id).toBe(newId)
+    expect(split.children[2].id).toBe(bId)
+  })
 })
 
 // ── findLeaf ──────────────────────────────────────────────────────────────────
@@ -331,5 +444,13 @@ describe('findLeaf', () => {
     const [root1, lbId] = splitPane(la, la.id, 'horizontal')
     const [root2, lcId] = splitPane(root1, lbId, 'vertical')
     expect(findLeaf(root2, lcId)!.id).toBe(lcId)
+  })
+
+  it('finds a leaf within an n-ary group', () => {
+    const la = makeLeaf()
+    const [root1, bId] = splitPane(la, la.id, 'horizontal')
+    const [root2, cId] = splitPane(root1, bId, 'horizontal')
+    expect(findLeaf(root2, cId)!.id).toBe(cId)
+    expect(findLeaf(root2, la.id)!.id).toBe(la.id)
   })
 })

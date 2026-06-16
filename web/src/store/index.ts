@@ -82,9 +82,8 @@ function isPaneNode(v: unknown): v is PaneNode {
       typeof n.id === 'string' &&
       (n.direction === 'horizontal' || n.direction === 'vertical') &&
       Array.isArray(n.children) &&
-      n.children.length === 2 &&
-      isPaneNode(n.children[0]) &&
-      isPaneNode(n.children[1])
+      n.children.length >= 2 &&
+      (n.children as unknown[]).every((c) => isPaneNode(c))
     )
   }
   return false

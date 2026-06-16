@@ -210,6 +210,59 @@ describe('store.assignSessionFromSidebar', () => {
   })
 })
 
+// ── n-ary flattening: same-direction splits merge into the parent group ───────
+
+describe('store.splitPane — n-ary flattening', () => {
+  beforeEach(resetStore)
+
+  it('splitting a leaf in the same direction as its parent produces a 3-child group', () => {
+    const { paneRoot } = useStore.getState()
+    const aId = (paneRoot as LeafPane).id
+    // First split: [A, B]
+    useStore.getState().splitPane(aId, 'horizontal')
+    const root1 = useStore.getState().paneRoot as SplitPane
+    const bId = root1.children[1].id
+    // Second same-direction split on B → should flatten to [A, B, C]
+    useStore.getState().splitPane(bId, 'horizontal')
+    const root2 = useStore.getState().paneRoot as SplitPane
+    expect(root2.kind).toBe('split')
+    expect(root2.direction).toBe('horizontal')
+    expect(root2.children.length).toBe(3)
+    expect(root2.children[0].id).toBe(aId)
+    expect(root2.children[1].id).toBe(bId)
+  })
+
+  it('removing one leaf from a 3-child group keeps the group (no collapse)', () => {
+    const { paneRoot } = useStore.getState()
+    const aId = (paneRoot as LeafPane).id
+    useStore.getState().splitPane(aId, 'horizontal')
+    const root1 = useStore.getState().paneRoot as SplitPane
+    const bId = root1.children[1].id
+    useStore.getState().splitPane(bId, 'horizontal')
+    // Now [A, B, C]; close B
+    useStore.getState().closePane(bId)
+    const root2 = useStore.getState().paneRoot
+    expect(root2.kind).toBe('split')
+    expect((root2 as SplitPane).children.length).toBe(2)
+  })
+
+  it('a perpendicular split still nests (does not flatten)', () => {
+    const { paneRoot } = useStore.getState()
+    const aId = (paneRoot as LeafPane).id
+    useStore.getState().splitPane(aId, 'horizontal')
+    const root1 = useStore.getState().paneRoot as SplitPane
+    const bId = root1.children[1].id
+    // Perpendicular: split B vertically
+    useStore.getState().splitPane(bId, 'vertical')
+    const root2 = useStore.getState().paneRoot as SplitPane
+    expect(root2.direction).toBe('horizontal')
+    expect(root2.children.length).toBe(2)
+    // children[1] is a nested vertical split
+    expect(root2.children[1].kind).toBe('split')
+    expect((root2.children[1] as SplitPane).direction).toBe('vertical')
+  })
+})
+
 // ── diveToSession (Overview click-to-dive — focus existing or fill) ───────────
 
 describe('store.diveToSession', () => {
