@@ -1,6 +1,9 @@
 package sessions
 
-import "crypto/rand"
+import (
+	"crypto/rand"
+	"math/big"
+)
 
 // sessionAdjectives and sessionNouns are the word pools for auto-generated
 // session names. A name is one adjective + one noun joined by a hyphen
@@ -33,11 +36,21 @@ var (
 // (the ULID id remains the key), so on the unlikely CSPRNG failure it returns
 // "" and the UI falls back to the id.
 func generateSessionName() string {
-	b := make([]byte, 2)
-	if _, err := rand.Read(b); err != nil {
+	adj, err1 := randIndex(len(sessionAdjectives))
+	noun, err2 := randIndex(len(sessionNouns))
+	if err1 != nil || err2 != nil {
 		return ""
 	}
-	adj := sessionAdjectives[int(b[0])%len(sessionAdjectives)]
-	noun := sessionNouns[int(b[1])%len(sessionNouns)]
-	return adj + "-" + noun
+	return sessionAdjectives[adj] + "-" + sessionNouns[noun]
+}
+
+// randIndex returns a uniformly distributed index in [0, n). It uses
+// crypto/rand via big.Int so the result has no modulo bias (a plain
+// byte%n skews toward low indices when n does not divide 256).
+func randIndex(n int) (int, error) {
+	i, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0, err
+	}
+	return int(i.Int64()), nil
 }

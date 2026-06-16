@@ -147,10 +147,12 @@ func TestVerifyChecksum(t *testing.T) {
 		t.Error("verifyChecksum: expected true for matching hash")
 	}
 
-	// Upper-cased hex should also match (case-insensitive).
-	if !verifyChecksum(data, "  "+goodHex) {
-		// leading spaces should not match
+	// Leading/trailing whitespace must not match — the hash is compared verbatim.
+	if verifyChecksum(data, "  "+goodHex) {
+		t.Error("verifyChecksum: expected false for hash with leading spaces")
 	}
+
+	// Upper-cased hex should match (case-insensitive).
 	upperHex := hex.EncodeToString(sum[:])
 	for i := range []byte(upperHex) {
 		if upperHex[i] >= 'a' && upperHex[i] <= 'f' {

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func cmdUpdate(args []string) {
@@ -46,7 +47,8 @@ func cmdUpdate(args []string) {
 	}
 
 	// Fetch and verify update.sh from the release using system roots (GitHub TLS).
-	client := &http.Client{}
+	// A timeout bounds each request so a stalled connection can't hang the command.
+	client := &http.Client{Timeout: 30 * time.Second}
 
 	sumsData, err := httpGet(client, base+"/SHA256SUMS")
 	if err != nil {
