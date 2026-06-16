@@ -15,7 +15,7 @@ import { OverviewGrid } from './features/overview/OverviewGrid'
 import { DashboardView } from './features/dashboard/DashboardView'
 import { Login } from './features/auth/Login'
 import { Snackbar, type SnackbarVariant } from './components/Snackbar'
-import { useStore } from './store'
+import { useStore, hashToView } from './store'
 import { authStatus, logout, passkeyRegister } from './api/rest'
 import { parsePaneDropId } from './features/terminal/dnd'
 import type { SessionDragData } from './features/terminal/dnd'
@@ -96,6 +96,18 @@ export function App() {
   useEffect(() => {
     checkAuth()
   }, [])
+
+  // Keep viewMode in sync with the URL hash so the browser back/forward buttons
+  // and manual hash edits switch views. setViewMode writes the hash; this only
+  // reacts to external changes (guarded against the self-write feedback loop).
+  useEffect(() => {
+    const onHashChange = () => {
+      const next = hashToView(window.location.hash)
+      if (next !== useStore.getState().viewMode) setViewMode(next)
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [setViewMode])
 
   // Alt/Cmd + 1/2/3 jump straight to a view. Use e.code (physical key) so it
   // works regardless of the character Alt produces on some keyboard layouts.

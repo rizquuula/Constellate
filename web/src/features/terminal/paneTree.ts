@@ -88,7 +88,7 @@ function containsId(node: PaneNode, id: string): boolean {
   return false
 }
 
-function firstLeafId(node: PaneNode): string {
+export function firstLeafId(node: PaneNode): string {
   if (node.kind === 'leaf') return node.id
   return firstLeafId(node.children[0])
 }

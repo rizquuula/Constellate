@@ -25,6 +25,7 @@ import {
   findLeaf,
   findLeafBySession,
   firstEmptyLeafId,
+  firstLeafId,
   splitPaneWithSession as treeSplitPaneWithSession,
 } from '../features/terminal/paneTree'
 
@@ -45,10 +46,70 @@ function lsSet(key: string, value: string): void {
   }
 }
 
+export type ViewMode = 'workspace' | 'overview' | 'dashboard'
+
+// hashToView maps the URL fragment (`#overview`, `#dashboard`, `#workspace`) to
+// a view. The hash is the source of truth for which view is active, so a reload
+// or a shared link lands on the same view instead of always resetting to the
+// workspace. Anything unrecognised (including an empty hash) falls back to
+// 'workspace'.
+export function hashToView(hash: string): ViewMode {
+  switch (hash.replace(/^#/, '')) {
+    case 'overview':
+      return 'overview'
+    case 'dashboard':
+      return 'dashboard'
+    default:
+      return 'workspace'
+  }
+}
+
+const PANE_ROOT_KEY = 'constellate.paneRoot'
+const FOCUSED_PANE_KEY = 'constellate.focusedPaneId'
+
+// isPaneNode structurally validates a parsed value as a PaneNode before it is
+// trusted as restored state — guards against corrupt or stale localStorage from
+// an older schema. Recurses through splits so a malformed child rejects the
+// whole tree.
+function isPaneNode(v: unknown): v is PaneNode {
+  if (!v || typeof v !== 'object') return false
+  const n = v as Record<string, unknown>
+  if (n.kind === 'leaf') {
+    return typeof n.id === 'string' && (n.sessionId === null || typeof n.sessionId === 'string')
+  }
+  if (n.kind === 'split') {
+    return (
+      typeof n.id === 'string' &&
+      (n.direction === 'horizontal' || n.direction === 'vertical') &&
+      Array.isArray(n.children) &&
+      n.children.length === 2 &&
+      isPaneNode(n.children[0]) &&
+      isPaneNode(n.children[1])
+    )
+  }
+  return false
+}
+
+// loadPaneRoot restores the persisted pane layout, falling back to a single
+// empty leaf on missing or corrupt data. Session bindings are reconciled
+// against the server later (refreshSessions) — here we only restore the shape.
+function loadPaneRoot(): PaneNode {
+  const raw = lsGet(PANE_ROOT_KEY, '')
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (isPaneNode(parsed)) return parsed
+    } catch {
+      // corrupt JSON — fall through to a fresh leaf
+    }
+  }
+  return makeLeaf(null)
+}
+
 interface Store {
   // ── view mode ─────────────────────────────────────────────────────────────
-  viewMode: 'workspace' | 'overview' | 'dashboard'
-  setViewMode: (mode: 'workspace' | 'overview' | 'dashboard') => void
+  viewMode: ViewMode
+  setViewMode: (mode: ViewMode) => void
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
   showRevokedMachines: boolean
@@ -92,11 +153,23 @@ interface Store {
   ) => Promise<void>
 }
 
-const initialLeaf = makeLeaf(null)
+const initialPaneRoot = loadPaneRoot()
+const storedFocus = lsGet(FOCUSED_PANE_KEY, '')
+// Restore the focused pane only if it still exists in the restored tree;
+// otherwise fall back to the first leaf so the focus is always valid.
+const initialFocusedPaneId =
+  storedFocus && findLeaf(initialPaneRoot, storedFocus) ? storedFocus : firstLeafId(initialPaneRoot)
 
 export const useStore = create<Store>((set, get) => ({
-  viewMode: 'workspace',
-  setViewMode: (mode) => set({ viewMode: mode }),
+  viewMode: hashToView(typeof window !== 'undefined' ? window.location.hash : ''),
+  setViewMode: (mode) => {
+    // Keep the URL hash in sync so reloads/back-forward land on the same view.
+    // Guard the write to avoid a redundant hashchange feedback loop.
+    if (typeof window !== 'undefined' && hashToView(window.location.hash) !== mode) {
+      window.location.hash = mode
+    }
+    set({ viewMode: mode })
+  },
   sidebarOpen: false,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   showRevokedMachines: lsGet('constellate.showRevokedMachines', 'false') === 'true',
@@ -133,7 +206,19 @@ export const useStore = create<Store>((set, get) => ({
 
   refreshSessions: async () => {
     const sessions = await listSessions()
-    set({ sessions })
+    // Reconcile the restored/live pane tree against the server: drop any pane
+    // binding to a session the server no longer knows about (deleted
+    // elsewhere), turning that leaf back into an empty pane. Sessions that
+    // still exist — including exited/lost — stay bound; running ones re-attach
+    // and replay scrollback on mount.
+    set((s) => {
+      const known = new Set(sessions.map((x) => x.id))
+      let paneRoot = s.paneRoot
+      for (const id of collectSessionIds(paneRoot)) {
+        if (!known.has(id)) paneRoot = clearSession(paneRoot, id)
+      }
+      return { sessions, paneRoot }
+    })
   },
 
   createProject: async (input) => {
@@ -174,8 +259,8 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // ── workspace ──────────────────────────────────────────────────────────────
-  paneRoot: initialLeaf,
-  focusedPaneId: initialLeaf.id,
+  paneRoot: initialPaneRoot,
+  focusedPaneId: initialFocusedPaneId,
 
   focusPane: (id) => set({ focusedPaneId: id }),
 
@@ -275,3 +360,21 @@ export const useStore = create<Store>((set, get) => ({
     set({ sessions })
   },
 }))
+
+// Persist the workspace layout (per browser) so a reload restores the same
+// panes and their session bindings. We write only when paneRoot/focusedPaneId
+// actually change — a serialize-and-compare guard keeps the frequent session
+// polls from thrashing localStorage on every store update.
+let lastPaneRootJSON = JSON.stringify(useStore.getState().paneRoot)
+let lastFocusedPaneId = useStore.getState().focusedPaneId
+useStore.subscribe((state) => {
+  const json = JSON.stringify(state.paneRoot)
+  if (json !== lastPaneRootJSON) {
+    lastPaneRootJSON = json
+    lsSet(PANE_ROOT_KEY, json)
+  }
+  if (state.focusedPaneId !== lastFocusedPaneId) {
+    lastFocusedPaneId = state.focusedPaneId
+    lsSet(FOCUSED_PANE_KEY, state.focusedPaneId)
+  }
+})
