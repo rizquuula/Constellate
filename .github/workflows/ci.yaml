@@ -67,13 +67,16 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      # v9 is required for golangci-lint v2 configs (v6 only supports v1); with
-      # `latest` it pulls a golangci-lint built with Go 1.25, which the go 1.25.0
-      # module requires (older binaries refuse: "build Go version < targeted").
+      # v9 is required for golangci-lint v2 configs (v6 only supports v1).
+      # Pinned to an explicit version (not `latest`) so CI and local `make lint`
+      # use the same linter and the same rule set — `latest` silently rolls in
+      # new staticcheck rules and breaks CI out of nowhere. v2.12.2 is built with
+      # Go 1.25, which the go 1.25.0 module requires (older binaries refuse:
+      # "build Go version < targeted"). Keep in sync with GOLANGCI_VERSION in the Makefile.
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2
 
       - name: Test (unit + integration + in-process E2E, race-enabled)
         run: go test ./... -race -count=1

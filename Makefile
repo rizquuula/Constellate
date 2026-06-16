@@ -17,6 +17,11 @@ LDFLAGS_AGENT := -ldflags "-X $(VERSION_PKG).Version=$(AGENT_VERSION) \
 DEV_COMPOSE  := docker compose -f docker-compose.dev.yaml
 PROD_COMPOSE := docker compose -f deploy/compose.yaml
 
+# Pin golangci-lint so `make lint` matches CI exactly (.github/workflows/ci.yaml).
+# Bump both together. `go run @version` builds it with the local Go 1.25
+# toolchain, so no global install is needed and the version can't drift.
+GOLANGCI_VERSION ?= v2.12.2
+
 .DEFAULT_GOAL := help
 
 .PHONY: help build build-hub build-agent web image-hub \
@@ -68,8 +73,8 @@ test-e2e: ## Run single-machine Playwright E2E suite
 test-docker: ## Run dockerized E2E (hub + 2 agent containers)
 	./test/docker/run.sh
 
-lint: ## Run golangci-lint (v2 config)
-	golangci-lint run
+lint: ## Run golangci-lint (v2 config), version-pinned to match CI
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION) run
 
 ##@ Dev stack (local docker: hub + 2 agents)
 
