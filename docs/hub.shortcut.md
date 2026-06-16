@@ -14,6 +14,20 @@ Jump straight to a top-level view. Works from anywhere once signed in.
 | `Alt`/`⌘` + `2` | Overview |
 | `Alt`/`⌘` + `3` | Dashboard |
 
+## Terminal clipboard
+
+Active while a terminal is focused. These override the browser defaults (notably
+`Ctrl+Shift+C`, which would otherwise open DevTools "inspect element").
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl` + `Shift` + `C` | **Copy** the current terminal selection to the clipboard |
+| `Ctrl` + `Shift` + `V` | **Paste** from the clipboard into the terminal |
+
+Plain `Ctrl+C` / `Ctrl+V` are left untouched, so `Ctrl+C` still sends `SIGINT`
+and shells that read the literal keystroke keep working. Clipboard access
+requires a secure context (HTTPS), which the hub always serves.
+
 ## Pane controls (Workspace)
 
 These act on the **focused pane** and only fire in the **Workspace** view. They

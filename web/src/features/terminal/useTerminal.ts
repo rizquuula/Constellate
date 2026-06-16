@@ -31,6 +31,30 @@ export function useTerminal(
     term.open(container)
     fitAddon.fit()
 
+    // Ctrl+Shift+C / Ctrl+Shift+V → copy the selection / paste from the system
+    // clipboard, instead of the browser default (Ctrl+Shift+C opens DevTools
+    // "inspect element"). Returning false stops xterm from also processing the
+    // key; preventDefault stops the browser shortcut. Runs while the terminal
+    // is focused. Plain Ctrl+C/Ctrl+V are left untouched so SIGINT and shells
+    // that read the literal keystroke still work.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown' || !e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true
+      if (e.code === 'KeyC') {
+        const selection = term.getSelection()
+        if (selection) navigator.clipboard?.writeText(selection).catch(() => {})
+        e.preventDefault()
+        return false
+      }
+      if (e.code === 'KeyV') {
+        navigator.clipboard?.readText().then((text) => {
+          if (text) term.paste(text)
+        }).catch(() => {})
+        e.preventDefault()
+        return false
+      }
+      return true
+    })
+
     termRef.current = term
     fitRef.current = fitAddon
 
