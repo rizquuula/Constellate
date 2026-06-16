@@ -226,7 +226,7 @@ func TestOpen_GeneratesNameWhenTitleEmpty(t *testing.T) {
 		t.Fatalf("generated title %q: want exactly two non-empty hyphen-joined words", title)
 	}
 	for _, c := range title {
-		if !(c >= 'a' && c <= 'z') && c != '-' {
+		if (c < 'a' || c > 'z') && c != '-' {
 			t.Errorf("generated title %q contains unexpected char %q (want [a-z-])", title, c)
 		}
 	}
