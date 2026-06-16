@@ -12,6 +12,7 @@ interface TerminalPaneProps {
   onFocus: () => void
   onSplitH: () => void
   onSplitV: () => void
+  onDetach: () => void
   onClose: () => void
 }
 
@@ -22,6 +23,7 @@ export function TerminalPane({
   onFocus,
   onSplitH,
   onSplitV,
+  onDetach,
   onClose,
 }: TerminalPaneProps) {
   const session = useStore((s) => sessionId ? s.sessions.find((x) => x.id === sessionId) : undefined)
@@ -160,6 +162,16 @@ export function TerminalPane({
           >
             ▤
           </button>
+          {sessionId && (
+            <button
+              className="pane-btn"
+              title="Detach session (keep it running in the sidebar, blank this pane)"
+              aria-label="Detach session from pane"
+              onClick={onDetach}
+            >
+              ⏏
+            </button>
+          )}
           <button
             className="pane-btn pane-btn-close"
             title="Close pane"

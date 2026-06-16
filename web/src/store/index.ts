@@ -18,6 +18,7 @@ import {
   makeLeaf,
   splitPane,
   closePane,
+  detachPane,
   assignSession,
   clearSession,
   collectSessionIds,
@@ -80,6 +81,7 @@ interface Store {
   focusPane: (id: string) => void
   splitPane: (paneId: string, direction: PaneDirection) => void
   closePane: (paneId: string) => void
+  detachPane: (paneId: string) => void
   assignSessionToPane: (paneId: string, sessionId: string) => void
   assignSessionFromSidebar: (paneId: string, sessionId: string) => void
   diveToSession: (sessionId: string) => void
@@ -185,6 +187,13 @@ export const useStore = create<Store>((set, get) => ({
   closePane: (paneId) => {
     const [newRoot, nextFocusId] = closePane(get().paneRoot, paneId)
     set({ paneRoot: newRoot, focusedPaneId: nextFocusId })
+  },
+
+  // detachPane unbinds the session from a pane without removing the pane or
+  // touching the shell. The pane stays in the layout as an empty leaf; the
+  // session keeps running and remains reachable from the sidebar.
+  detachPane: (paneId) => {
+    set({ paneRoot: detachPane(get().paneRoot, paneId), focusedPaneId: paneId })
   },
 
   assignSessionToPane: (paneId, sessionId) => {

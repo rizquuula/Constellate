@@ -13,6 +13,7 @@ function WorkspaceNode({ node }: WorkspaceNodeProps) {
   const focusPane = useStore((s) => s.focusPane)
   const doSplitPane = useStore((s) => s.splitPane)
   const doClosePane = useStore((s) => s.closePane)
+  const doDetachPane = useStore((s) => s.detachPane)
 
   if (node.kind === 'leaf') {
     return (
@@ -23,6 +24,7 @@ function WorkspaceNode({ node }: WorkspaceNodeProps) {
         onFocus={() => focusPane(node.id)}
         onSplitH={() => doSplitPane(node.id, 'horizontal')}
         onSplitV={() => doSplitPane(node.id, 'vertical')}
+        onDetach={() => doDetachPane(node.id)}
         onClose={() => doClosePane(node.id)}
       />
     )
@@ -74,6 +76,7 @@ export function Workspace() {
   const focusPane = useStore((s) => s.focusPane)
   const doSplitPane = useStore((s) => s.splitPane)
   const doClosePane = useStore((s) => s.closePane)
+  const doDetachPane = useStore((s) => s.detachPane)
   const isNarrow = useIsNarrow()
 
   if (isNarrow) {
@@ -87,6 +90,7 @@ export function Workspace() {
           onFocus={() => focusPane(leaf.id)}
           onSplitH={() => doSplitPane(leaf.id, 'horizontal')}
           onSplitV={() => doSplitPane(leaf.id, 'vertical')}
+          onDetach={() => doDetachPane(leaf.id)}
           onClose={() => doClosePane(leaf.id)}
         />
       </div>

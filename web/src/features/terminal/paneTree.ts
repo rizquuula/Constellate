@@ -129,6 +129,16 @@ export function closePane(
   return [newRoot, resolvedFocus]
 }
 
+// detachPane nulls out the sessionId on a single leaf, leaving the pane in place
+// as an empty leaf. The shell session itself is untouched (still alive on the
+// agent and listed in the sidebar) — this only unbinds it from this pane.
+export function detachPane(root: PaneNode, paneId: string): PaneNode {
+  return mapNode(root, paneId, (n) => {
+    if (n.kind !== 'leaf') return n
+    return { ...n, sessionId: null }
+  })
+}
+
 // clearSession nulls out sessionId from every leaf that holds it.
 export function clearSession(root: PaneNode, sessionId: string): PaneNode {
   if (root.kind === 'leaf') {
