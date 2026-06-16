@@ -116,7 +116,7 @@ export function Login({ onSuccess }: Props) {
               autoFocus
             />
           )}
-          <p className="login-error" role="alert" aria-live="assertive">{error || ' '}</p>
+          <p className="login-error" role="alert" aria-live="assertive">{error ? `⚠ ${error}` : ' '}</p>
           <button className="login-submit" type="submit" disabled={loading || passkeyLoading || !code}>
             {loading ? 'Signing in…' : 'Sign in'}
           </button>

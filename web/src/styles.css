@@ -1305,10 +1305,6 @@ body {
   min-height: 1.4em;
 }
 
-.login-error::before {
-  content: '⚠ ';
-}
-
 .login-submit {
   background: var(--accent);
   border: none;
