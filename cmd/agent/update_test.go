@@ -76,6 +76,7 @@ func TestFlagsToEnv(t *testing.T) {
 		check     bool
 		force     bool
 		noRestart bool
+		rootless  bool
 		bin       string
 		want      []string
 	}{
@@ -103,17 +104,25 @@ func TestFlagsToEnv(t *testing.T) {
 			want:      []string{"CONSTELLATE_NO_RESTART=1", "CONSTELLATE_BIN=/usr/local/bin/constellate-agent"},
 		},
 		{
+			name:     "rootless",
+			rootless: true,
+			bin:      "/home/bob/.local/bin/constellate-agent",
+			want:     []string{"CONSTELLATE_ROOTLESS=1", "CONSTELLATE_BIN=/home/bob/.local/bin/constellate-agent"},
+		},
+		{
 			name:      "all flags",
 			version:   "v20260615-1200",
 			check:     true,
 			force:     true,
 			noRestart: true,
+			rootless:  true,
 			bin:       "/usr/bin/constellate-agent",
 			want: []string{
 				"CONSTELLATE_VERSION=v20260615-1200",
 				"CONSTELLATE_CHECK=1",
 				"CONSTELLATE_FORCE=1",
 				"CONSTELLATE_NO_RESTART=1",
+				"CONSTELLATE_ROOTLESS=1",
 				"CONSTELLATE_BIN=/usr/bin/constellate-agent",
 			},
 		},
@@ -125,7 +134,7 @@ func TestFlagsToEnv(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := flagsToEnv(c.version, c.check, c.force, c.noRestart, c.bin)
+			got := flagsToEnv(c.version, c.check, c.force, c.noRestart, c.rootless, c.bin)
 			if len(got) != len(c.want) {
 				t.Fatalf("flagsToEnv: got %v, want %v", got, c.want)
 			}

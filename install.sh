@@ -2,22 +2,45 @@
 # Constellate agent installer.
 #
 #   curl -fsSL https://raw.githubusercontent.com/rizquuula/Constellate/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/rizquuula/Constellate/main/install.sh | sh -s -- --rootless
 #
 # Downloads the constellate-agent binary for your OS/arch from the latest
 # GitHub Release, verifies its SHA-256 against the release's SHA256SUMS, and
 # installs it to /usr/local/bin (override with BIN_DIR=...).
 #
+# Flags:
+#   --rootless          install to ~/.local/bin (no sudo); also set via CONSTELLATE_ROOTLESS=1
+#
 # Environment overrides:
-#   BIN_DIR             install dir            (default: /usr/local/bin)
+#   BIN_DIR             install dir            (default: /usr/local/bin, or ~/.local/bin with --rootless)
+#   CONSTELLATE_ROOTLESS  set to 1 to enable rootless install (installs to ~/.local/bin, no sudo)
 #   CONSTELLATE_VERSION pin a release tag      (default: latest, e.g. v20260615-0830)
 #   CONSTELLATE_HUB     hub base URL           (if set with TOKEN, auto-runs enroll)
 #   CONSTELLATE_TOKEN   enrollment token       (if set with HUB, auto-runs enroll)
 #
 set -eu
 
+# ---- parse arguments ---------------------------------------------------------
+ROOTLESS="${CONSTELLATE_ROOTLESS:-}"
+for _arg in "$@"; do
+  case "$_arg" in
+    --rootless) ROOTLESS=1 ;;
+  esac
+done
+
 REPO="rizquuula/Constellate"
 BIN="constellate-agent"
-BIN_DIR="${BIN_DIR:-/usr/local/bin}"
+
+# Resolve BIN_DIR: an explicit BIN_DIR from the environment always wins.
+# If not set, choose /usr/local/bin (system) or ~/.local/bin (rootless).
+_BIN_DIR_EXPLICIT="${BIN_DIR:-}"
+if [ -n "$_BIN_DIR_EXPLICIT" ]; then
+  BIN_DIR="$_BIN_DIR_EXPLICIT"
+elif [ -n "$ROOTLESS" ]; then
+  BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
+else
+  BIN_DIR="/usr/local/bin"
+fi
 
 # ---- pretty output -----------------------------------------------------------
 if [ -t 1 ]; then B=$(printf '\033[1m'); G=$(printf '\033[32m'); Y=$(printf '\033[33m'); R=$(printf '\033[31m'); N=$(printf '\033[0m'); else B= G= Y= R= N=; fi

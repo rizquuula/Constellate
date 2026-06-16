@@ -48,6 +48,20 @@ Check the binary runs:
 ./bin/constellate-agent version
 ```
 
+**Installing via script:** the quickest way to get the binary onto a machine is:
+
+```bash
+# System-wide install (to /usr/local/bin, requires sudo):
+curl -fsSL https://raw.githubusercontent.com/rizquuula/Constellate/main/install.sh | sudo sh
+
+# Rootless install (to ~/.local/bin, no sudo):
+curl -fsSL https://raw.githubusercontent.com/rizquuula/Constellate/main/install.sh | sh -s -- --rootless
+# or:  CONSTELLATE_ROOTLESS=1 sh install.sh
+```
+
+The `--rootless` flag (or `CONSTELLATE_ROOTLESS=1`) installs to `${XDG_BIN_HOME:-~/.local/bin}` without
+requiring root. Make sure `~/.local/bin` is on your `$PATH` (`export PATH="$HOME/.local/bin:$PATH"`).
+
 ---
 
 ## Step 1 — Write the agent config
@@ -214,6 +228,34 @@ systemctl status constellate-agent          # should be "active (running)"
 journalctl -u constellate-agent -f          # follow logs
 ```
 
+### Linux — systemd (rootless / user service)
+
+If you don't have root on the machine, install a **user-level** systemd service — no sudo anywhere:
+
+```bash
+constellate-agent install --rootless --config ~/.constellate/agent.yaml
+```
+
+This writes `~/.config/systemd/user/constellate-agent.service`, runs `systemctl --user daemon-reload`,
+then `systemctl --user enable --now constellate-agent`. The service runs as you (no `User=` line in the
+unit). The `--user <name>` flag is ignored in rootless mode.
+
+```bash
+systemctl --user status constellate-agent   # should be "active (running)"
+journalctl --user -u constellate-agent -f   # follow logs
+systemctl --user restart constellate-agent  # restart after config changes
+```
+
+> **Logout caveat:** a `systemd --user` service stops when your login session ends. To keep the agent
+> running after you log out, enable [lingering](https://www.freedesktop.org/software/systemd/man/loginctl.html):
+>
+> ```bash
+> loginctl enable-linger <your-username>
+> ```
+>
+> This may require `sudo` or polkit authorisation depending on your system policy. Once lingering is
+> enabled, the user service manager starts at boot even without an active login session.
+
 ### macOS — launchd
 
 Create `~/Library/LaunchAgents/com.constellate.agent.plist`:
@@ -298,6 +340,22 @@ The command requires root (or sudo) when the binary lives in a root-owned direct
 `/usr/local/bin`. After updating, if `constellate-agent.service` is active, `systemctl restart` is
 called automatically; pass `--no-restart` to skip this.
 
+For a **rootless install** (binary in `~/.local/bin`, user service in `~/.config/systemd/user/`), pass
+`--rootless` — no sudo needed:
+
+```bash
+constellate-agent update --rootless
+```
+
+After the binary is replaced, the user service is restarted via `systemctl --user restart`. The direct
+shell one-liner form also accepts the flag:
+
+```bash
+curl -fsSL https://github.com/rizquuula/Constellate/releases/latest/download/update.sh | sh -s -- --rootless
+# or via env:
+curl -fsSL https://github.com/rizquuula/Constellate/releases/latest/download/update.sh | CONSTELLATE_ROOTLESS=1 sh
+```
+
 ### Flags
 
 | Flag | Description |
@@ -306,6 +364,7 @@ called automatically; pass `--no-restart` to skip this.
 | `--check` | Report current vs available version and exit without downloading. |
 | `--force` | Reinstall even if already at the latest version. |
 | `--no-restart` | Skip the systemd service restart after the binary is replaced. |
+| `--rootless` | Update a rootless user install; restart via `systemctl --user` (no sudo). |
 | `--bin <path>` | Override the target binary path (default: the running binary). |
 
 ### How it works

@@ -452,14 +452,24 @@ func cmdReset(args []string) {
 // unitServiceName is the systemd unit installed by `install`.
 const unitServiceName = "constellate-agent.service"
 
-// unitPath is where the systemd unit is written.
-const unitPath = "/etc/systemd/system/" + unitServiceName
+// systemUnitPath is where a system-wide unit is written (requires root).
+const systemUnitPath = "/etc/systemd/system/" + unitServiceName
+
+// userUnitPath resolves the per-user unit path (~/.config/systemd/user/<unit>).
+func userUnitPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "systemd", "user", unitServiceName), nil
+}
 
 // unitParams holds the values rendered into the systemd unit template.
 type unitParams struct {
 	ExecBin    string // absolute path to the agent binary
 	ConfigPath string // absolute config path; empty omits the --config flag
 	User       string // system user the service runs as
+	Rootless   bool   // when true, render a systemctl --user unit (no User= line, WantedBy=default.target)
 }
 
 // renderUnit renders a systemd service unit from p. It is pure (no I/O) so it
@@ -468,6 +478,20 @@ func renderUnit(p unitParams) string {
 	execLine := p.ExecBin + " connect"
 	if p.ConfigPath != "" {
 		execLine += " --config " + p.ConfigPath
+	}
+	if p.Rootless {
+		return fmt.Sprintf(`[Unit]
+Description=Constellate agent
+
+[Service]
+Type=simple
+ExecStart=%s
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+`, execLine)
 	}
 	return fmt.Sprintf(`[Unit]
 Description=Constellate agent
@@ -491,6 +515,7 @@ func cmdInstall(args []string) {
 	configPath := fs.String("config", "", "path to config file (passed through to the service's connect command)")
 	userFlag := fs.String("user", "", "system user to run the service as (default: $SUDO_USER, else current user)")
 	noStart := fs.Bool("no-start", false, "write + reload the unit but do not enable/start it")
+	rootless := fs.Bool("rootless", false, "install a rootless systemd *user* service (~/.config/systemd/user, systemctl --user) — no root required")
 	_ = fs.Parse(args)
 
 	// systemd is Linux-only; macOS (launchd) / Windows stay documented-manual.
@@ -500,8 +525,9 @@ func cmdInstall(args []string) {
 	}
 
 	// Writing to /etc/systemd/system and running systemctl require root.
-	if os.Geteuid() != 0 {
-		fmt.Fprintln(os.Stderr, "install: must run as root — re-run with sudo")
+	// In rootless mode the unit goes to ~/.config/systemd/user — no root needed.
+	if !*rootless && os.Geteuid() != 0 {
+		fmt.Fprintln(os.Stderr, "install: must run as root — re-run with sudo (or use --rootless for a user service)")
 		os.Exit(1)
 	}
 
@@ -542,36 +568,88 @@ func cmdInstall(args []string) {
 		}
 	}
 
-	runAs := resolveServiceUser(*userFlag)
-	if runAs == "" {
-		fmt.Fprintln(os.Stderr, "install: could not determine a user to run as — pass --user")
+	var unitContent string
+	var writePath string
+	var runAs string
+
+	if *rootless {
+		// Rootless: user unit — no User= line, WantedBy=default.target.
+		// --user <name> is ignored in this mode.
+		unitContent = renderUnit(unitParams{ExecBin: execBin, ConfigPath: absConfig, Rootless: true})
+		p, err := userUnitPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "install: resolve user unit path: %v\n", err)
+			os.Exit(1)
+		}
+		writePath = p
+		if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "install: create systemd user dir: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// System mode: requires root, writes to /etc/systemd/system/.
+		runAs = resolveServiceUser(*userFlag)
+		if runAs == "" {
+			fmt.Fprintln(os.Stderr, "install: could not determine a user to run as — pass --user")
+			os.Exit(1)
+		}
+		unitContent = renderUnit(unitParams{ExecBin: execBin, ConfigPath: absConfig, User: runAs})
+		writePath = systemUnitPath
+	}
+
+	if err := os.WriteFile(writePath, []byte(unitContent), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "install: write %s: %v\n", writePath, err)
 		os.Exit(1)
 	}
 
-	unit := renderUnit(unitParams{ExecBin: execBin, ConfigPath: absConfig, User: runAs})
-	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "install: write %s: %v\n", unitPath, err)
-		os.Exit(1)
+	if *rootless {
+		fmt.Printf("wrote %s (rootless user service)\n", writePath)
+	} else {
+		fmt.Printf("wrote %s (User=%s)\n", writePath, runAs)
 	}
-	fmt.Printf("wrote %s (User=%s)\n", unitPath, runAs)
 
-	if err := runSystemctl("daemon-reload"); err != nil {
+	if err := runSystemctl(*rootless, "daemon-reload"); err != nil {
 		fmt.Fprintf(os.Stderr, "install: systemctl daemon-reload: %v\n", err)
 		os.Exit(1)
 	}
 
 	if *noStart {
-		fmt.Printf("installed (not started). Start with: systemctl enable --now %s\n", unitServiceName)
+		if *rootless {
+			fmt.Printf("installed (not started). Start with: systemctl --user enable --now %s\n", unitServiceName)
+		} else {
+			fmt.Printf("installed (not started). Start with: systemctl enable --now %s\n", unitServiceName)
+		}
 		return
 	}
 
-	if err := runSystemctl("enable", "--now", unitServiceName); err != nil {
+	if err := runSystemctl(*rootless, "enable", "--now", unitServiceName); err != nil {
 		fmt.Fprintf(os.Stderr, "install: systemctl enable --now: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("started %s\n", unitServiceName)
-	fmt.Printf("  systemctl status %s\n", unitServiceName)
-	fmt.Printf("  journalctl -u %s -f\n", unitServiceName)
+	if *rootless {
+		fmt.Printf("  systemctl --user status %s\n", unitServiceName)
+		fmt.Printf("  journalctl --user -u %s -f\n", unitServiceName)
+
+		// Linger hint: a --user service stops when the user logs out unless
+		// lingering is enabled. Show the command to enable it.
+		currentUser := ""
+		if u, err := user.Current(); err == nil {
+			currentUser = u.Username
+		}
+		fmt.Println()
+		fmt.Println("Note: systemd --user services stop when you log out.")
+		fmt.Println("To keep the agent running after logout, enable lingering:")
+		if currentUser != "" {
+			fmt.Printf("  loginctl enable-linger %s\n", currentUser)
+		} else {
+			fmt.Printf("  loginctl enable-linger <your-username>\n")
+		}
+		fmt.Println("(This command may require sudo or polkit authorisation.)")
+	} else {
+		fmt.Printf("  systemctl status %s\n", unitServiceName)
+		fmt.Printf("  journalctl -u %s -f\n", unitServiceName)
+	}
 }
 
 // resolveServiceUser picks the user the service runs as: the --user override,
@@ -590,7 +668,11 @@ func resolveServiceUser(override string) string {
 }
 
 // runSystemctl runs `systemctl <args...>`, streaming output to the operator.
-func runSystemctl(args ...string) error {
+// When rootless is true, --user is prepended so the user manager is targeted.
+func runSystemctl(rootless bool, args ...string) error {
+	if rootless {
+		args = append([]string{"--user"}, args...)
+	}
 	cmd := exec.Command("systemctl", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

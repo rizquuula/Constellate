@@ -20,6 +20,7 @@ func cmdUpdate(args []string) {
 	checkFlag := fs.Bool("check", false, "report current vs available version and exit without updating")
 	forceFlag := fs.Bool("force", false, "reinstall even if already up to date")
 	noRestartFlag := fs.Bool("no-restart", false, "skip systemd service restart after update")
+	rootlessFlag := fs.Bool("rootless", false, "update a rootless user install (restart via systemctl --user)")
 	binFlag := fs.String("bin", "", "override target binary path (default: the running binary)")
 	_ = fs.Parse(args)
 
@@ -108,7 +109,7 @@ func cmdUpdate(args []string) {
 	}
 
 	// Build env: start from the process environment, then append our overrides.
-	env := append(os.Environ(), flagsToEnv(*versionFlag, *checkFlag, *forceFlag, *noRestartFlag, binPath)...)
+	env := append(os.Environ(), flagsToEnv(*versionFlag, *checkFlag, *forceFlag, *noRestartFlag, *rootlessFlag, binPath)...)
 
 	cmd := exec.Command(shPath, tmpPath)
 	cmd.Stdin = os.Stdin
@@ -157,7 +158,7 @@ func parseSHA256SUMS(data []byte) map[string]string {
 // flagsToEnv translates update flags to the KEY=VALUE env slice consumed by
 // update.sh. Only non-zero/non-empty values produce entries; CONSTELLATE_BIN is
 // always included when bin is non-empty.
-func flagsToEnv(version string, check, force, noRestart bool, bin string) []string {
+func flagsToEnv(version string, check, force, noRestart, rootless bool, bin string) []string {
 	var env []string
 	if version != "" {
 		env = append(env, "CONSTELLATE_VERSION="+version)
@@ -170,6 +171,9 @@ func flagsToEnv(version string, check, force, noRestart bool, bin string) []stri
 	}
 	if noRestart {
 		env = append(env, "CONSTELLATE_NO_RESTART=1")
+	}
+	if rootless {
+		env = append(env, "CONSTELLATE_ROOTLESS=1")
 	}
 	if bin != "" {
 		env = append(env, "CONSTELLATE_BIN="+bin)
