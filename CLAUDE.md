@@ -24,6 +24,17 @@ and own the PTYs. **[`DESIGN.md`](DESIGN.md) is canonical** — read it before n
   containers) · `make lint` (golangci-lint **v2** config).
 - Binaries: `constellate-hub serve|migrate|version` · `constellate-agent connect|status|version`.
 
+## Releasing
+The hub and agent **version independently** via `cmd/hub/VERSION` and `cmd/agent/VERSION` (plain semver,
+e.g. `0.1.1`); the Makefile reads them and bakes them in via `-ldflags`. A push of a **datetime
+"release-train" tag** `v<YYYYMMDD>-<HHMM>` (e.g. `v20260615-1546`) triggers `.github/workflows/release.yaml`,
+which builds binaries + GHCR images and cuts a GitHub Release. The tag is a neutral umbrella — the real
+per-binary versions are read from the two `VERSION` files at build time. To cut a release:
+1. Bump `cmd/hub/VERSION` and/or `cmd/agent/VERSION` (only those that changed).
+2. Commit the bump (`chore(release): …`).
+3. Tag the release commit with the datetime format: `git tag "v$(date -u +%Y%m%d-%H%M)"`.
+4. Push commit then tag: `git push origin HEAD && git push origin <tag>` — the workflow starts on the tag push.
+
 ## Status
 All planned features are implemented; the full test matrix has been run end-to-end and passes —
 `make test` (unit + integration + in-proc E2E), `make test-e2e` (single-machine Playwright), and
