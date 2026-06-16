@@ -408,12 +408,12 @@ curl -fsSL https://github.com/rizquuula/Constellate/releases/download/v20260615-
 
 ## CLI quick reference
 
-`constellate-agent <subcommand>` (default `connect`). All accept `--config <path>`; `connect` also
-accepts `--log-level`.
+`constellate-agent <subcommand>` (default `connect`). All accept `--config <path>` / `-c`; `connect`
+also accepts `--log-level` / `-l`.
 
 | Subcommand | What it does |
 |---|---|
-| `enroll` | Redeem a one-time token (`--hub`, `--token`) and store the credential. One-shot. |
+| `enroll` | Redeem a one-time token (`--hub` / `-H`, `--token` / `-t`) and store the credential. One-shot. |
 | `connect` | Dial home and serve PTYs. Long-running — this is what makes the machine **online**. |
 | `status` | Print local enrollment identity (no live connectivity check). |
 | `reset` | Delete the local machine ID + credential. |

@@ -12,15 +12,17 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	platcli "github.com/rizquuula/Constellate/internal/platform/cli"
 )
 
 func cmdUpdate(args []string) {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 	versionFlag := fs.String("version", "", "pin a release tag (e.g. v20260615-0830)")
 	checkFlag := fs.Bool("check", false, "report current vs available version and exit without updating")
-	forceFlag := fs.Bool("force", false, "reinstall even if already up to date")
+	forceFlag := platcli.Bool(fs, "force", "f", false, "reinstall even if already up to date")
 	noRestartFlag := fs.Bool("no-restart", false, "skip systemd service restart after update")
-	rootlessFlag := fs.Bool("rootless", false, "update a rootless user install (restart via systemctl --user)")
+	rootlessFlag := platcli.Bool(fs, "rootless", "r", false, "update a rootless user install (restart via systemctl --user)")
 	binFlag := fs.String("bin", "", "override target binary path (default: the running binary)")
 	_ = fs.Parse(args)
 

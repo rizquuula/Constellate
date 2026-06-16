@@ -31,6 +31,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/vt"
 	"github.com/rizquuula/Constellate/internal/agent/app/session"
 	"github.com/rizquuula/Constellate/internal/agent/app/snapshot"
+	platcli "github.com/rizquuula/Constellate/internal/platform/cli"
 	platconfig "github.com/rizquuula/Constellate/internal/platform/config"
 	"github.com/rizquuula/Constellate/internal/platform/id"
 	platlog "github.com/rizquuula/Constellate/internal/platform/log"
@@ -117,8 +118,8 @@ func cmdVersion() {
 
 func cmdStatus(args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
-	_ = fs.String("log-level", "", "log level override (debug/info/warn/error)")
+	configPath := platcli.ConfigFlag(fs)
+	_ = platcli.String(fs, "log-level", "l", "", "log level override (debug/info/warn/error)")
 	_ = fs.Parse(args)
 
 	cfg, err := platconfig.LoadAgent(*configPath)
@@ -148,8 +149,8 @@ func cmdStatus(args []string) {
 
 func cmdConnect(args []string) {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
-	logLevel := fs.String("log-level", "", "log level override (debug/info/warn/error)")
+	configPath := platcli.ConfigFlag(fs)
+	logLevel := platcli.String(fs, "log-level", "l", "", "log level override (debug/info/warn/error)")
 	_ = fs.Parse(args)
 
 	cfg, err := platconfig.LoadAgent(*configPath)
@@ -324,9 +325,9 @@ func hubHTTPBase(hubURL string) string {
 
 func cmdEnroll(args []string) {
 	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
-	hubFlag := fs.String("hub", "", "hub HTTP base URL (e.g. http://localhost:8080)")
-	tokenFlag := fs.String("token", "", "enrollment token (required)")
+	configPath := platcli.ConfigFlag(fs)
+	hubFlag := platcli.String(fs, "hub", "H", "", "hub HTTP base URL (e.g. http://localhost:8080)")
+	tokenFlag := platcli.String(fs, "token", "t", "", "enrollment token (required)")
 	_ = fs.Parse(args)
 
 	cfg, err := platconfig.LoadAgent(*configPath)
@@ -428,7 +429,7 @@ func cmdEnroll(args []string) {
 
 func cmdReset(args []string) {
 	fs := flag.NewFlagSet("reset", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
+	configPath := platcli.ConfigFlag(fs)
 	_ = fs.Parse(args)
 
 	cfg, err := platconfig.LoadAgent(*configPath)
@@ -512,10 +513,10 @@ WantedBy=multi-user.target
 
 func cmdInstall(args []string) {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file (passed through to the service's connect command)")
+	configPath := platcli.String(fs, "config", "c", "", "path to config file (passed through to the service's connect command)")
 	userFlag := fs.String("user", "", "system user to run the service as (default: $SUDO_USER, else current user)")
 	noStart := fs.Bool("no-start", false, "write + reload the unit but do not enable/start it")
-	rootless := fs.Bool("rootless", false, "install a rootless systemd *user* service (~/.config/systemd/user, systemctl --user) — no root required")
+	rootless := platcli.Bool(fs, "rootless", "r", false, "install a rootless systemd *user* service (~/.config/systemd/user, systemctl --user) — no root required")
 	_ = fs.Parse(args)
 
 	// systemd is Linux-only; macOS (launchd) / Windows stay documented-manual.

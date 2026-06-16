@@ -292,7 +292,9 @@ Wipe an agent's local identity (forces a fresh enrollment next time):
 | `reset` | Delete the local machine ID + credential |
 | `version` | Print version, commit, wire protocol version |
 
-All subcommands accept `--config <path>`; `serve`/`connect` also accept `--log-level`.
+All subcommands accept `--config <path>` / `-c`; `serve`/`connect` also accept `--log-level` / `-l`.
+`enroll` also accepts `--hub` / `-H` and `--token` / `-t`; `install`/`update` accept `--rootless` / `-r`;
+`update` also accepts `--force` / `-f`.
 
 ---
 

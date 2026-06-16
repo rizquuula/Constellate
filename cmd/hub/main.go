@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/httpapi"
-	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/wsbrowser"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/wsagent"
+	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/wsbrowser"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/agentlink"
 	memstore "github.com/rizquuula/Constellate/internal/hub/adapter/secondary/memory"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/sqlite"
@@ -31,9 +31,10 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/app/projects"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
+	platcli "github.com/rizquuula/Constellate/internal/platform/cli"
 	platconfig "github.com/rizquuula/Constellate/internal/platform/config"
-	platlog "github.com/rizquuula/Constellate/internal/platform/log"
 	"github.com/rizquuula/Constellate/internal/platform/id"
+	platlog "github.com/rizquuula/Constellate/internal/platform/log"
 	"github.com/rizquuula/Constellate/internal/platform/version"
 	"github.com/rizquuula/Constellate/internal/transport"
 )
@@ -129,7 +130,7 @@ func cmdVersion() {
 
 func cmdMigrate(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
+	configPath := platcli.ConfigFlag(fs)
 	_ = fs.Parse(args)
 
 	cfg, err := platconfig.LoadHub(*configPath)
@@ -171,8 +172,8 @@ func resolveWebAuthnConfig(cfg platconfig.Hub, log *slog.Logger) (rpID string, o
 
 func cmdServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
-	logLevel := fs.String("log-level", "", "log level override (debug/info/warn/error)")
+	configPath := platcli.ConfigFlag(fs)
+	logLevel := platcli.String(fs, "log-level", "l", "", "log level override (debug/info/warn/error)")
 	_ = fs.Parse(args)
 
 	cfg, err := platconfig.LoadHub(*configPath)
@@ -279,7 +280,7 @@ func cmdServe(args []string) {
 
 func cmdEnrollToken(args []string) {
 	fs := flag.NewFlagSet("enroll-token", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
+	configPath := platcli.ConfigFlag(fs)
 	ttlStr := fs.String("ttl", "", "token TTL (default from config, e.g. 15m)")
 	_ = fs.Parse(args)
 
@@ -333,7 +334,7 @@ func cmdEnrollToken(args []string) {
 
 func cmdMachines(args []string) {
 	fs := flag.NewFlagSet("machines", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
+	configPath := platcli.ConfigFlag(fs)
 	_ = fs.Parse(args)
 
 	cfg, err := platconfig.LoadHub(*configPath)
@@ -387,7 +388,7 @@ func cmdMachines(args []string) {
 
 func cmdRevoke(args []string) {
 	fs := flag.NewFlagSet("revoke", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
+	configPath := platcli.ConfigFlag(fs)
 	_ = fs.Parse(args)
 
 	remaining := fs.Args()
@@ -452,7 +453,7 @@ func cmdOperator(args []string) {
 
 func cmdOperatorAdd(args []string) {
 	fs := flag.NewFlagSet("operator add", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config file")
+	configPath := platcli.ConfigFlag(fs)
 	issuer := fs.String("issuer", "Constellate", "TOTP issuer name")
 	account := fs.String("account", "operator", "TOTP account name")
 	_ = fs.Parse(args)
