@@ -15,6 +15,13 @@
 #   CONSTELLATE_NO_RESTART  skip systemd restart after update
 #
 set -eu
+# Enable pipefail when the shell supports it (POSIX 2024; bash, modern dash/ash)
+# so a failure on the left of a pipe (e.g. sha256sum) isn't masked by a
+# succeeding right side. Guarded in a subshell so an older /bin/sh that lacks
+# pipefail doesn't abort here under `set -e`.
+if (set -o pipefail) 2>/dev/null; then
+  set -o pipefail
+fi
 
 REPO="rizquuula/Constellate"
 BIN_NAME="constellate-agent"
@@ -146,8 +153,11 @@ cleanup_bak() {
 }
 
 restore_bak() {
-  warn "Update failed; restoring backup"
+  # Only announce a restore when a backup actually exists; an early failure
+  # (e.g. staging the new binary) happens before any backup is made, where the
+  # caller's err() already reports the real cause.
   if [ -f "$bak" ]; then
+    warn "Update failed; restoring backup"
     $SUDO mv "$bak" "$BIN" 2>/dev/null || warn "could not restore backup — check ${bak}"
   fi
   $SUDO rm -f "$new_tmp" 2>/dev/null || true

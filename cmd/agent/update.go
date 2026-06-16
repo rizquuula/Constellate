@@ -184,8 +184,15 @@ func verifyChecksum(data []byte, wantHex string) bool {
 	return strings.EqualFold(got, wantHex)
 }
 
+// maxUpdateBody bounds how much we read from a release asset (SHA256SUMS or
+// update.sh). Both are tiny in practice; the cap stops a malicious or
+// misconfigured redirect from streaming unbounded data into memory before the
+// checksum can reject it — this command often runs as root.
+const maxUpdateBody = 8 << 20 // 8 MiB
+
 // httpGet fetches url with client and returns the response body. It returns an
-// error for any non-200 status or transport failure.
+// error for any non-200 status, a body larger than maxUpdateBody, or a
+// transport failure.
 func httpGet(client *http.Client, url string) ([]byte, error) {
 	resp, err := client.Get(url)
 	if err != nil {
@@ -195,5 +202,13 @@ func httpGet(client *http.Client, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
-	return io.ReadAll(resp.Body)
+	// Read one extra byte so an over-cap body is detectable rather than silently truncated.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxUpdateBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxUpdateBody {
+		return nil, fmt.Errorf("response from %s exceeds %d bytes", url, maxUpdateBody)
+	}
+	return data, nil
 }

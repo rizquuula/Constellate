@@ -148,6 +148,47 @@ describe('splitPane', () => {
     expect(split.children.length).toBe(3)
     expect(split.children.map((c) => c.id)).toEqual([leaf.id, bId, cId])
   })
+
+  // ── findParent regression: 3-child group with a nested split child ──
+  // Exercises the internal findParent via splitPane. The parent lookup must
+  // return the *immediate* parent of a deeply-nested leaf, not the top-level
+  // group, even when an earlier sibling subtree returns no match first.
+
+  it('splitting a nested leaf flattens into its own sub-split, leaving the 3-child group intact', () => {
+    // Build [A, B, C] horizontal, then nest C into a vertical split [C, D].
+    const a = makeLeaf()
+    const [r1, bId] = splitPane(a, a.id, 'horizontal')
+    const [r2, cId] = splitPane(r1, bId, 'horizontal') // [A, B, C]
+    const [r3, dId] = splitPane(r2, cId, 'vertical') // C → vertical [C, D] (last child)
+
+    // Split D vertically again: its immediate parent is the nested vertical
+    // split, so E flattens into [C, D, E] — NOT into the top-level group.
+    const [r4, eId] = splitPane(r3, dId, 'vertical')
+
+    const top = r4 as SplitPane
+    expect(top.direction).toBe('horizontal')
+    expect(top.children.length).toBe(3) // group unchanged: [A, B, <vsplit>]
+    expect(top.children[0].id).toBe(a.id)
+    expect(top.children[1].id).toBe(bId)
+
+    const nested = top.children[2] as SplitPane
+    expect(nested.kind).toBe('split')
+    expect(nested.direction).toBe('vertical')
+    expect(nested.children.map((c) => c.id)).toEqual([cId, dId, eId])
+  })
+
+  it('splitting the middle child of a 3-child group finds the group as parent and inserts in place', () => {
+    // [A, B, C] horizontal; split the MIDDLE child B in the same direction.
+    const a = makeLeaf()
+    const [r1, bId] = splitPane(a, a.id, 'horizontal')
+    const [r2, cId] = splitPane(r1, bId, 'horizontal') // [A, B, C]
+    const [r3, newId] = splitPane(r2, bId, 'horizontal') // flatten after B
+
+    const split = r3 as SplitPane
+    expect(split.children.length).toBe(4)
+    // New leaf inserted immediately after B, group otherwise preserved.
+    expect(split.children.map((c) => c.id)).toEqual([a.id, bId, newId, cId])
+  })
 })
 
 // ── closePane ─────────────────────────────────────────────────────────────────
