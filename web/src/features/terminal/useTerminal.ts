@@ -6,9 +6,12 @@ import { openTerminalSocket, sendResize } from '../../api/ws'
 // Attaches an xterm.js terminal to `containerRef` for the given `sessionId`.
 // Each call is fully independent — multiple panes can call this hook concurrently.
 // Tears down its xterm instance and WebSocket on unmount or when sessionId changes.
+// Bumping `reloadKey` forces a full teardown + reattach (fresh socket, scrollback
+// replayed on attach) — used by the pane's reload button to recover a wedged term.
 export function useTerminal(
   containerRef: React.RefObject<HTMLDivElement | null>,
   sessionId: string | null,
+  reloadKey = 0,
 ) {
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -100,5 +103,5 @@ export function useTerminal(
       wsRef.current = null
       fitRef.current = null
     }
-  }, [sessionId, containerRef])
+  }, [sessionId, containerRef, reloadKey])
 }

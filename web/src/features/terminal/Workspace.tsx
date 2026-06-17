@@ -19,6 +19,7 @@ const WorkspaceNode = memo(function WorkspaceNode({ node }: WorkspaceNodeProps) 
   const doSplitPane = useStore((s) => s.splitPane)
   const doClosePane = useStore((s) => s.closePane)
   const doDetachPane = useStore((s) => s.detachPane)
+  const doReloadPane = useStore((s) => s.reloadPane)
 
   if (node.kind === 'leaf') {
     return (
@@ -30,6 +31,7 @@ const WorkspaceNode = memo(function WorkspaceNode({ node }: WorkspaceNodeProps) 
         onSplitH={() => doSplitPane(node.id, 'horizontal')}
         onSplitV={() => doSplitPane(node.id, 'vertical')}
         onDetach={() => doDetachPane(node.id)}
+        onReload={() => doReloadPane(node.id)}
         onClose={() => doClosePane(node.id)}
       />
     )
@@ -93,6 +95,7 @@ export function Workspace() {
   const doSplitPane = useStore((s) => s.splitPane)
   const doClosePane = useStore((s) => s.closePane)
   const doDetachPane = useStore((s) => s.detachPane)
+  const doReloadPane = useStore((s) => s.reloadPane)
   const isNarrow = useIsNarrow()
 
   if (isNarrow) {
@@ -107,6 +110,7 @@ export function Workspace() {
           onSplitH={() => doSplitPane(leaf.id, 'horizontal')}
           onSplitV={() => doSplitPane(leaf.id, 'vertical')}
           onDetach={() => doDetachPane(leaf.id)}
+          onReload={() => doReloadPane(leaf.id)}
           onClose={() => doClosePane(leaf.id)}
         />
       </div>

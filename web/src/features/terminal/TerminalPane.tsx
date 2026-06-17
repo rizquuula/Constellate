@@ -13,6 +13,7 @@ interface TerminalPaneProps {
   onSplitH: () => void
   onSplitV: () => void
   onDetach: () => void
+  onReload: () => void
   onClose: () => void
 }
 
@@ -24,18 +25,20 @@ function TerminalPaneImpl({
   onSplitH,
   onSplitV,
   onDetach,
+  onReload,
   onClose,
 }: TerminalPaneProps) {
   const session = useStore((s) => sessionId ? s.sessions.find((x) => x.id === sessionId) : undefined)
   const machine = useStore((s) => session ? s.machines.find((m) => m.id === session.machineID) : undefined)
   const renameSession = useStore((s) => s.renameSession)
+  const reloadKey = useStore((s) => s.paneReloads[paneId] ?? 0)
   const containerRef = useRef<HTMLDivElement>(null)
 
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
 
-  useTerminal(containerRef, sessionId)
+  useTerminal(containerRef, sessionId, reloadKey)
   const sessionEnded = session !== undefined && session.status !== 'running'
 
   // Shell name shown in full (no cropping); fall back to a short id only for
@@ -173,6 +176,16 @@ function TerminalPaneImpl({
               onClick={onDetach}
             >
               ⏏
+            </button>
+          )}
+          {sessionId && (
+            <button
+              className="pane-btn"
+              title="Reload terminal (reconnect and replay scrollback) — Shift+Alt+R"
+              aria-label="Reload terminal"
+              onClick={onReload}
+            >
+              ↻
             </button>
           )}
           <button

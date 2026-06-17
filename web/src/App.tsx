@@ -127,22 +127,24 @@ export function App() {
   }, [authState, setViewMode])
 
   // Shift+Alt pane controls act on the focused pane: split H (−), split V (=),
-  // close (W), detach (E). Physical e.code keeps them layout-independent (Alt
-  // often rewrites the produced character). Capture phase + stop/prevent so the
-  // shortcut wins even while a terminal is focused and xterm would otherwise
-  // swallow the keystroke. State is read live via getState() so the handler
-  // always targets the currently focused pane without re-registering.
+  // close (W), detach (E), reload (R). Physical e.code keeps them
+  // layout-independent (Alt often rewrites the produced character). Capture
+  // phase + stop/prevent so the shortcut wins even while a terminal is focused
+  // and xterm would otherwise swallow the keystroke. State is read live via
+  // getState() so the handler always targets the currently focused pane without
+  // re-registering.
   useEffect(() => {
     if (authState !== 'authed') return
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.shiftKey || !e.altKey || e.ctrlKey || e.metaKey) return
-      const { viewMode, focusedPaneId, splitPane, closePane, detachPane } = useStore.getState()
+      const { viewMode, focusedPaneId, splitPane, closePane, detachPane, reloadPane } = useStore.getState()
       if (viewMode !== 'workspace') return
       switch (e.code) {
         case 'Minus': splitPane(focusedPaneId, 'horizontal'); break
         case 'Equal': splitPane(focusedPaneId, 'vertical'); break
         case 'KeyW':  closePane(focusedPaneId); break
         case 'KeyE':  detachPane(focusedPaneId); break
+        case 'KeyR':  reloadPane(focusedPaneId); break
         default: return
       }
       e.preventDefault()

@@ -137,11 +137,15 @@ interface Store {
   // ── workspace (pane tree) ─────────────────────────────────────────────────
   paneRoot: PaneNode
   focusedPaneId: string
+  // Per-pane reload counter; bumping a pane's entry forces its terminal to tear
+  // down and reattach (fresh socket, scrollback replayed) to recover a wedged term.
+  paneReloads: Record<string, number>
 
   focusPane: (id: string) => void
   splitPane: (paneId: string, direction: PaneDirection) => void
   closePane: (paneId: string) => void
   detachPane: (paneId: string) => void
+  reloadPane: (paneId: string) => void
   assignSessionToPane: (paneId: string, sessionId: string) => void
   assignSessionFromSidebar: (paneId: string, sessionId: string) => void
   diveToSession: (sessionId: string) => void
@@ -260,6 +264,7 @@ export const useStore = create<Store>((set, get) => ({
   // ── workspace ──────────────────────────────────────────────────────────────
   paneRoot: initialPaneRoot,
   focusedPaneId: initialFocusedPaneId,
+  paneReloads: {},
 
   focusPane: (id) => set({ focusedPaneId: id }),
 
@@ -278,6 +283,13 @@ export const useStore = create<Store>((set, get) => ({
   // session keeps running and remains reachable from the sidebar.
   detachPane: (paneId) => {
     set({ paneRoot: detachPane(get().paneRoot, paneId), focusedPaneId: paneId })
+  },
+
+  // reloadPane bumps the pane's reload counter, forcing useTerminal to rebuild
+  // the xterm + socket for the bound session (scrollback replays on reattach).
+  reloadPane: (paneId) => {
+    const reloads = get().paneReloads
+    set({ paneReloads: { ...reloads, [paneId]: (reloads[paneId] ?? 0) + 1 } })
   },
 
   assignSessionToPane: (paneId, sessionId) => {
