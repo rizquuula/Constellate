@@ -35,6 +35,8 @@ per-binary versions are read from the two `VERSION` files at build time. To cut 
 3. Tag the release commit with the datetime format: `git tag "v$(date -u +%Y%m%d-%H%M)"`.
 4. Push commit then tag: `git push origin HEAD && git push origin <tag>` — the workflow starts on the tag push.
 
+**Before any push, run `make lint` (golangci-lint v2) and ensure it passes.**
+
 ## Status
 All planned features are implemented; the full test matrix has been run end-to-end and passes —
 `make test` (unit + integration + in-proc E2E), `make test-e2e` (single-machine Playwright), and
