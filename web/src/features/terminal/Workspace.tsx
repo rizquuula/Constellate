@@ -9,7 +9,12 @@ interface WorkspaceNodeProps {
 }
 
 const WorkspaceNode = memo(function WorkspaceNode({ node }: WorkspaceNodeProps) {
-  const focusedPaneId = useStore((s) => s.focusedPaneId)
+  // Subscribe only to whether THIS node is the focused one (a primitive bool),
+  // not to focusedPaneId itself. Subscribing to focusedPaneId would re-render
+  // every WorkspaceNode on any focus change (the hot path), defeating the memo.
+  // Split nodes never match (focus is always a leaf), so they never re-render
+  // on focus changes — only the two affected leaves do.
+  const focused = useStore((s) => s.focusedPaneId === node.id)
   const focusPane = useStore((s) => s.focusPane)
   const doSplitPane = useStore((s) => s.splitPane)
   const doClosePane = useStore((s) => s.closePane)
@@ -20,7 +25,7 @@ const WorkspaceNode = memo(function WorkspaceNode({ node }: WorkspaceNodeProps) 
       <TerminalPane
         paneId={node.id}
         sessionId={node.sessionId}
-        focused={node.id === focusedPaneId}
+        focused={focused}
         onFocus={() => focusPane(node.id)}
         onSplitH={() => doSplitPane(node.id, 'horizontal')}
         onSplitV={() => doSplitPane(node.id, 'vertical')}

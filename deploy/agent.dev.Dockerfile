@@ -1,4 +1,4 @@
-# deploy/agent.dev.Dockerfile — dev/demo agent image used by docker-compose.dev.yaml.
+# deploy/agent.dev.Dockerfile — dev/demo agent image used by deploy/compose.dev.yaml.
 # Debian-based, with the `opencode` CLI installed, so the shells you open in the
 # browser land in a Debian environment with opencode available on PATH.
 # (Automated topology tests use the smaller test/docker/agent.test.Dockerfile.)
@@ -32,7 +32,7 @@ ENV PATH="/root/.opencode/bin:${PATH}" \
 
 COPY --from=build /out/constellate-agent /usr/local/bin/constellate-agent
 # Entrypoint wrapper: enrolls the agent on first start, then runs connect.
-# Used by docker-compose.dev.yaml (overrides CMD). Running the image directly
+# Used by deploy/compose.dev.yaml (overrides CMD). Running the image directly
 # without the entrypoint override still runs `connect` as before.
 COPY deploy/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/constellate-agent"]

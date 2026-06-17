@@ -104,7 +104,7 @@ function TerminalPaneImpl({
       onKeyDown={handlePaneKeyDown}
     >
       {/* Pane chrome: title + controls */}
-      <div className="pane-chrome" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+      <div className="pane-chrome" onMouseDown={(e) => e.stopPropagation()}>
         <div
           className={`pane-title${dragData ? ' pane-title-draggable' : ''}${isDragging ? ' pane-title-dragging' : ''}`}
           ref={dragData ? setDragRef : undefined}
