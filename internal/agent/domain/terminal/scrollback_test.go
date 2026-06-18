@@ -99,6 +99,29 @@ func TestScrollbackStaleCursorClamps(t *testing.T) {
 	}
 }
 
+// TestScrollbackClearDoesNotResetBuffer verifies that writing a terminal
+// "clear" escape sequence is treated as ordinary bytes: it is appended, not
+// interpreted, so prior output stays in the buffer and the clear sequence
+// itself is retained for faithful replay.
+func TestScrollbackClearDoesNotResetBuffer(t *testing.T) {
+	sb := NewScrollback(1024)
+	sb.Write([]byte("hello world\n"))
+	sb.Write([]byte("\x1b[H\x1b[2J\x1b[3J")) // what `clear` emits
+
+	data, _, ok := sb.ReadFrom(sb.Oldest(), make(chan struct{}))
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	// Pre-clear output is still present — clear is appended, not a reset.
+	if !bytes.Contains(data, []byte("hello world")) {
+		t.Errorf("pre-clear output was lost; got %q", data)
+	}
+	// The clear sequence itself is retained verbatim.
+	if !bytes.Contains(data, []byte("\x1b[3J")) {
+		t.Errorf("clear sequence not buffered; got %q", data)
+	}
+}
+
 func TestScrollbackCloseUnblocksReader(t *testing.T) {
 	sb := NewScrollback(1024)
 	done := make(chan struct{})

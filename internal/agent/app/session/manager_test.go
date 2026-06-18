@@ -254,6 +254,70 @@ func TestManagerReplayOnAttach(t *testing.T) {
 	_ = fake.Close()
 }
 
+// TestManagerReplayIncludesPreClearOutput verifies that a "clear" sequence
+// emitted before Attach does not purge the scrollback: replay faithfully
+// streams the pre-clear output AND the clear sequence itself. Any visual wipe
+// on the client is the sequence doing its job, not the buffer dropping data.
+func TestManagerReplayIncludesPreClearOutput(t *testing.T) {
+	fake := newFakePTY(45)
+	m, _ := newTestManager(fake)
+
+	if _, err := m.Open("sess-clear", PTYSpec{}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	const preOutput = "hello world\n"
+	const clearSeq = "\x1b[H\x1b[2J\x1b[3J" // what `clear` emits
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := fake.outputW.Write([]byte(preOutput + clearSeq))
+		writeDone <- err
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write fake PTY output: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out writing pre-attach PTY output")
+	}
+
+	// Give readPump time to drain the pipe into scrollback.
+	time.Sleep(20 * time.Millisecond)
+
+	stream := &capturingWriter{}
+	inR, inW := io.Pipe()
+	attachDone := make(chan error, 1)
+	go func() { attachDone <- m.Attach("sess-clear", stream, inR) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if bytes.Contains(stream.Bytes(), []byte(clearSeq)) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	got := stream.Bytes()
+	if !bytes.Contains(got, []byte("hello world")) {
+		t.Errorf("replay dropped pre-clear output; got %q", got)
+	}
+	if !bytes.Contains(got, []byte(clearSeq)) {
+		t.Errorf("replay missing clear sequence; got %q", got)
+	}
+
+	_ = inW.Close()
+	select {
+	case err := <-attachDone:
+		if err != nil && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, io.EOF) {
+			t.Errorf("Attach unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Attach did not return after input EOF")
+	}
+
+	_ = fake.Close()
+}
+
 // TestManagerAttachInputReachesPTY verifies that keystrokes from the client
 // are forwarded to the PTY.
 func TestManagerAttachInputReachesPTY(t *testing.T) {

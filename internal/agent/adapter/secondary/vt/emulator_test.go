@@ -108,6 +108,20 @@ func TestTab(t *testing.T) {
 	}
 }
 
+// TestEraseInDisplayClearsScreen verifies that ED (ESC[2J) — what `clear`
+// emits — wipes the rendered grid. This is the screen-state half of "clear":
+// the visible/snapshot screen is reset even though the byte scrollback is not.
+func TestEraseInDisplayClearsScreen(t *testing.T) {
+	e := New(10, 3)
+	write(e, "hello\r\nworld")
+	sc := write(e, csi("2", "J")) // ED 2 — erase entire display
+	for y, row := range renderRows(sc) {
+		if row != "" {
+			t.Errorf("row %d not cleared by ED; got %q", y, row)
+		}
+	}
+}
+
 func TestBackspace(t *testing.T) {
 	e := New(10, 3)
 	write(e, "ABC")
