@@ -252,6 +252,58 @@ func (c *Client) clearSnapStream() {
 	}
 }
 
+// SendRawSnapshot relays a pre-encoded transport.Snapshot from the host to the
+// hub snapshot stream, stamping the machineID before sending. This is called by
+// hostclient when relaying snapshots from the session-host, avoiding a
+// double-encode round-trip through terminal.SessionScreen.
+func (c *Client) SendRawSnapshot(s transport.Snapshot) error {
+	c.mu.Lock()
+	sess := c.muxSess
+	enc := c.snapEnc
+	c.mu.Unlock()
+
+	if sess == nil {
+		return nil // not connected; drop silently
+	}
+
+	if enc == nil {
+		stream, err := sess.OpenStream()
+		if err != nil {
+			return fmt.Errorf("hubclient: open snapshot stream: %w", err)
+		}
+		newEnc := transport.NewEncoder(stream)
+		if err := newEnc.Encode(transport.NewSnapStreamHeader()); err != nil {
+			_ = stream.Close()
+			return fmt.Errorf("hubclient: write snap stream header: %w", err)
+		}
+		c.mu.Lock()
+		if c.muxSess != sess {
+			c.mu.Unlock()
+			_ = stream.Close()
+			return nil
+		}
+		if c.snapEnc != nil {
+			c.mu.Unlock()
+			_ = stream.Close()
+			enc = c.snapEnc
+		} else {
+			c.snapStream = stream
+			c.snapEnc = newEnc
+			enc = newEnc
+			c.mu.Unlock()
+		}
+	}
+
+	s.MachineID = c.machineID
+	if err := enc.Encode(s); err != nil {
+		c.mu.Lock()
+		c.clearSnapStream()
+		c.mu.Unlock()
+		return fmt.Errorf("hubclient: write raw snapshot: %w", err)
+	}
+	return nil
+}
+
 const (
 	backoffInitial = 500 * time.Millisecond
 	backoffFactor  = 2.0

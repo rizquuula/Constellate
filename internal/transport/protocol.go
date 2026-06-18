@@ -1,5 +1,14 @@
 package transport
 
+// LocalProtocolVersion is the version of the connect⇄host local (UDS) protocol.
+//
+//	1 — initial version: HostHello/HostInfo handshake, OpenSession/Resize/
+//	    CloseSession/EnableSnaps forwarding, AttachHeader+raw data streams.
+//	2 — adds LocalStat (host→connect activity) and host-side snapshot production
+//	    (host opens snapshot stream; connect relays to hub). EnableSnaps is now
+//	    forwarded to the host's snapshot toggle.
+const LocalProtocolVersion = 2
+
 // ProtocolVersion is the wire protocol an agent advertises in Hello.
 //
 //	1 — control + data streams.

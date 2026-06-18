@@ -7,6 +7,14 @@ import (
 	"github.com/rizquuula/Constellate/internal/agent/domain/terminal"
 )
 
+// SessionInfo is a lightweight descriptor of a running session returned by
+// Manager.Sessions(). It carries only the ID and PID that the localhost server
+// needs to populate HostInfo on handshake.
+type SessionInfo struct {
+	ID  string
+	PID int
+}
+
 // ErrCwdNotFound is returned by a PTYFactory when the requested working
 // directory does not exist and CreateDir was not set. The hub maps it to a
 // distinct "cwd_not_found" code so the UI can offer to create the directory.

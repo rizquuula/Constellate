@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,11 +27,14 @@ import (
 	"time"
 
 	"github.com/rizquuula/Constellate/internal/agent/adapter/primary/hubclient"
+	"github.com/rizquuula/Constellate/internal/agent/adapter/primary/localhost"
+	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/hostclient"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/pty"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/sysmetrics"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/vt"
 	"github.com/rizquuula/Constellate/internal/agent/app/session"
 	"github.com/rizquuula/Constellate/internal/agent/app/snapshot"
+	"github.com/rizquuula/Constellate/internal/agent/domain/terminal"
 	platcli "github.com/rizquuula/Constellate/internal/platform/cli"
 	platconfig "github.com/rizquuula/Constellate/internal/platform/config"
 	"github.com/rizquuula/Constellate/internal/platform/id"
@@ -74,6 +78,8 @@ func main() {
 		cmdStatus(args)
 	case "connect":
 		cmdConnect(args)
+	case "session-host":
+		cmdSessionHost(args)
 	case "enroll":
 		cmdEnroll(args)
 	case "reset":
@@ -96,13 +102,14 @@ Usage:
   constellate-agent [command] [flags]
 
 Commands:
-  connect   Connect to the hub and serve sessions (default)
-  enroll    Enroll this machine with the hub (--hub, --token)
-  status    Show local enrollment status
-  reset     Remove local enrollment (id + credential)
-  install   Install + start a systemd service (Linux; requires enrollment)
-  update    Download + install the latest agent release, then restart the service
-  version   Print version and protocol info
+  connect       Connect to the hub and serve sessions (default)
+  session-host  Run the durable session-host process (owns PTYs + scrollback)
+  enroll        Enroll this machine with the hub (--hub, --token)
+  status        Show local enrollment status
+  reset         Remove local enrollment (id + credential)
+  install       Install + start a systemd service (Linux; requires enrollment)
+  update        Download + install the latest agent release, then restart the service
+  version       Print version and protocol info
 
 Flags:
   -v, --version   Print version and protocol info
@@ -196,9 +203,23 @@ func cmdConnect(args []string) {
 		os.Exit(1)
 	}
 
-	instanceID := id.New()
+	socketPath := cfg.SocketPath()
 
-	mgr := session.NewManager(pty.Factory{}, cfg.ScrollbackBytes, log)
+	// Auto-spawn: if the session-host UDS is not responding, spawn it detached.
+	if err := spawnHostIfNeeded(socketPath, *configPath, log); err != nil {
+		log.Error("connect: could not start session-host", "err", err)
+		os.Exit(1)
+	}
+
+	// Dial the session-host and source the durable instanceID from it.
+	hc, err := hostclient.Dial(socketPath, log)
+	if err != nil {
+		log.Error("connect: dial session-host", "socketPath", socketPath, "err", err)
+		os.Exit(1)
+	}
+	defer func() { _ = hc.Shutdown() }()
+
+	instanceID := hc.InstanceID()
 
 	client := hubclient.New(hubclient.Config{
 		HubURL:            cfg.HubURL,
@@ -209,28 +230,157 @@ func cmdConnect(args []string) {
 		Name:              cfg.Name,
 		HeartbeatInterval: 5 * time.Second,
 		Log:               log,
-		Sessions:          mgr,
+		Sessions:          hc,
 		Metrics:           sysmetrics.Collector{},
 	})
 
-	prod := snapshot.New(mgr, client, snapshot.DefaultInterval, log)
-	client.SetSnapshotToggle(prod)
-	mgr.SetScreenFactory(vtScreenFactory{})
-	mgr.SetNotifier(client)
+	// Wire the hostclient exit notifier so SessionExited events from the host
+	// flow through to the hub.
+	hc.SetNotifier(client)
+
+	// Wire snapshot relay: hub's EnableSnaps → hostclient (forwarded to host
+	// producer); host snapshot stream → hubclient.SendRawSnapshot.
+	client.SetSnapshotToggle(hc)
+	hc.SetSnapshotSink(client)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Info("connecting", "hub", cfg.HubURL, "machineID", machineID)
+	log.Info("connecting", "hub", cfg.HubURL, "machineID", machineID, "instanceID", instanceID)
 
-	go func() { _ = prod.Run(ctx) }()
+	// Run hubclient in a goroutine so we can also watch for unexpected host loss.
+	runErr := make(chan error, 1)
+	go func() { runErr <- client.Run(ctx) }()
 
-	if err := client.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Error("connect: run error", "err", err)
+	select {
+	case err := <-runErr:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Error("connect: run error", "err", err)
+			stop()           // cancel hub client goroutine
+			_ = hc.Shutdown() // close host connection
+			os.Exit(1)
+		}
+	case <-hc.Lost():
+		// The session-host died unexpectedly. Exit with a non-zero status so
+		// the supervisor (systemd Restart=always) restarts connect. On the next
+		// start connect will re-spawn the host (which gets a new instanceID) or
+		// re-attach to a still-running one, and the hub will correctly mark old
+		// sessions lost only when the instanceID differs.
+		log.Error("connect: session-host connection lost unexpectedly; exiting for restart")
+		stop()           // cancel hub client goroutine
+		_ = hc.Shutdown() // close host connection
+		os.Exit(1)
+	}
+	// Clean exit: deferred stop() and hc.Shutdown() run on return.
+}
+
+// cmdSessionHost is the composition root for the durable session-host process.
+// It owns the session.Manager, PTYs, and scrollback. It generates the instanceID
+// once at startup and never changes it — connect processes source this ID via the
+// local handshake so the hub sees a stable identity across connect restarts.
+func cmdSessionHost(args []string) {
+	fs := flag.NewFlagSet("session-host", flag.ExitOnError)
+	configPath := platcli.ConfigFlag(fs)
+	logLevel := platcli.String(fs, "log-level", "l", "", "log level override (debug/info/warn/error)")
+	_ = fs.Parse(args)
+
+	cfg, err := platconfig.LoadAgent(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session-host: load config: %v\n", err)
 		os.Exit(1)
 	}
 
+	level := cfg.Log.Level
+	if *logLevel != "" {
+		level = *logLevel
+	}
+	log := platlog.New(level, cfg.Log.Format)
+
+	socketPath := cfg.SocketPath()
+	socketDir := filepath.Dir(socketPath)
+	if err := os.MkdirAll(socketDir, 0o700); err != nil {
+		log.Error("session-host: create socket dir", "dir", socketDir, "err", err)
+		os.Exit(1)
+	}
+
+	// Remove a stale socket if one exists from a previous run.
+	_ = os.Remove(socketPath)
+
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		log.Error("session-host: listen on socket", "path", socketPath, "err", err)
+		os.Exit(1)
+	}
+
+	// Generate the durable instanceID for this host process lifetime.
+	instanceID := id.New()
+
+	mgr := session.NewManager(pty.Factory{}, cfg.ScrollbackBytes, log)
+	mgr.SetScreenFactory(vtScreenFactory{})
+
+	srv := localhost.New(instanceID, &managerAdapter{mgr}, log)
+
+	// Wire the snapshot producer against the host's Manager and the server's
+	// connectSink so snapshots flow: Manager → Producer → connectSink → connect
+	// → hub snapshot stream.
+	prod := snapshot.New(mgr, srv.Sink(), snapshot.DefaultInterval, log)
+	srv.SetSnapshotToggle(prod)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	log.Info("session-host: listening", "socket", socketPath, "instanceID", instanceID)
+
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
+
+	// Run the snapshot producer alongside the server.
+	go func() { _ = prod.Run(ctx) }()
+
+	select {
+	case <-ctx.Done():
+	case err := <-serveErr:
+		if err != nil {
+			log.Error("session-host: serve error", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	_ = ln.Close()
 	mgr.Shutdown()
+	log.Info("session-host: shut down")
+}
+
+// managerAdapter adapts *session.Manager to localhost.SessionManager. The
+// Manager already satisfies the Open/Attach/Resize/Close methods; this thin
+// wrapper adds Sessions() by converting session.SessionInfo → transport-agnostic
+// form that localhost.SessionManager expects.
+type managerAdapter struct {
+	m *session.Manager
+}
+
+func (a *managerAdapter) Open(sessionID string, spec session.PTYSpec) (int, error) {
+	return a.m.Open(sessionID, spec)
+}
+
+func (a *managerAdapter) Attach(sessionID string, stream io.ReadWriteCloser, in io.Reader) error {
+	return a.m.Attach(sessionID, stream, in)
+}
+
+func (a *managerAdapter) Resize(sessionID string, cols, rows int) error {
+	return a.m.Resize(sessionID, cols, rows)
+}
+
+func (a *managerAdapter) Close(sessionID string) error {
+	return a.m.Close(sessionID)
+}
+
+func (a *managerAdapter) Sessions() []session.SessionInfo {
+	return a.m.Sessions()
+}
+
+func (a *managerAdapter) Activities(now int64) []terminal.SessionActivity {
+	return a.m.Activities(now)
 }
 
 // readMachineID reads the machine ID from path. Returns an error if the file

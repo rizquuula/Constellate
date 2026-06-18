@@ -319,6 +319,18 @@ func (m *Manager) lookup(sessionID string) (*liveSession, error) {
 	return ls, nil
 }
 
+// Sessions returns a snapshot of open session IDs and their PIDs. Used by the
+// localhost server to populate HostInfo.Sessions on connect handshake.
+func (m *Manager) Sessions() []SessionInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]SessionInfo, 0, len(m.sessions))
+	for id, ls := range m.sessions {
+		out = append(out, SessionInfo{ID: id, PID: ls.pty.Pid()})
+	}
+	return out
+}
+
 // readPump runs per session. It reads PTY output into the scrollback buffer.
 // When the PTY closes it closes the scrollback, removes the session, and fires
 // the notifier.

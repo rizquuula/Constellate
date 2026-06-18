@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +18,10 @@ type Agent struct {
 	DefaultShell    string    `yaml:"default_shell"`
 	ScrollbackBytes int       `yaml:"scrollback_bytes"`
 	Log             LogConfig `yaml:"log"`
+	// RuntimeDir is the directory used for the session-host socket and other
+	// runtime files. Defaults to $XDG_RUNTIME_DIR/constellate if set, else
+	// ~/.constellate/run. The socket is at <runtime_dir>/host.sock.
+	RuntimeDir string `yaml:"runtime_dir"`
 }
 
 func defaultAgent() Agent {
@@ -31,6 +36,21 @@ func defaultAgent() Agent {
 			Format: "text",
 		},
 	}
+}
+
+// SocketPath returns the path for the session-host Unix domain socket derived
+// from RuntimeDir. If RuntimeDir is empty, it uses $XDG_RUNTIME_DIR/constellate
+// when available, otherwise ~/.constellate/run.
+func (a *Agent) SocketPath() string {
+	dir := a.RuntimeDir
+	if dir == "" {
+		if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+			dir = filepath.Join(xdg, "constellate")
+		} else {
+			dir = expandHome("~/.constellate/run")
+		}
+	}
+	return filepath.Join(dir, "host.sock")
 }
 
 // LoadAgent loads agent configuration from path (if non-empty) and applies
@@ -73,5 +93,8 @@ func applyAgentEnv(cfg *Agent) {
 	}
 	if v := os.Getenv("CONSTELLATE_HUB_CA"); v != "" {
 		cfg.HubCA = v
+	}
+	if v := os.Getenv("CONSTELLATE_RUNTIME_DIR"); v != "" {
+		cfg.RuntimeDir = v
 	}
 }
