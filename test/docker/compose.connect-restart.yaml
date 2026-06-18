@@ -1,0 +1,42 @@
+# Constellate connect-restart survival test: 1 hub + 1 agent.
+# The agent container uses the supervisor entrypoint so the shell stays PID 1;
+# killing the connect process does NOT kill the container or the session-host.
+# This compose file is used exclusively by test/docker/run_connect_restart.sh.
+
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: deploy/hub.Dockerfile
+    environment:
+      CONSTELLATE_ADDR: "0.0.0.0:8080"
+      CONSTELLATE_DB_PATH: "/data/constellate.db"
+    tmpfs:
+      - /data
+    ports:
+      - "127.0.0.1:18081:8080"
+    networks:
+      - constellate-cr
+
+  agent1:
+    build:
+      context: ../..
+      dockerfile: test/docker/agent.supervisor.Dockerfile
+    environment:
+      CONSTELLATE_HUB_URL: "ws://hub:8080/ws/agent"
+      CONSTELLATE_HUB_BASE: "http://hub:8080"
+      CONSTELLATE_NAME: "agent-cr-1"
+      CONSTELLATE_ENROLL_TOKEN: "${AGENT1_TOKEN:-}"
+    volumes:
+      - agent1cr-cred:/root/.constellate
+    depends_on:
+      - hub
+    networks:
+      - constellate-cr
+
+networks:
+  constellate-cr:
+    driver: bridge
+
+volumes:
+  agent1cr-cred:

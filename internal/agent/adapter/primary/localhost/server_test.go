@@ -351,6 +351,148 @@ func TestListSessionsInHostInfo(t *testing.T) {
 	}
 }
 
+// TestVersionSkewNegotiatesDown verifies that when a connect sends a lower
+// LocalProtocol than the host supports, the host negotiates down to the
+// connect's version in HostInfo. This covers the "old connect, new host"
+// skew case: the host (running LocalProtocolVersion 2) must accept a connect
+// claiming version 1 and reply with negotiated=1 so the connect knows it
+// cannot use v2-only features (LocalStat, host-side snapshot streams).
+//
+// This maps to the §8 version-skew row: "a v2 connect handshaking a v1-style
+// host (or vice versa) negotiates down and the core path still works."
+func TestVersionSkewNegotiatesDown(t *testing.T) {
+	const connectProto = 1 // an old connect (or simulated old-style)
+	const wantInstanceID = "skew-instance-789"
+	mgr := newFakeManager()
+	ln := startTestServer(t, wantInstanceID, mgr)
+
+	conn, err := net.Dial(ln.Addr().Network(), ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	yamuxSess, err := transport.Client(conn)
+	if err != nil {
+		t.Fatalf("yamux client: %v", err)
+	}
+	defer func() { _ = yamuxSess.Close() }()
+
+	ctrl, err := yamuxSess.OpenStream()
+	if err != nil {
+		t.Fatalf("open ctrl stream: %v", err)
+	}
+	enc := transport.NewEncoder(ctrl)
+	dec := transport.NewDecoder(ctrl)
+
+	// Claim an old protocol version — lower than what the host supports.
+	if err := enc.Encode(transport.NewHostHello(connectProto)); err != nil {
+		t.Fatalf("send HostHello(v%d): %v", connectProto, err)
+	}
+
+	frame, err := dec.Next()
+	if err != nil {
+		t.Fatalf("read HostInfo: %v", err)
+	}
+	if frame.Type != transport.TypeHostInfo {
+		t.Fatalf("expected HostInfo, got %q", frame.Type)
+	}
+	info, err := transport.Unmarshal[transport.HostInfo](frame)
+	if err != nil {
+		t.Fatalf("decode HostInfo: %v", err)
+	}
+
+	// The negotiated version must be min(connectProto, host's LocalProtocolVersion).
+	wantNegotiated := connectProto
+	if transport.LocalProtocolVersion < wantNegotiated {
+		wantNegotiated = transport.LocalProtocolVersion
+	}
+	if info.LocalProtocol != wantNegotiated {
+		t.Errorf("negotiated localProtocol: got %d, want %d (min of connect=%d, host=%d)",
+			info.LocalProtocol, wantNegotiated, connectProto, transport.LocalProtocolVersion)
+	}
+	if info.InstanceID != wantInstanceID {
+		t.Errorf("instanceID: got %q, want %q", info.InstanceID, wantInstanceID)
+	}
+
+	// Core path: an OpenSession frame is still dispatched (v1 feature) even after
+	// negotiating down. We register a session in the manager and send OpenSession —
+	// the server should reply with SessionOpened.
+	const sid = "skew-sess-1"
+	mgr.register(sid, newFakeSession(77))
+	if err := enc.Encode(transport.NewOpenSession(sid, "", "/bin/sh", 80, 24, false)); err != nil {
+		t.Fatalf("send OpenSession: %v", err)
+	}
+	reply, err := dec.Next()
+	if err != nil {
+		t.Fatalf("read reply after OpenSession: %v", err)
+	}
+	if reply.Type != transport.TypeSessionOpened {
+		t.Errorf("expected SessionOpened reply, got %q", reply.Type)
+	}
+	opened, err := transport.Unmarshal[transport.SessionOpened](reply)
+	if err != nil {
+		t.Fatalf("decode SessionOpened: %v", err)
+	}
+	if opened.SessionID != sid {
+		t.Errorf("SessionOpened.SessionID: got %q, want %q", opened.SessionID, sid)
+	}
+	if opened.PID != 77 {
+		t.Errorf("SessionOpened.PID: got %d, want 77", opened.PID)
+	}
+}
+
+// TestVersionSkewNewConnectOldHost verifies the reverse skew: a new connect
+// (higher protocol) talking to a host that only supports v1. We simulate this
+// by having the host claim version 1 — we achieve this by directly testing the
+// negotiation formula: the negotiated version is min(connect, host).
+func TestVersionSkewNewConnectOldHost(t *testing.T) {
+	// The server always replies with min(hello.LocalProtocol, LocalProtocolVersion).
+	// To simulate an old host we just check that a connect claiming version 99
+	// (future version) gets capped at the host's actual LocalProtocolVersion.
+	const connectProto = 99 // future new connect
+	mgr := newFakeManager()
+	ln := startTestServer(t, "new-connect-old-host-inst", mgr)
+
+	conn, err := net.Dial(ln.Addr().Network(), ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	yamuxSess, err := transport.Client(conn)
+	if err != nil {
+		t.Fatalf("yamux client: %v", err)
+	}
+	defer func() { _ = yamuxSess.Close() }()
+
+	ctrl, err := yamuxSess.OpenStream()
+	if err != nil {
+		t.Fatalf("open ctrl stream: %v", err)
+	}
+	enc := transport.NewEncoder(ctrl)
+	dec := transport.NewDecoder(ctrl)
+
+	if err := enc.Encode(transport.NewHostHello(connectProto)); err != nil {
+		t.Fatalf("send HostHello(v%d): %v", connectProto, err)
+	}
+
+	frame, err := dec.Next()
+	if err != nil {
+		t.Fatalf("read HostInfo: %v", err)
+	}
+	info, err := transport.Unmarshal[transport.HostInfo](frame)
+	if err != nil {
+		t.Fatalf("decode HostInfo: %v", err)
+	}
+
+	// Host caps at its own version.
+	if info.LocalProtocol != transport.LocalProtocolVersion {
+		t.Errorf("negotiated localProtocol: got %d, want %d (capped at host version)",
+			info.LocalProtocol, transport.LocalProtocolVersion)
+	}
+}
+
 // syncBuffer is a thread-safe byte buffer implementing io.ReadWriteCloser.
 type syncBuffer struct {
 	mu     sync.Mutex
