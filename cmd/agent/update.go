@@ -22,6 +22,7 @@ func cmdUpdate(args []string) {
 	checkFlag := fs.Bool("check", false, "report current vs available version and exit without updating")
 	forceFlag := platcli.Bool(fs, "force", "f", false, "reinstall even if already up to date")
 	noRestartFlag := fs.Bool("no-restart", false, "skip systemd service restart after update")
+	restartHostFlag := fs.Bool("restart-host", false, "after updating, also restart the session-host service so it adopts the new binary (ENDS its live sessions)")
 	rootlessFlag := platcli.Bool(fs, "rootless", "r", false, "update a rootless user install (restart via systemctl --user)")
 	binFlag := fs.String("bin", "", "override target binary path (default: the running binary)")
 	_ = fs.Parse(args)
@@ -126,6 +127,41 @@ func cmdUpdate(args []string) {
 		fmt.Fprintf(os.Stderr, "update: run script: %v\n", err)
 		os.Exit(1)
 	}
+
+	// --restart-host: the update above replaced the binary and restarted the
+	// connect relay, but the durable session-host keeps running the OLD binary
+	// until it is restarted. This opt-in flag restarts it so it adopts the new
+	// binary — which ENDS its live sessions (host restart -> new instanceID ->
+	// the hub marks those sessions lost). Skipped in --check mode (nothing was
+	// updated) and when --no-restart disabled restarts entirely.
+	if *restartHostFlag && *noRestartFlag {
+		fmt.Fprintf(os.Stderr, "update: --restart-host ignored because --no-restart was set\n")
+	}
+	if shouldRestartHost(*checkFlag, *noRestartFlag, *restartHostFlag) {
+		fmt.Fprintf(os.Stderr, "update: restarting %s to adopt the new binary (this ends its live sessions)...\n", hostUnitServiceName)
+		if err := runSystemctl(*rootlessFlag, "restart", hostUnitServiceName); err != nil {
+			fmt.Fprintf(os.Stderr, "update: restart %s: %v\n", hostUnitServiceName, err)
+			fmt.Fprintf(os.Stderr, "  restart it manually: systemctl%s restart %s\n", userFlagHint(*rootlessFlag), hostUnitServiceName)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "update: %s restarted; its previous sessions are now closed.\n", hostUnitServiceName)
+	}
+}
+
+// shouldRestartHost reports whether `agent update --restart-host` should restart
+// the session-host service: only when restart-host is requested, an update
+// actually ran (not --check), and restarts were not disabled (--no-restart).
+func shouldRestartHost(check, noRestart, restartHost bool) bool {
+	return restartHost && !check && !noRestart
+}
+
+// userFlagHint returns " --user" for rootless installs so printed manual
+// systemctl hints target the user instance.
+func userFlagHint(rootless bool) string {
+	if rootless {
+		return " --user"
+	}
+	return ""
 }
 
 // parseSHA256SUMS parses a SHA256SUMS file (format: "<hash>  <filename>" per line,

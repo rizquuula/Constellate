@@ -165,3 +165,25 @@ func TestRenderUnit(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldRestartHost(t *testing.T) {
+	cases := []struct {
+		name                      string
+		check, noRestart, restart bool
+		want                      bool
+	}{
+		{"restart requested", false, false, true, true},
+		{"not requested", false, false, false, false},
+		{"check mode skips", true, false, true, false},
+		{"no-restart skips", false, true, true, false},
+		{"check+norestart skip", true, true, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRestartHost(tc.check, tc.noRestart, tc.restart); got != tc.want {
+				t.Errorf("shouldRestartHost(check=%v, noRestart=%v, restart=%v) = %v, want %v",
+					tc.check, tc.noRestart, tc.restart, got, tc.want)
+			}
+		})
+	}
+}

@@ -455,16 +455,18 @@ is **not** restarted. Connect exits, the updated binary starts as a new connect 
 still-running session-host over the UDS, picks up the same `instanceID`, and reconnects to the hub.
 The hub sees the same instanceID and leaves all sessions as `running`.
 
-If you need to update the session-host binary itself (i.e. the host process must be replaced), you
-must restart `constellate-session-host.service` explicitly:
+If you need to update the session-host binary itself (i.e. the host process must be replaced), pass
+`--restart-host`, which restarts `constellate-session-host.service` after the update completes:
 
 ```bash
-sudo systemctl restart constellate-session-host
+sudo constellate-agent update --restart-host
 ```
 
-This **will end all running sessions** — the old host dies (PTYs die), the new host starts with a
-fresh `instanceID`, and the hub marks the old sessions `lost`. There is no automatic drain-and-hand-off
-for session-host restarts (future work).
+(Equivalent to `constellate-agent update` followed by `sudo systemctl restart
+constellate-session-host`.) This **will end all running sessions** — the old host dies (PTYs die),
+the new host starts with a fresh `instanceID`, and the hub marks the old sessions `lost`. The restart
+is **immediate**; there is no graceful drain-and-hand-off (wait-for-idle) yet — that remains future
+work. `--restart-host` is ignored in `--check` mode and when `--no-restart` is set.
 
 For a **rootless install** (binary in `~/.local/bin`, user service in `~/.config/systemd/user/`), pass
 `--rootless` — no sudo needed:
