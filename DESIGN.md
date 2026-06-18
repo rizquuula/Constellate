@@ -85,10 +85,11 @@ PaaS, not an environment provisioner, not a web IDE.
 | D3 | Transport | **TLS WebSocket + yamux** mux | Simple, proxy-friendly, one transport family; many logical streams over one conn | gRPC (browser can't bidi-stream); NATS (extra infra); SSH broker (re-wraps what we replace) |
 | D4 | Frontend | **React + xterm.js** | Largest ecosystem, best terminal/websocket precedent | Flutter web (immature xterm); SolidJS (small community) |
 | D5 | Store | **SQLite** on the hub (metadata/history only) | Single VPS, single operator; zero extra services | Postgres (operational weight); bbolt (weak relational queries) |
-| D6 | Persistence | **In-process PTY** on the agent + scrollback buffer | Survives disconnects; simplest robust model | tmux-backed PTYs — rejected (extra dep; an agent restart dropping its sessions is an accepted trade-off) |
+| D6 | Persistence | ~~**In-process PTY** on the agent + scrollback buffer~~ **superseded by D8** | *See D8.* | — |
 | D7 | Auth | **Passkey (WebAuthn) + TOTP** fallback | Phishing-resistant, no shared secret | Password (weak); OIDC (ties login to a provider) — kept as an option |
+| D8 | Persistence | **Split agent: durable `session-host` (owns PTYs/scrollback/instanceID) + volatile `connect` relay** | Sessions survive a connect restart or `agent update`; only session-host death or machine reboot loses them. Pure-Go UDS relay — no extra deps, no tmux, no fd-passing. | tmux-backed PTYs (extra dep, external process lifecycle), SCM_RIGHTS fd-passing (non-portable, fragile), keeping the in-process model (restart-drops-sessions — D6's accepted trade-off, now rejected). *Supersedes D6.* |
 
-Decisions D1–D7 are settled. The detail *below* each (protocol framing, schema, package
+Decisions D1–D8 are settled. The detail *below* each (protocol framing, schema, package
 boundaries) is what this review is for.
 
 ---
@@ -105,11 +106,10 @@ boundaries) is what this review is for.
 - Owns the SQLite store, the machine/project/session registry, the audit log, and operator auth.
 - Holds **no shells itself** — it is a pure control plane and relay.
 
-**Agent** (Go, one static binary per machine) — outbound only.
-- Dials home to the hub and maintains **one** persistent, multiplexed connection (auto-reconnect).
-- **Owns the PTYs** — spawns shells, pipes I/O, applies resizes, reaps on exit.
-- Keeps each session's **scrollback ring buffer** and (M4) current **screen state**.
-- Survives browser disconnects: PTYs keep running; re-attach replays scrollback then resumes live.
+**Agent** (Go, one static binary per machine) — outbound only. The agent process is split into two cooperating roles (D8):
+- **`constellate-agent session-host`** (durable) — generates the machine's `instanceID` once at start, owns all PTYs and scrollback ring buffers, runs the vt emulator and snapshot producer, and listens on a Unix domain socket (UDS) under `$XDG_RUNTIME_DIR/constellate/host.sock` (or `~/.constellate/run/host.sock`). Survives `connect` restarts.
+- **`constellate-agent connect`** (volatile) — dials home to the hub over a single multiplexed WebSocket (auto-reconnect/backoff); sources the `instanceID` from the session-host via a local handshake; relays all hub commands (OpenSession/Resize/CloseSession/EnableSnaps) to the session-host over the UDS; relays output, snapshots, and activity signals back to the hub. Safe to kill and restart — the session-host keeps running.
+- Sessions survive browser disconnects **and** connect restarts: PTYs keep running in the host; re-attach replays scrollback then resumes live. Only session-host death (crash or machine reboot) loses sessions.
 
 **Web app** (React + xterm.js, served by the hub).
 - **Overview** grid (the signature view), project-grouped **sidebar**, live **terminal** view, and
@@ -159,6 +159,27 @@ Each agent holds exactly one WebSocket to the hub. That socket is wrapped as a `
 Multiplexing over one socket means a single TLS handshake, a single auth check, and one thing to
 reconnect — while still giving every terminal its own independent, back-pressured byte pipe.
 
+### 4.4 Local protocol (connect ⇄ session-host, D8)
+
+Inside the machine, connect and session-host communicate over a **Unix domain socket** (UDS) using
+the same yamux + NDJSON codec as the hub wire protocol — no second encoding layer. The local stream
+model mirrors the hub model:
+
+| Stream | Direction | Carries |
+|--------|-----------|---------|
+| **local-control** (first stream) | bidirectional | `HostHello` (connect→host), `HostInfo` (host→connect: instanceID + session list), `OpenSession`, `Resize`, `CloseSession`, `EnableSnaps`, `LocalStat` (host→connect: activity), errors |
+| **local-data** (one per attached session) | connect-opened / host-accepted | `AttachHeader{sessionID}` + raw PTY bytes (same format as hub data streams) |
+| **local-snapshot** (one per connect) | host-opened / connect-accepted | NDJSON `Snapshot` frames relayed to hub snapshot stream |
+
+The local control stream opens with a version handshake: connect sends `HostHello{localProtocol}`,
+host replies `HostInfo{instanceID, localProtocol, sessions}`. Both sides negotiate
+`min(localProtocol)` and gate features on the negotiated version. `LocalProtocolVersion = 2`
+(v1 = basic relay; v2 = adds `LocalStat` + host-side snapshot production).
+
+The socket is at `<runtime_dir>/host.sock` (default `$XDG_RUNTIME_DIR/constellate/host.sock`),
+created `0600` under a `0700` directory. The session-host verifies the connecting process's UID
+via `SO_PEERCRED` (Linux) and accepts at most one client at a time.
+
 ---
 
 ## 5. Connection & session lifecycle
@@ -177,14 +198,18 @@ reconnect — while still giving every terminal its own independent, back-pressu
    `Authenticate` rejects revoked machines).
 
 ### 5.2 Dial-home
-1. Agent opens `wss://hub/ws/agent`, presenting its credential.
-2. Hub validates, registers the connection in **agentlink** (`machineID → conn`), starts the yamux
+1. `connect` dials the session-host UDS and performs the local handshake (§4.4), sourcing the
+   stable `instanceID` generated by the session-host at startup.
+2. `connect` opens `wss://hub/ws/agent`, presenting its credential.
+3. Hub validates, registers the connection in **agentlink** (`machineID → conn`), starts the yamux
    server side, accepts the control stream.
-3. Agent sends `Hello{…, agentVersion, protocolVersion}`; the hub checks the protocol is in its
-   supported range (else rejects with a clear error), upserts the machine, and marks it **online**.
-4. Agent sends `Heartbeat` every ~5 s with light session stats; hub updates `last_seen_at`.
-5. On socket close or missed heartbeats (≥ N intervals), hub marks the machine **offline** and
-   tears down routes; agent reconnects with exponential backoff + jitter (cap ~30 s).
+4. `connect` sends `Hello{…, instanceID, agentVersion, protocolVersion}`; the hub checks the protocol
+   is in its supported range (else rejects with a clear error), upserts the machine, and marks it
+   **online**. If the `instanceID` matches the previous connection, sessions stay `running`; a
+   different `instanceID` (session-host was restarted) triggers `MarkMachineSessionsLost`.
+5. `connect` sends `Heartbeat` every ~5 s with light session stats; hub updates `last_seen_at`.
+6. On socket close or missed heartbeats (≥ N intervals), hub marks the machine **offline** and
+   tears down routes; `connect` reconnects with exponential backoff + jitter (cap ~30 s).
 
 ### 5.3 Open / attach a terminal
 1. Browser opens `wss://hub/ws/term?session=<id|new>` (authenticated).
@@ -201,8 +226,7 @@ reconnect — while still giving every terminal its own independent, back-pressu
   the agent. Re-attach repeats §5.3 from step 3 — scrollback replay then live.
 - **Close** (explicit): hub sends control `CloseSession`; agent sends `SIGHUP`, reaps the process,
   emits `SessionExited{exitCode}`; hub marks the session `exited`.
-- **Lost**: if the agent process dies (in-process PTYs), its sessions are marked `lost` on
-  reconnect — an accepted trade-off of the in-process model (D6).
+- **Lost**: sessions are marked `lost` only when the **session-host**'s `instanceID` changes — i.e. when the session-host process itself dies (crash, OOM, SIGKILL) or the machine reboots and a new host starts with a fresh `instanceID`. A connect restart or `agent update` does **not** mark sessions lost because the session-host — and therefore the `instanceID` — keeps running. The hub's restart detection in `registry.Register` keys entirely on `instanceID` difference (D8).
 
 ---
 
@@ -275,10 +299,9 @@ distinct types from `transport.Snapshot`).
 ## 7. Persistence & the overview pipeline
 
 ### 7.1 Scrollback (G2)
-Each agent session owns a **bounded ring buffer** (default 256 KiB, configurable) of recent output.
-On attach, the agent writes the buffer to the data stream before going live, so a reconnecting
-browser repaints history instantly. The buffer is byte-oriented (raw terminal output incl. escape
-sequences) so replay is faithful; only the cap is enforced, oldest bytes dropped first.
+Each session owns a **bounded ring buffer** (default 256 KiB, configurable) of recent output, held in the **session-host's RAM**. On attach, the agent writes the buffer to the data stream before going live, so a reconnecting browser repaints history instantly. The buffer is byte-oriented (raw terminal output incl. escape sequences) so replay is faithful; only the cap is enforced, oldest bytes dropped first.
+
+Scrollback survives a `connect` restart automatically — the session-host's ring buffer keeps filling while connect is absent (the `readPump` writes to it continuously, independent of any attached client). Scrollback is **not** persisted to disk; a machine reboot or session-host death empties it — by design.
 
 ### 7.2 Screen state & snapshots (G4, M4)
 Rendering N full live terminals at once would overwhelm the browser, so the overview does **not**
@@ -310,8 +333,7 @@ output stream — and are only produced while someone is watching.
 
 ## 8. Data model
 
-SQLite on the hub. **Metadata and history only** — live PTY state lives in the agent and is never
-persisted. Timestamps are unix seconds.
+SQLite on the hub. **Metadata and history only** — live PTY state (scrollback, screen, PTYs) lives in the **session-host process RAM** and is never persisted to disk. The `instanceID` advertised in `Hello` is generated once by the session-host at startup and is stable for its lifetime; connect sources it via the local handshake. Timestamps are unix seconds.
 
 ```sql
 -- one row per enrolled agent
@@ -536,7 +558,10 @@ Constellate/
 │   │   ├── main.go                 # load config → wire internal/hub adapters → start servers
 │   │   └── VERSION                 # hub's semver, stamped into the binary at build
 │   └── agent/
-│       ├── main.go                 # load config → wire internal/agent → dial home
+│       ├── main.go                 # subcommand dispatch: connect · session-host · enroll · install · update …
+│       │                           #   cmdConnect: auto-spawns host if needed, dials hostclient, runs hubclient
+│       │                           #   cmdSessionHost: generates instanceID, owns Manager+PTYs, runs localhost server
+│       ├── spawn_linux.go          # [D8] spawnHostIfNeeded: setsid-spawns session-host when UDS is absent
 │       └── VERSION                 # agent's semver, stamped into the binary at build
 │
 ├── internal/
@@ -573,17 +598,27 @@ Constellate/
 │   │   │   └── snapshot/           # [M4] produce throttled screen snapshots
 │   │   └── adapter/
 │   │       ├── primary/
-│   │       │   └── hubclient/      # client.go (dial-home, reconnect/backoff, yamux client)
-│   │       │                       #   control.go (hub frames→use cases) · streams.go (data streams↔PTYs)
+│   │       │   ├── hubclient/      # client.go (dial-home, reconnect/backoff, yamux client)
+│   │       │   │                   #   control.go (hub frames→use cases) · streams.go (data streams↔PTYs)
+│   │       │   └── localhost/      # [D8] server.go — session-host UDS server (host-side primary adapter);
+│   │       │                       #   accepts one connect at a time (single-client lease), runs
+│   │       │                       #   transport.Server over UDS, dispatches local-control frames into
+│   │       │                       #   session.Manager, verifies peer UID via SO_PEERCRED (Linux),
+│   │       │                       #   socket is 0600 under a 0700 runtime dir
 │   │       └── secondary/
 │   │           ├── pty/            # pty.go · factory.go (creack/pty wrapper)
-│   │           └── vt/             # [M4] parser.go · screen.go (ANSI→grid)
+│   │           ├── vt/             # [M4] parser.go · screen.go (ANSI→grid)
+│   │           └── hostclient/     # [D8] client.go — connect-side UDS client; dials session-host,
+│   │                               #   performs HostHello/HostInfo handshake, sources instanceID,
+│   │                               #   implements hubclient.SessionManager by relaying over UDS
 │   │
 │   ├── transport/                  # ───── SHARED wire protocol (hub + agent import) ─────
 │   │   ├── frame.go                # control-frame envelope + type tags
 │   │   ├── messages.go             # Hello·Heartbeat·OpenSession·Resize·Close·Snapshot…
+│   │   ├── local.go                # [D8] local-protocol types: HostHello·HostInfo·ListSessions·LocalStat
 │   │   ├── codec.go                # NDJSON now; swappable for msgpack/proto
 │   │   ├── attach.go               # data-stream AttachHeader
+│   │   ├── protocol.go             # ProtocolVersion (hub wire) + LocalProtocolVersion (UDS local)
 │   │   └── mux.go                  # yamux server/client over a net.Conn
 │   │
 │   └── platform/                   # ───── SHARED cross-cutting infra ─────
@@ -610,14 +645,20 @@ Constellate/
 ├── deploy/                         # production deployment
 │   ├── hub.Dockerfile              # multi-stage → distroless (RELEASE image; reused by tests)
 │   ├── compose.yaml                # prod hub: container + Caddy (TLS)
-│   ├── systemd/                    # constellate-agent.service (agent = host binary)
+│   ├── agent-supervisor-entrypoint.sh  # [D8] Docker supervisor: runs connect in a loop (PID 1 = shell,
+│   │                               #   not connect) so killing connect leaves the setsid-spawned
+│   │                               #   session-host alive — used by the connect-restart test
+│   ├── systemd/
+│   │   ├── constellate-agent.service          # connect relay unit (Restart=always, Requires= host unit)
+│   │   └── constellate-session-host.service   # [D8] durable host unit (Restart=on-failure)
 │   └── caddy/Caddyfile             # TLS reverse proxy in front of the hub
 │
 ├── scripts/                        # dev-hub.sh · dev-agent.sh · gen-dev-certs.sh
 │
 ├── docs/                           # deep-dives (DESIGN.md stays canonical)
 │   ├── protocol.md · security.md   # wire-protocol spec · threat model
-│   └── adr/                        # 0001-dial-home · 0002-ws-yamux · 0003-in-process-pty
+│   ├── usage.agent.md              # per-machine setup guide (two-process model, systemd units, update story)
+│   └── design/                     # implementation plans (session-survival-plan.md)
 │
 ├── .github/workflows/              # ci.yaml · e2e.yaml · release.yaml
 │
@@ -628,9 +669,12 @@ Constellate/
     │   ├── e2e_test.go
     │   └── browser/                # Playwright specs
     └── docker/                     # multi-"machine": containers on a Docker network
-        ├── compose.test.yaml       # 1 hub + 2–3 agents + test-runner
-        ├── agent.test.Dockerfile   # agent binary + a real shell (alpine)
-        └── scenarios/              # topology · NAT isolation · restart-loses-sessions · reconnect
+        ├── compose.test.yaml               # 1 hub + 2–3 agents + test-runner
+        ├── compose.connect-restart.yaml    # [D8] connect-restart survival scenario
+        ├── agent.test.Dockerfile           # agent binary + a real shell (alpine)
+        ├── agent.supervisor.Dockerfile     # [D8] supervisor-mode agent image (PID 1 = shell)
+        ├── run.sh                          # main docker E2E (enrollment, dial-home, restart-loses-sessions)
+        └── run_connect_restart.sh          # [D8] kills only connect process, asserts sessions stay running
 ```
 
 **What M0 actually creates** (a small subset): `go.mod`, `Makefile`, `cmd/{hub,agent}/main.go`,
@@ -651,11 +695,14 @@ Two binaries; both take subcommands. The agent defaults to `connect`, the hub to
 
 | Command | M | Description |
 |---------|---|-------------|
-| `agent connect` | M0 | Dial home and serve — the long-running daemon mode. **Default.** Hub URL + auth from env/flags (dev token M0–M4, stored credential M5). |
-| `agent status` | M0 | Print local state: enrolled?, connected?, live session count. |
-| `agent version` | M0 | Print version + git commit. |
+| `agent connect` | M0 | Volatile relay: auto-spawns the session-host if not running, sources instanceID, dials home and relays hub commands. **Default.** |
+| `agent session-host` | D8 | Durable host: generates instanceID, owns PTYs + scrollback + vt + snapshots, listens on UDS. Not normally run directly — started by `connect` (auto-spawn or systemd). |
+| `agent status` | M0 | Print local state: enrolled?, machine id, hub URL. |
+| `agent version` | M0 | Print version + git commit + wire protocol version. |
 | `agent enroll --hub <url> --token <tok>` | M5 | One-time enrollment: register, store machine id + long-lived credential, then exit. |
 | `agent reset` | M5 | Remove the local id/credential — de-enrolls this machine. |
+| `agent install` | M5 | Install + start both systemd units (`constellate-session-host.service` and `constellate-agent.service`) with correct ordering. |
+| `agent update` | M5 | Download + verify latest release, replace binary, restart connect unit (session-host unit keeps running — sessions survive). |
 
 **`constellate-hub`** — built from `cmd/hub`, runs on the VPS:
 
@@ -766,6 +813,10 @@ id_file: "~/.constellate/agent-id"
 # hub_ca: ""                                   # PEM CA/cert to verify hub; empty = system roots
 default_shell: "/bin/bash"
 scrollback_bytes: 262144                        # ring buffer cap per session
+# runtime_dir: ""                              # dir for session-host UDS (host.sock); dir mode 0700,
+                                               # socket mode 0600; default: $XDG_RUNTIME_DIR/constellate
+                                               # if set, else ~/.constellate/run
+                                               # env override: CONSTELLATE_RUNTIME_DIR
 log:
   level: "info"                                 # debug | info | warn | error
   format: "text"                                # text | json
@@ -821,9 +872,12 @@ and a **test-runner** (Playwright + Go client). Agents sit on an **internal Dock
 reach only the hub, not each other**, mimicking machines behind NAT and proving the dial-home model
 (no inbound ports; the hub never connects in). Scenarios assert: enrollment/dial-home, a live shell
 through the container boundary, scrollback replay on re-attach, the overview across all "machines",
-and **kill an agent container → its sessions go `lost` → restart → it reconnects** (validating the
-D6 in-process-PTY trade-off). This tier is the executable form of the M0 acceptance check and grows
-with every milestone.
+and **kill an agent container → its sessions go `lost` → restart → it reconnects** (validating D8:
+when the session-host dies, sessions are correctly marked lost). A separate scenario (`run_connect_restart.sh`,
+`compose.connect-restart.yaml`) uses a supervisor-mode container to **kill only the connect process** while
+the session-host survives: asserts the hub never marks sessions `lost` and the instanceID is unchanged
+after reconnect — the end-to-end proof of D8. This tier is the executable form of the M0 acceptance
+check and grows with every milestone.
 
 ### CI — GitHub Actions
 - `ci.yaml` — lint + unit + integration + in-process E2E on every push/PR (fast gate).
@@ -847,9 +901,10 @@ is the single source for both the release image and the Dockerized tests.
 The agent spawns shells on the **host** it manages, so in production it runs as a host process,
 **not** a container — a containerized agent would only reach the container's own shell. It ships as
 a static, cross-compiled binary per OS/arch, attached to an `agent/vX.Y.Z` GitHub Release, installed
-on each machine and supervised by `deploy/systemd/constellate-agent.service` (launchd / Windows
-service later). The agent **is** containerized for the Dockerized topology tests — a test fixture,
-never a release artifact.
+on each machine via two systemd units — `constellate-session-host.service` (durable host, `Restart=on-failure`)
+and `constellate-agent.service` (volatile connect relay, `Restart=always`, `Requires=` the host unit) —
+written by `agent install` (D8). The agent **is** containerized for the Dockerized topology tests — a
+test fixture, never a release artifact.
 
 ### Make targets
 `make test` (unit + integration + in-proc) · `make test-e2e` (single-machine) · `make test-docker`
@@ -956,6 +1011,19 @@ acceptance check passes.
   (OSC 133 bash/zsh snippets) is documented in [`docs/shell-integration.md`]; without it, activity
   falls back to output-timing + the screen-tail heuristic. Decisions folded into §6/§7.2/§18.
 
+### D8 — Session-host / connect split (2026-06-18, supersedes D6) *(done)*
+
+Sessions survive an agent restart. The single-process agent is split into two roles sharing one static binary:
+
+- **`session-host`** (durable): generates the machine's `instanceID` once at startup; owns all PTYs, scrollback ring buffers, the vt emulator, and the snapshot producer; listens on a Unix domain socket (`$XDG_RUNTIME_DIR/constellate/host.sock`, dir `0700`, socket `0600`). Accepts exactly one connect client at a time (single-client lease) and verifies peer UID via SO_PEERCRED (Linux). Supervised by `constellate-session-host.service` (`Restart=on-failure`).
+- **`connect`** (volatile): dials the session-host UDS, performs the `HostHello`/`HostInfo` handshake (local protocol v2), sources the stable `instanceID`, then dials home to the hub and relays all hub commands and events. Restarting connect (by `agent update` or systemd) does not change the `instanceID` — the hub's `registry.Register` sees `restarted=false` and leaves sessions `running`. Supervised by `constellate-agent.service` (`Restart=always`, `Requires=constellate-session-host.service`).
+- **Auto-spawn** (non-systemd / dev): if the UDS is absent when connect starts, connect `setsid`-spawns the session-host as a detached process (own process group, stdio to a log file next to the socket) and polls until it answers (up to 10 s). `spawn_linux.go`, Linux-only.
+- **Local protocol** (`internal/transport/local.go`): reuses the existing NDJSON codec and yamux mux over the UDS. `LocalProtocolVersion = 2`. Message set: `HostHello` (connect→host), `HostInfo` (host→connect: instanceID + session list), `ListSessions`, `LocalStat` (host→connect: per-session activity for hub Heartbeat). Data streams use the existing `AttachHeader` + raw bytes.
+- **Hub-side impact**: zero code change. `registry.Register` already keys on `instanceID` difference for restart detection.
+- **Survival scope**: connect restart/update ✓ · network drop/hub restart ✓ · machine reboot ✗ (session-host dies with the OS) · session-host crash ✗ (new host = new instanceID = sessions correctly marked `lost`).
+- **Rejected alternatives**: tmux-backed PTYs (extra runtime dep; external process lifecycle outside Go); SCM_RIGHTS fd-passing (Linux-only, fragile, non-portable); keeping D6's in-process model (restart-drops-sessions trade-off, now unacceptable given the update UX).
+- **Test**: `test/docker/run_connect_restart.sh` + `compose.connect-restart.yaml` — supervisor-mode container kills only the connect PID; asserts hub never logs "process restart detected, marking running sessions lost" between the two agent-online events.
+
 ### Post-M7 — project delete
 - Closes the M3 deferral. `DELETE /api/projects/{id}` (session-gated like the rest of `/api/*`)
   removes a project. The use case **refuses with `409` (`projects.ErrHasSessions`)** when the
@@ -975,7 +1043,9 @@ acceptance check passes.
 ## 19. Glossary
 
 - **Hub** — the single public Go service brokering everything.
-- **Agent** — the per-machine Go binary that owns PTYs and dials home.
+- **Agent** — the per-machine Go binary that owns PTYs and dials home. Runs as two cooperating processes: the durable *session-host* and the volatile *connect relay* (D8).
+- **Session-host** — the durable agent process that owns PTYs, scrollback, and the `instanceID`. Survives connect restarts.
+- **Connect** — the volatile agent process that dials home to the hub and relays commands to the session-host over the local UDS protocol.
 - **Session** — one terminal (one PTY on the agent; metadata row on the hub).
 - **Project** — a named grouping of sessions bound to a machine + working dir; uniqueness is
   `(machine_id, path)`. A session may be project-less (ungrouped).
