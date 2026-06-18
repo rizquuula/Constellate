@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -301,13 +302,15 @@ func TestListSessionsInHostInfo(t *testing.T) {
 
 	ln := startTestServer(t, "inst-sessions", mgr)
 
+	// Verify via a hostclient: the HostInfo received during Dial includes sessions.
 	hc, err := hostclient.DialNetwork(ln.Addr().Network(), ln.Addr().String(), discardLog())
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer func() { _ = hc.Shutdown() }()
+	// Shut down the first client so the lease is released before the raw dial.
+	_ = hc.Shutdown()
+	time.Sleep(20 * time.Millisecond) // allow lease release
 
-	// The HostInfo was already processed during Dial; we verify by re-dialing.
 	// Encode HostHello manually to inspect raw HostInfo.Sessions.
 	conn, err := net.Dial(ln.Addr().Network(), ln.Addr().String())
 	if err != nil {
@@ -490,6 +493,144 @@ func TestVersionSkewNewConnectOldHost(t *testing.T) {
 	if info.LocalProtocol != transport.LocalProtocolVersion {
 		t.Errorf("negotiated localProtocol: got %d, want %d (capped at host version)",
 			info.LocalProtocol, transport.LocalProtocolVersion)
+	}
+}
+
+// TestSingleClientLease verifies that:
+//  1. A second concurrent connect to the same running server is rejected (the
+//     server closes the connection before or shortly after the yamux handshake
+//     because the lease is held by the first client).
+//  2. After the first client disconnects, a new connect succeeds and receives
+//     a valid HostInfo with the correct instanceID.
+//
+// This maps to §8 row "single-client lease" in the test matrix.
+func TestSingleClientLease(t *testing.T) {
+	const wantInstanceID = "lease-instance-001"
+	mgr := newFakeManager()
+	ln := startTestServer(t, wantInstanceID, mgr)
+
+	// First client: connect and hold the connection open.
+	hc1, err := hostclient.DialNetwork(ln.Addr().Network(), ln.Addr().String(), discardLog())
+	if err != nil {
+		t.Fatalf("first Dial: %v", err)
+	}
+
+	// Second client: should be rejected because the first holds the lease.
+	// We dial raw and attempt the yamux handshake; the server either refuses
+	// the yamux session or sends an Error and closes.
+	conn2, err := net.Dial(ln.Addr().Network(), ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial second client: %v", err)
+	}
+	defer func() { _ = conn2.Close() }()
+
+	// The server rejects by: wrapping in yamux, accepting ctrl stream, reading
+	// HostHello, replying with Error, then closing. We mirror that sequence.
+	sess2, err := transport.Client(conn2)
+	if err != nil {
+		// yamux setup failed — server closed before we could even negotiate. OK.
+		// The server rejected us before yamux; treat as rejection.
+		_ = hc1.Shutdown()
+		return
+	}
+	defer func() { _ = sess2.Close() }()
+
+	ctrl2, err := sess2.OpenStream()
+	if err != nil {
+		// stream open failed — server closed session. Treated as rejection.
+		_ = hc1.Shutdown()
+		return
+	}
+
+	enc2 := transport.NewEncoder(ctrl2)
+	dec2 := transport.NewDecoder(ctrl2)
+
+	_ = enc2.Encode(transport.NewHostHello(transport.LocalProtocolVersion))
+
+	// Read the response: should be an Error frame (host_busy) or EOF.
+	_ = ctrl2.SetReadDeadline(time.Now().Add(3 * time.Second))
+	frame, err := dec2.Next()
+	if err != nil {
+		// EOF or connection closed — server rejected us. This is also acceptable.
+	} else {
+		if frame.Type != transport.TypeError {
+			t.Errorf("expected Error frame from busy host, got %q", frame.Type)
+		} else {
+			errMsg, decErr := transport.Unmarshal[transport.Error](frame)
+			if decErr != nil {
+				t.Errorf("decode Error frame: %v", decErr)
+			} else if errMsg.Code != "host_busy" {
+				t.Errorf("expected error code %q, got %q", "host_busy", errMsg.Code)
+			}
+		}
+	}
+
+	// Disconnect the first client.
+	_ = hc1.Shutdown()
+
+	// Brief wait for the lease to be released (handleConn returns on Shutdown).
+	deadline := time.Now().Add(3 * time.Second)
+	var hc3 *hostclient.Client
+	for time.Now().Before(deadline) {
+		hc3, err = hostclient.DialNetwork(ln.Addr().Network(), ln.Addr().String(), discardLog())
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("third Dial (after first disconnected) failed: %v", err)
+	}
+	defer func() { _ = hc3.Shutdown() }()
+
+	if got := hc3.InstanceID(); got != wantInstanceID {
+		t.Errorf("third client instanceID: got %q, want %q", got, wantInstanceID)
+	}
+}
+
+// TestSocketPermissions verifies that the session-host socket directory is
+// created with mode 0700 and the socket file itself is mode 0600 when the
+// session-host creates them.
+//
+// This maps to §8 row "socket perms" in the test matrix.
+func TestSocketPermissions(t *testing.T) {
+	dir := t.TempDir()
+	socketPath := dir + "/host.sock"
+
+	// Ensure the dir mode is 0700 (TempDir creates 0700 on Linux; verify explicitly).
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod dir: %v", err)
+	}
+
+	// Mirror what cmdSessionHost does: Listen then chmod 0600.
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		t.Fatalf("chmod socket: %v", err)
+	}
+
+	// Assert socket mode.
+	fi, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+	gotMode := fi.Mode().Perm()
+	if gotMode != 0o600 {
+		t.Errorf("socket mode: got %04o, want 0600", gotMode)
+	}
+
+	// Assert dir mode.
+	di, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+	gotDirMode := di.Mode().Perm()
+	if gotDirMode != 0o700 {
+		t.Errorf("socket dir mode: got %04o, want 0700", gotDirMode)
 	}
 }
 

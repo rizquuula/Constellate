@@ -232,6 +232,10 @@ type Server struct {
 	snaps      SnapshotToggle // may be nil when no producer is wired
 	sink       *connectSink
 	log        *slog.Logger
+
+	// lease guards single-client enforcement. A value of 1 means a client is
+	// currently being served; 0 means the server is free.
+	lease sync.Mutex
 }
 
 // New creates a Server. instanceID must be the durable identity generated once
@@ -278,6 +282,36 @@ func (s *Server) Serve(ln net.Listener) error {
 // connect is the yamux client) and runs the control + data-stream loops.
 func (s *Server) handleConn(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
+
+	// Peer-credential check (Linux only): reject connections from a different uid.
+	if err := checkPeerCred(conn); err != nil {
+		s.log.Warn("localhost: rejected connection from wrong uid", "err", err)
+		return
+	}
+
+	// Single-client lease: only one connect is served at a time. TryLock returns
+	// false when another client holds the lease. In that case we reject the
+	// incoming connection with a clear Error frame before closing.
+	if !s.lease.TryLock() {
+		// Best-effort rejection: wrap conn in yamux, send an Error, then close.
+		// If yamux setup fails we just close — the remote will detect EOF.
+		if rejectSess, err := transport.Server(conn); err == nil {
+			if rejectCtrl, err := rejectSess.AcceptStream(); err == nil {
+				// Read the HostHello so connect receives the reply on its ctrl stream.
+				rejectDec := transport.NewDecoder(rejectCtrl)
+				rejectEnc := transport.NewEncoder(rejectCtrl)
+				if f, err := rejectDec.Next(); err == nil && f.Type == transport.TypeHostHello {
+					_ = rejectEnc.Encode(transport.NewError("", "host_busy",
+						"localhost: another connect client is already attached; try again after it disconnects"))
+				}
+				_ = rejectCtrl.Close()
+			}
+			_ = rejectSess.Close()
+		}
+		s.log.Warn("localhost: rejected second concurrent connect client (host busy)")
+		return
+	}
+	defer s.lease.Unlock()
 
 	// For the local UDS protocol the host acts as the yamux *server* (accepts
 	// streams) and connect acts as the yamux *client* (opens streams).

@@ -311,6 +311,13 @@ func cmdSessionHost(args []string) {
 		log.Error("session-host: listen on socket", "path", socketPath, "err", err)
 		os.Exit(1)
 	}
+	// Restrict the socket to the owning user (0600). The dir is already 0700
+	// (created above). This ensures only the service user can connect.
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		log.Error("session-host: chmod socket", "path", socketPath, "err", err)
+		_ = ln.Close()
+		os.Exit(1)
+	}
 
 	// Generate the durable instanceID for this host process lifetime.
 	instanceID := id.New()
@@ -600,19 +607,34 @@ func cmdReset(args []string) {
 	fmt.Println("reset done")
 }
 
-// unitServiceName is the systemd unit installed by `install`.
+// unitServiceName is the systemd unit for the connect relay, installed by `install`.
 const unitServiceName = "constellate-agent.service"
 
-// systemUnitPath is where a system-wide unit is written (requires root).
+// hostUnitServiceName is the systemd unit for the durable session-host, installed by `install`.
+const hostUnitServiceName = "constellate-session-host.service"
+
+// systemUnitPath is where a system-wide connect unit is written (requires root).
 const systemUnitPath = "/etc/systemd/system/" + unitServiceName
 
-// userUnitPath resolves the per-user unit path (~/.config/systemd/user/<unit>).
+// systemHostUnitPath is where a system-wide session-host unit is written (requires root).
+const systemHostUnitPath = "/etc/systemd/system/" + hostUnitServiceName
+
+// userUnitPath resolves the per-user connect unit path (~/.config/systemd/user/<unit>).
 func userUnitPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "systemd", "user", unitServiceName), nil
+}
+
+// userHostUnitPath resolves the per-user session-host unit path (~/.config/systemd/user/<unit>).
+func userHostUnitPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "systemd", "user", hostUnitServiceName), nil
 }
 
 // unitParams holds the values rendered into the systemd unit template.
@@ -623,8 +645,49 @@ type unitParams struct {
 	Rootless   bool   // when true, render a systemctl --user unit (no User= line, WantedBy=default.target)
 }
 
-// renderUnit renders a systemd service unit from p. It is pure (no I/O) so it
-// can be unit-tested without root or a running systemd.
+// renderHostUnit renders the durable session-host systemd unit. It is pure (no I/O).
+// The host unit uses Restart=on-failure (not always) because a host crash should not
+// loop endlessly — connect detects host death via Lost() and exits so systemd restarts
+// connect, which then re-spawns or re-attaches a new host.
+func renderHostUnit(p unitParams) string {
+	execLine := p.ExecBin + " session-host"
+	if p.ConfigPath != "" {
+		execLine += " --config " + p.ConfigPath
+	}
+	if p.Rootless {
+		return fmt.Sprintf(`[Unit]
+Description=Constellate session host (durable PTY owner)
+
+[Service]
+Type=simple
+ExecStart=%s
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+`, execLine)
+	}
+	return fmt.Sprintf(`[Unit]
+Description=Constellate session host (durable PTY owner)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%s
+ExecStart=%s
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+`, p.User, execLine)
+}
+
+// renderUnit renders the connect-relay systemd unit from p. The connect unit
+// declares Requires=+After= on the session-host unit so systemd starts the host
+// first. It is pure (no I/O) so it can be unit-tested without root or a running systemd.
 func renderUnit(p unitParams) string {
 	execLine := p.ExecBin + " connect"
 	if p.ConfigPath != "" {
@@ -632,7 +695,9 @@ func renderUnit(p unitParams) string {
 	}
 	if p.Rootless {
 		return fmt.Sprintf(`[Unit]
-Description=Constellate agent
+Description=Constellate agent (connect relay)
+Requires=%s
+After=%s
 
 [Service]
 Type=simple
@@ -642,12 +707,13 @@ RestartSec=3
 
 [Install]
 WantedBy=default.target
-`, execLine)
+`, hostUnitServiceName, hostUnitServiceName, execLine)
 	}
 	return fmt.Sprintf(`[Unit]
-Description=Constellate agent
-After=network-online.target
+Description=Constellate agent (connect relay)
+After=network-online.target %s
 Wants=network-online.target
+Requires=%s
 
 [Service]
 Type=simple
@@ -658,7 +724,7 @@ RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
-`, p.User, execLine)
+`, hostUnitServiceName, hostUnitServiceName, p.User, execLine)
 }
 
 func cmdInstall(args []string) {
@@ -721,21 +787,28 @@ func cmdInstall(args []string) {
 		}
 	}
 
-	var unitContent string
-	var writePath string
+	params := unitParams{ExecBin: execBin, ConfigPath: absConfig}
+	var connectWritePath string
+	var hostWritePath string
 	var runAs string
 
 	if *rootless {
-		// Rootless: user unit — no User= line, WantedBy=default.target.
+		// Rootless: user units — no User= line, WantedBy=default.target.
 		// --user <name> is ignored in this mode.
-		unitContent = renderUnit(unitParams{ExecBin: execBin, ConfigPath: absConfig, Rootless: true})
+		params.Rootless = true
 		p, err := userUnitPath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "install: resolve user unit path: %v\n", err)
 			os.Exit(1)
 		}
-		writePath = p
-		if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
+		connectWritePath = p
+		hp, err := userHostUnitPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "install: resolve user host unit path: %v\n", err)
+			os.Exit(1)
+		}
+		hostWritePath = hp
+		if err := os.MkdirAll(filepath.Dir(connectWritePath), 0o755); err != nil {
 			fmt.Fprintf(os.Stderr, "install: create systemd user dir: %v\n", err)
 			os.Exit(1)
 		}
@@ -746,19 +819,31 @@ func cmdInstall(args []string) {
 			fmt.Fprintln(os.Stderr, "install: could not determine a user to run as — pass --user")
 			os.Exit(1)
 		}
-		unitContent = renderUnit(unitParams{ExecBin: execBin, ConfigPath: absConfig, User: runAs})
-		writePath = systemUnitPath
+		params.User = runAs
+		connectWritePath = systemUnitPath
+		hostWritePath = systemHostUnitPath
 	}
 
-	if err := os.WriteFile(writePath, []byte(unitContent), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "install: write %s: %v\n", writePath, err)
+	// Write the session-host unit first (connect depends on it).
+	hostUnitContent := renderHostUnit(params)
+	if err := os.WriteFile(hostWritePath, []byte(hostUnitContent), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "install: write %s: %v\n", hostWritePath, err)
+		os.Exit(1)
+	}
+
+	// Write the connect unit.
+	connectUnitContent := renderUnit(params)
+	if err := os.WriteFile(connectWritePath, []byte(connectUnitContent), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "install: write %s: %v\n", connectWritePath, err)
 		os.Exit(1)
 	}
 
 	if *rootless {
-		fmt.Printf("wrote %s (rootless user service)\n", writePath)
+		fmt.Printf("wrote %s (rootless user service)\n", hostWritePath)
+		fmt.Printf("wrote %s (rootless user service)\n", connectWritePath)
 	} else {
-		fmt.Printf("wrote %s (User=%s)\n", writePath, runAs)
+		fmt.Printf("wrote %s (User=%s)\n", hostWritePath, runAs)
+		fmt.Printf("wrote %s (User=%s)\n", connectWritePath, runAs)
 	}
 
 	if err := runSystemctl(*rootless, "daemon-reload"); err != nil {
@@ -768,15 +853,24 @@ func cmdInstall(args []string) {
 
 	if *noStart {
 		if *rootless {
-			fmt.Printf("installed (not started). Start with: systemctl --user enable --now %s\n", unitServiceName)
+			fmt.Printf("installed (not started). Start with: systemctl --user enable --now %s\n", hostUnitServiceName)
+			fmt.Printf("  then: systemctl --user enable --now %s\n", unitServiceName)
 		} else {
-			fmt.Printf("installed (not started). Start with: systemctl enable --now %s\n", unitServiceName)
+			fmt.Printf("installed (not started). Start with: systemctl enable --now %s\n", hostUnitServiceName)
+			fmt.Printf("  then: systemctl enable --now %s\n", unitServiceName)
 		}
 		return
 	}
 
+	// Enable and start the host first, then connect (connect Requires= the host).
+	if err := runSystemctl(*rootless, "enable", "--now", hostUnitServiceName); err != nil {
+		fmt.Fprintf(os.Stderr, "install: systemctl enable --now %s: %v\n", hostUnitServiceName, err)
+		os.Exit(1)
+	}
+	fmt.Printf("started %s\n", hostUnitServiceName)
+
 	if err := runSystemctl(*rootless, "enable", "--now", unitServiceName); err != nil {
-		fmt.Fprintf(os.Stderr, "install: systemctl enable --now: %v\n", err)
+		fmt.Fprintf(os.Stderr, "install: systemctl enable --now %s: %v\n", unitServiceName, err)
 		os.Exit(1)
 	}
 	fmt.Printf("started %s\n", unitServiceName)

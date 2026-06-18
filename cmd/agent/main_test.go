@@ -5,6 +5,71 @@ import (
 	"testing"
 )
 
+func TestRenderHostUnit(t *testing.T) {
+	tests := []struct {
+		name     string
+		params   unitParams
+		rootless bool
+	}{
+		{
+			name:   "system with config",
+			params: unitParams{ExecBin: "/usr/local/bin/constellate-agent", ConfigPath: "/etc/constellate/agent.yaml", User: "agent"},
+		},
+		{
+			name:     "rootless without config",
+			params:   unitParams{ExecBin: "/home/bob/.local/bin/constellate-agent", Rootless: true},
+			rootless: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderHostUnit(tc.params)
+
+			// ExecStart must use session-host subcommand.
+			wantExec := tc.params.ExecBin + " session-host"
+			if tc.params.ConfigPath != "" {
+				wantExec += " --config " + tc.params.ConfigPath
+			}
+			if !strings.Contains(got, "ExecStart="+wantExec+"\n") {
+				t.Errorf("ExecStart missing:\nwant: %q\nin:\n%s", wantExec, got)
+			}
+
+			for _, want := range []string{
+				"Description=Constellate session host (durable PTY owner)",
+				"Type=simple",
+				"Restart=on-failure",
+				"RestartSec=3",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing directive %q in:\n%s", want, got)
+				}
+			}
+
+			// connect unit must NOT have Requires= on itself.
+			if strings.Contains(got, "Requires=") {
+				t.Errorf("host unit must not contain Requires=, got:\n%s", got)
+			}
+
+			if tc.rootless {
+				if strings.Contains(got, "User=") {
+					t.Errorf("rootless unit must not contain User=, got:\n%s", got)
+				}
+				if !strings.Contains(got, "WantedBy=default.target") {
+					t.Errorf("rootless unit missing WantedBy=default.target in:\n%s", got)
+				}
+			} else {
+				if !strings.Contains(got, "User="+tc.params.User+"\n") {
+					t.Errorf("missing User=%s in:\n%s", tc.params.User, got)
+				}
+				if !strings.Contains(got, "WantedBy=multi-user.target") {
+					t.Errorf("missing WantedBy=multi-user.target in:\n%s", got)
+				}
+			}
+		})
+	}
+}
+
 func TestRenderUnit(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -59,10 +124,12 @@ func TestRenderUnit(t *testing.T) {
 
 			// Directives always present regardless of mode.
 			for _, want := range []string{
-				"Description=Constellate agent",
+				"Description=Constellate agent (connect relay)",
 				"Type=simple",
 				"Restart=always",
 				"RestartSec=3",
+				"Requires=" + hostUnitServiceName,
+				hostUnitServiceName, // must appear somewhere in After= line
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("missing static directive %q in:\n%s", want, got)
