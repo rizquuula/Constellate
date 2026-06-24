@@ -87,9 +87,10 @@ func (s *connectSink) SendSnapshot(screen terminal.SessionScreen) error {
 		}
 		if s.enc != nil {
 			// Another call beat us (shouldn't happen — single producer); discard ours.
+			// Capture s.enc while still holding mu so the read is synchronized.
+			enc = s.enc
 			s.mu.Unlock()
 			_ = stream.Close()
-			enc = s.enc
 		} else {
 			s.stream = stream
 			s.enc = newEnc

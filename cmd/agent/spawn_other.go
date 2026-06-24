@@ -13,7 +13,7 @@ import (
 // spawnHostIfNeeded on non-Linux platforms cannot use setsid. It attempts to
 // connect to an already-running host; if none is listening it falls back to
 // inline spawning (the child will be in the same process group — acceptable for
-// dev use; Phase 3 adds the proper daemon path per platform).
+// dev use; a proper per-platform daemon path is not yet implemented).
 func spawnHostIfNeeded(socketPath, configPath string, log *slog.Logger) error {
 	if socketResponds(socketPath) {
 		return nil

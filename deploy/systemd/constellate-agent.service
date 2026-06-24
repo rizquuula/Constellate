@@ -6,6 +6,8 @@ Requires=constellate-session-host.service
 
 [Service]
 Type=simple
+# Replace YOUR_USER with the service account, or let `constellate-agent install`
+# generate a populated unit for you.
 User=YOUR_USER
 ExecStart=/usr/local/bin/constellate-agent connect
 Restart=always

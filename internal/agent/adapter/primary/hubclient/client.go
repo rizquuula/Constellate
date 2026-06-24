@@ -221,9 +221,10 @@ func (c *Client) SendSnapshot(s terminal.SessionScreen) error {
 		}
 		if c.snapEnc != nil {
 			// Another goroutine (shouldn't happen — single producer) beat us; discard ours.
+			// Capture c.snapEnc while still holding mu so the read is synchronized.
+			enc = c.snapEnc
 			c.mu.Unlock()
 			_ = stream.Close()
-			enc = c.snapEnc
 		} else {
 			c.snapStream = stream
 			c.snapEnc = newEnc
@@ -283,9 +284,10 @@ func (c *Client) SendRawSnapshot(s transport.Snapshot) error {
 			return nil
 		}
 		if c.snapEnc != nil {
+			// Capture c.snapEnc while still holding mu so the read is synchronized.
+			enc = c.snapEnc
 			c.mu.Unlock()
 			_ = stream.Close()
-			enc = c.snapEnc
 		} else {
 			c.snapStream = stream
 			c.snapEnc = newEnc

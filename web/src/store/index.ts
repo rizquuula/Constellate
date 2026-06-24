@@ -275,7 +275,10 @@ export const useStore = create<Store>((set, get) => ({
 
   closePane: (paneId) => {
     const [newRoot, nextFocusId] = closePane(get().paneRoot, paneId)
-    set({ paneRoot: newRoot, focusedPaneId: nextFocusId })
+    // Drop the pane's reload-counter entry so paneReloads doesn't accumulate
+    // stale keys for panes that no longer exist.
+    const { [paneId]: _removed, ...paneReloads } = get().paneReloads
+    set({ paneRoot: newRoot, focusedPaneId: nextFocusId, paneReloads })
   },
 
   // detachPane unbinds the session from a pane without removing the pane or

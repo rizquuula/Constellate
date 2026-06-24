@@ -296,7 +296,7 @@ func (c *Client) dispatch(frame transport.Frame) {
 		n.SessionExited(msg.SessionID, msg.ExitCode)
 
 	case transport.TypeHostInfo:
-		// ListSessions response; ignored in Phase 1 (no resync caller yet).
+		// ListSessions response; ignored for now (no resync caller yet).
 		c.log.Debug("hostclient: received HostInfo (ListSessions reply), ignoring")
 
 	case transport.TypeLocalStat:

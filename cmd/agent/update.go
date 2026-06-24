@@ -134,8 +134,12 @@ func cmdUpdate(args []string) {
 	// binary — which ENDS its live sessions (host restart -> new instanceID ->
 	// the hub marks those sessions lost). Skipped in --check mode (nothing was
 	// updated) and when --no-restart disabled restarts entirely.
-	if *restartHostFlag && *noRestartFlag {
-		fmt.Fprintf(os.Stderr, "update: --restart-host ignored because --no-restart was set\n")
+	if *restartHostFlag && (*noRestartFlag || *checkFlag) {
+		reason := "--no-restart was set"
+		if *checkFlag && !*noRestartFlag {
+			reason = "--check performs no update"
+		}
+		fmt.Fprintf(os.Stderr, "update: --restart-host ignored because %s\n", reason)
 	}
 	if shouldRestartHost(*checkFlag, *noRestartFlag, *restartHostFlag) {
 		fmt.Fprintf(os.Stderr, "update: restarting %s to adopt the new binary (this ends its live sessions)...\n", hostUnitServiceName)
