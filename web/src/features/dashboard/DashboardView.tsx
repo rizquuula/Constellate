@@ -341,6 +341,10 @@ export function DashboardView() {
       <div className="dashboard-scroll">
         <h1 className="sr-only">Dashboard</h1>
 
+        <p className="dashboard-fleet-prompt" aria-hidden="true">
+          <span className="dashboard-fleet-caret">❯</span> fleet status — {totals.machinesOnline}/{totals.machinesTotal} online, {totals.sessionsRunning} running
+        </p>
+
         <SummaryCards
           machinesOnline={totals.machinesOnline}
           machinesTotal={totals.machinesTotal}
