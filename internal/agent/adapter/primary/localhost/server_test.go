@@ -198,9 +198,22 @@ func TestInstanceIDStableAcrossReconnect(t *testing.T) {
 	_ = hc1.Shutdown()
 
 	// Second connection (simulates a connect restart with the same host).
-	hc2, err := hostclient.DialNetwork(netw, addr, discardLog())
-	if err != nil {
-		t.Fatalf("second Dial: %v", err)
+	// The host releases its single-client lease asynchronously — only once the
+	// first connection's handler goroutine observes the disconnect and unwinds.
+	// Under parallel load that lag can briefly outlast hc1.Shutdown(), so the
+	// redial races the lease release and is rejected with a "host_busy" Error.
+	// A real connect restart retries in exactly this window, so the test does too.
+	var hc2 *hostclient.Client
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		hc2, err = hostclient.DialNetwork(netw, addr, discardLog())
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("second Dial (after retrying past host_busy): %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	id2 := hc2.InstanceID()
 	_ = hc2.Shutdown()
