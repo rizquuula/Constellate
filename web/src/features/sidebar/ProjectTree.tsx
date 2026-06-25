@@ -87,11 +87,13 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
   const renameSession = useStore((s) => s.renameSession)
   const closeSession = useStore((s) => s.closeSession)
   const deleteSession = useStore((s) => s.deleteSession)
+  const setAutoRelaunch = useStore((s) => s.setAutoRelaunch)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [autoRelaunchError, setAutoRelaunchError] = useState<string | null>(null)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isRunning = session.status === 'running'
   // A running session can be closed (signals the agent); an already-closed
@@ -159,6 +161,19 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
     setConfirmAction(false)
     setActionError(null)
   }, [])
+
+  const handleAutoRelaunchToggle = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      e.stopPropagation()
+      setAutoRelaunchError(null)
+      try {
+        await setAutoRelaunch(session.id, e.target.checked)
+      } catch (err) {
+        setAutoRelaunchError(err instanceof Error ? err.message : 'Toggle failed')
+      }
+    },
+    [setAutoRelaunch, session.id],
+  )
 
   const setSidebarOpen = useStore((s) => s.setSidebarOpen)
 
@@ -244,6 +259,26 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
         </div>
       ) : (
         <div className="session-actions" onClick={(e) => e.stopPropagation()}>
+          {isRunning && (
+            <label
+              className="session-relaunch-toggle"
+              title="Auto-relaunch after restart — Reopen this session automatically (same folder, fresh shell) after the agent or machine restarts. Running processes are not restored."
+              aria-label="Auto-relaunch after restart"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                className="session-relaunch-checkbox"
+                checked={session.autoRelaunch ?? false}
+                onChange={handleAutoRelaunchToggle}
+                aria-label="Auto-relaunch after restart"
+              />
+              <span className="session-relaunch-icon" aria-hidden="true">↺</span>
+            </label>
+          )}
+          {autoRelaunchError && (
+            <span className="rename-error" role="alert" aria-live="assertive">{autoRelaunchError}</span>
+          )}
           {isRunning && (
             <button
               className="session-action-btn"

@@ -31,11 +31,13 @@ type SessionDTO struct {
 	ProjectID    string `json:"projectID"`
 	Title        string `json:"title"`
 	Shell        string `json:"shell"`
+	Cwd          string `json:"cwd"`
 	Status       string `json:"status"`
 	ExitCode     int    `json:"exitCode"`
 	CreatedAt    int64  `json:"createdAt"`
 	LastActiveAt int64  `json:"lastActiveAt"`
 	Activity     string `json:"activity"`
+	AutoRelaunch bool   `json:"autoRelaunch"`
 }
 
 func sessionToDTO(s session.Session) SessionDTO {
@@ -45,11 +47,13 @@ func sessionToDTO(s session.Session) SessionDTO {
 		ProjectID:    s.ProjectID(),
 		Title:        s.Title(),
 		Shell:        s.Shell(),
+		Cwd:          s.Cwd(),
 		Status:       string(s.Status()),
 		ExitCode:     s.ExitCode(),
 		CreatedAt:    s.CreatedAt(),
 		LastActiveAt: s.LastActiveAt(),
 		Activity:     s.Activity(),
+		AutoRelaunch: s.AutoRelaunch(),
 	}
 }
 

@@ -70,6 +70,27 @@ func (s *Scrollback) Oldest() int64 {
 	return v
 }
 
+// Snapshot returns a copy of all currently retained bytes under the lock.
+// It is safe to call concurrently. The returned slice is a fresh allocation.
+func (s *Scrollback) Snapshot() []byte {
+	s.mu.Lock()
+	out := append([]byte(nil), s.buf...)
+	s.mu.Unlock()
+	return out
+}
+
+// NewScrollbackWithData creates a Scrollback pre-seeded with data so that
+// ReadFrom(Oldest(), …) replays the preloaded bytes first.
+// max <= 0 defaults to 256 KiB. If data exceeds max, only the last max bytes
+// are kept (matching the overflow semantics of Write).
+func NewScrollbackWithData(max int, data []byte) *Scrollback {
+	sb := NewScrollback(max)
+	if len(data) > 0 {
+		sb.Write(data)
+	}
+	return sb
+}
+
 // ReadFrom reads data starting at cursor, blocking until new data is available
 // or done is closed. Returns (data, nextCursor, ok).
 // ok=false means the buffer is closed and no more data will arrive.

@@ -8,38 +8,44 @@ type Session struct {
 	machineID    string
 	title        string
 	shell        string
+	cwd          string
 	status       Status
 	exitCode     int
+	autoRelaunch bool
 	createdAt    int64
 	lastActiveAt int64
 	activity     string
 }
 
 // New creates a Session at open time. status is StatusRunning; lastActiveAt equals createdAt.
-func New(id, machineID, projectID, title, shell string, createdAt int64) Session {
+func New(id, machineID, projectID, title, shell, cwd string, createdAt int64) Session {
 	return Session{
 		id:           id,
 		projectID:    projectID,
 		machineID:    machineID,
 		title:        title,
 		shell:        shell,
+		cwd:          cwd,
 		status:       StatusRunning,
 		exitCode:     0,
+		autoRelaunch: false,
 		createdAt:    createdAt,
 		lastActiveAt: createdAt,
 	}
 }
 
 // Rehydrate reconstructs a Session from a persisted row.
-func Rehydrate(id, projectID, machineID, title, shell string, status Status, exitCode int, createdAt, lastActiveAt int64) Session {
+func Rehydrate(id, projectID, machineID, title, shell, cwd string, status Status, exitCode int, autoRelaunch bool, createdAt, lastActiveAt int64) Session {
 	return Session{
 		id:           id,
 		projectID:    projectID,
 		machineID:    machineID,
 		title:        title,
 		shell:        shell,
+		cwd:          cwd,
 		status:       status,
 		exitCode:     exitCode,
+		autoRelaunch: autoRelaunch,
 		createdAt:    createdAt,
 		lastActiveAt: lastActiveAt,
 	}
@@ -50,8 +56,10 @@ func (s Session) ProjectID() string    { return s.projectID }
 func (s Session) MachineID() string    { return s.machineID }
 func (s Session) Title() string        { return s.title }
 func (s Session) Shell() string        { return s.shell }
+func (s Session) Cwd() string          { return s.cwd }
 func (s Session) Status() Status       { return s.status }
 func (s Session) ExitCode() int        { return s.exitCode }
+func (s Session) AutoRelaunch() bool   { return s.autoRelaunch }
 func (s Session) CreatedAt() int64     { return s.createdAt }
 func (s Session) LastActiveAt() int64  { return s.lastActiveAt }
 func (s Session) Activity() string     { return s.activity }
@@ -81,4 +89,9 @@ func (s *Session) SetTitle(t string) {
 // SetActivity updates the session activity state.
 func (s *Session) SetActivity(a string) {
 	s.activity = a
+}
+
+// SetAutoRelaunch updates whether this session should be relaunched after agent restart.
+func (s *Session) SetAutoRelaunch(v bool) {
+	s.autoRelaunch = v
 }

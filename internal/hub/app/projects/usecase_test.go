@@ -196,7 +196,7 @@ func TestDelete_RefusedWhenProjectHasSessions(t *testing.T) {
 	}
 
 	// Attach a session to the project.
-	s := session.New("s1", "m1", p.ID(), "", "", 1000)
+	s := session.New("s1", "m1", p.ID(), "", "", "", 1000)
 	if err := sessStore.Create(context.Background(), s); err != nil {
 		t.Fatalf("session create: %v", err)
 	}

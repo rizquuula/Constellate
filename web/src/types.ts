@@ -34,6 +34,8 @@ export interface Session {
   createdAt: number
   lastActiveAt: number
   activity: string
+  cwd: string
+  autoRelaunch: boolean
 }
 
 export interface DashboardTotals {

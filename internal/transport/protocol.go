@@ -18,15 +18,18 @@ const LocalProtocolVersion = 2
 //	    addition is backward compatible.
 //	4 — adds Heartbeat.metrics (host CPU/RAM; additive, older peers ignore it).
 //	    The supported window is now [1,4]; backward compatible.
+//	5 — adds OpenSession.Revive for restart auto-relaunch (hub hint; additive,
+//	    older agents ignore the unknown field via JSON omitempty semantics).
+//	    The supported window is now [1,5]; backward compatible.
 //
 // The snapshot additions are backward compatible: a v1 agent never opens a
 // snapshot stream and ignores EnableSnaps, and a v1 hub never sends EnableSnaps,
 // so a mixed v1/v2 pair interoperates (just without the overview feed).
-const ProtocolVersion = 4
+const ProtocolVersion = 5
 
 const (
 	MinSupportedProtocol = 1
-	MaxSupportedProtocol = 4
+	MaxSupportedProtocol = 5
 )
 
 func ProtocolSupported(v int) bool {

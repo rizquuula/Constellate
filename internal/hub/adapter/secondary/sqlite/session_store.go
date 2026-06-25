@@ -34,12 +34,20 @@ func (s *SessionStore) Create(ctx context.Context, ss session.Session) error {
 	if ss.Shell() != "" {
 		shell = sql.NullString{String: ss.Shell(), Valid: true}
 	}
+	var cwd sql.NullString
+	if ss.Cwd() != "" {
+		cwd = sql.NullString{String: ss.Cwd(), Valid: true}
+	}
+	autoRelaunch := 0
+	if ss.AutoRelaunch() {
+		autoRelaunch = 1
+	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO sessions (id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at)
-		VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+		INSERT INTO sessions (id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
 	`,
-		ss.ID(), projectID, ss.MachineID(), title, shell, string(ss.Status()),
+		ss.ID(), projectID, ss.MachineID(), title, shell, cwd, autoRelaunch, string(ss.Status()),
 		ss.CreatedAt(), ss.LastActiveAt(),
 	)
 	if err != nil {
@@ -52,7 +60,7 @@ func (s *SessionStore) Create(ctx context.Context, ss session.Session) error {
 // Returns session.ErrNotFound (wrapped) if no row matches.
 func (s *SessionStore) ByID(ctx context.Context, id string) (session.Session, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at, activity
+		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity
 		FROM sessions WHERE id = ?
 	`, id)
 	ss, err := scanSession(row)
@@ -68,7 +76,7 @@ func (s *SessionStore) ByID(ctx context.Context, id string) (session.Session, er
 // List returns all session records.
 func (s *SessionStore) List(ctx context.Context) ([]session.Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at, activity
+		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity
 		FROM sessions
 	`)
 	if err != nil {
@@ -82,7 +90,7 @@ func (s *SessionStore) List(ctx context.Context) ([]session.Session, error) {
 // ListByMachine returns all sessions for the given machine.
 func (s *SessionStore) ListByMachine(ctx context.Context, machineID string) ([]session.Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, status, exit_code, created_at, last_active_at, activity
+		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity
 		FROM sessions WHERE machine_id = ?
 	`, machineID)
 	if err != nil {
@@ -93,14 +101,66 @@ func (s *SessionStore) ListByMachine(ctx context.Context, machineID string) ([]s
 	return collectSessions(rows)
 }
 
-// MarkRunningLost bulk-marks all running sessions for a machine as lost.
+// AutoRelaunchSessions returns running sessions for the given machine that have
+// auto_relaunch=1. Used during restart reconciliation.
+func (s *SessionStore) AutoRelaunchSessions(ctx context.Context, machineID string) ([]session.Session, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity
+		FROM sessions WHERE machine_id = ? AND status = ? AND auto_relaunch = 1
+	`, machineID, string(session.StatusRunning))
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: auto-relaunch sessions for machine %q: %w", machineID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return collectSessions(rows)
+}
+
+// MarkRunningLost bulk-marks all running sessions (with auto_relaunch=0) for a machine as lost.
+// Sessions with auto_relaunch=1 are handled separately by the relaunch path.
 func (s *SessionStore) MarkRunningLost(ctx context.Context, machineID string, ts int64) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE sessions SET status = ?, last_active_at = ?
-		WHERE machine_id = ? AND status = ?
+		WHERE machine_id = ? AND status = ? AND auto_relaunch = 0
 	`, string(session.StatusLost), ts, machineID, string(session.StatusRunning))
 	if err != nil {
 		return fmt.Errorf("sqlite: mark running lost for machine %q: %w", machineID, err)
+	}
+	return nil
+}
+
+// SetRunning sets a single session's status back to running (used after a successful relaunch).
+func (s *SessionStore) SetRunning(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET status = ? WHERE id = ?
+	`, string(session.StatusRunning), id)
+	if err != nil {
+		return fmt.Errorf("sqlite: set running %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: set running %q: %w", id, session.ErrNotFound)
+	}
+	return nil
+}
+
+// SetLost marks a single session as lost (used for failed relaunch attempts).
+func (s *SessionStore) SetLost(ctx context.Context, id string, ts int64) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET status = ?, last_active_at = ? WHERE id = ?
+	`, string(session.StatusLost), ts, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: set lost %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: set lost %q: %w", id, session.ErrNotFound)
 	}
 	return nil
 }
@@ -119,6 +179,29 @@ func (s *SessionStore) SetExited(ctx context.Context, id string, exitCode int, t
 	}
 	if n == 0 {
 		return fmt.Errorf("sqlite: set exited %q: %w", id, session.ErrNotFound)
+	}
+	return nil
+}
+
+// SetAutoRelaunch updates the auto_relaunch flag for a session.
+// Returns session.ErrNotFound (wrapped) if no row matches.
+func (s *SessionStore) SetAutoRelaunch(ctx context.Context, id string, v bool) error {
+	val := 0
+	if v {
+		val = 1
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET auto_relaunch = ? WHERE id = ?
+	`, val, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: set auto_relaunch %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: set auto_relaunch %q: %w", id, session.ErrNotFound)
 	}
 	return nil
 }
@@ -228,12 +311,14 @@ func scanSession(s scanner) (session.Session, error) {
 		projectID     sql.NullString
 		title         sql.NullString
 		shell         sql.NullString
+		cwd           sql.NullString
+		autoRelaunch  int
 		exitCode      sql.NullInt64
 		lastActiveAt  sql.NullInt64
 		createdAt     int64
 		activity      sql.NullString
 	)
-	if err := s.Scan(&id, &projectID, &machineID, &title, &shell, &statusStr, &exitCode, &createdAt, &lastActiveAt, &activity); err != nil {
+	if err := s.Scan(&id, &projectID, &machineID, &title, &shell, &cwd, &autoRelaunch, &statusStr, &exitCode, &createdAt, &lastActiveAt, &activity); err != nil {
 		return session.Session{}, err
 	}
 	var code int
@@ -250,8 +335,10 @@ func scanSession(s scanner) (session.Session, error) {
 		machineID,
 		title.String,
 		shell.String,
+		cwd.String,
 		session.Status(statusStr),
 		code,
+		autoRelaunch != 0,
 		createdAt,
 		lat,
 	)

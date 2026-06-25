@@ -53,11 +53,11 @@ func newMachine(id, name string) machine.Machine {
 }
 
 func newSession(id, machineID, projectID string, st session.Status) session.Session {
-	return session.Rehydrate(id, projectID, machineID, id+"-title", "/bin/sh", st, 0, 1000, 1001)
+	return session.Rehydrate(id, projectID, machineID, id+"-title", "/bin/sh", "", st, 0, false, 1000, 1001)
 }
 
 func newSessionWithActivity(id, machineID string, st session.Status, activity string) session.Session {
-	s := session.Rehydrate(id, "", machineID, id+"-title", "/bin/sh", st, 0, 1000, 1001)
+	s := session.Rehydrate(id, "", machineID, id+"-title", "/bin/sh", "", st, 0, false, 1000, 1001)
 	s.SetActivity(activity)
 	return s
 }

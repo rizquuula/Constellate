@@ -63,7 +63,7 @@ func (u *UseCase) Open(ctx context.Context, in OpenInput) (session.Session, erro
 	}
 
 	id := u.newID()
-	pid, err := u.gateway.OpenSession(ctx, in.MachineID, id, in.Cwd, in.Shell, cols, rows, in.CreateDir)
+	pid, err := u.gateway.OpenSession(ctx, in.MachineID, id, in.Cwd, in.Shell, cols, rows, in.CreateDir, false)
 	if err != nil {
 		return session.Session{}, err
 	}
@@ -74,7 +74,7 @@ func (u *UseCase) Open(ctx context.Context, in OpenInput) (session.Session, erro
 	}
 
 	now := u.clock.Now()
-	s := session.New(id, in.MachineID, in.ProjectID, title, in.Shell, now)
+	s := session.New(id, in.MachineID, in.ProjectID, title, in.Shell, in.Cwd, now)
 	if err := u.store.Create(ctx, s); err != nil {
 		_ = u.gateway.CloseSession(ctx, in.MachineID, id)
 		return session.Session{}, err
@@ -138,10 +138,50 @@ func (u *UseCase) MarkExited(ctx context.Context, id string, exitCode int) error
 	return u.store.SetExited(ctx, id, exitCode, u.clock.Now())
 }
 
-// MarkMachineSessionsLost bulk-marks all running sessions for a machine as lost.
-// Called when a process restart is detected (new instanceID on Hello).
-func (u *UseCase) MarkMachineSessionsLost(ctx context.Context, machineID string) error {
-	return u.store.MarkRunningLost(ctx, machineID, u.clock.Now())
+// ReconcileMachineRestart handles a detected agent process restart (new instanceID on Hello).
+// Sessions with auto_relaunch=true are re-opened on the agent (same session ID, preserving scrollback).
+// Sessions with auto_relaunch=false are marked lost, as before.
+// Idempotency: the registry only returns restarted=true once per instanceID change, so this
+// method is called at most once per actual restart event.
+// Satisfies wsagent.SessionEvents.
+func (u *UseCase) ReconcileMachineRestart(ctx context.Context, machineID string) error {
+	ts := u.clock.Now()
+
+	revivals, err := u.store.AutoRelaunchSessions(ctx, machineID)
+	if err != nil {
+		u.log.Error("sessions: ReconcileMachineRestart: fetch auto-relaunch sessions failed",
+			"machineID", machineID, "err", err)
+		// Fall back: mark all running sessions lost so nothing is silently orphaned.
+		return u.store.MarkRunningLost(ctx, machineID, ts)
+	}
+
+	for _, s := range revivals {
+		pid, rerr := u.gateway.OpenSession(ctx, machineID, s.ID(), s.Cwd(), s.Shell(), 80, 24, false, true)
+		if rerr != nil {
+			u.log.Warn("sessions: relaunch failed, marking session lost",
+				"sessionID", s.ID(), "machineID", machineID, "err", rerr)
+			if lerr := u.store.SetLost(ctx, s.ID(), ts); lerr != nil {
+				u.log.Error("sessions: SetLost after failed relaunch failed",
+					"sessionID", s.ID(), "err", lerr)
+			}
+			continue
+		}
+		if serr := u.store.SetRunning(ctx, s.ID()); serr != nil {
+			u.log.Warn("sessions: SetRunning after relaunch failed", "sessionID", s.ID(), "err", serr)
+		}
+		_ = u.audit.Record(ctx, audit.ActionRelaunch, machineID, s.ID(), "")
+		u.log.Info("sessions: session relaunched after restart",
+			"sessionID", s.ID(), "machineID", machineID, "pid", pid)
+	}
+
+	// Mark remaining running sessions (auto_relaunch=false) as lost.
+	return u.store.MarkRunningLost(ctx, machineID, ts)
+}
+
+// SetAutoRelaunch enables or disables auto-relaunch for a session.
+// Returns session.ErrNotFound if no session with the given id exists.
+func (u *UseCase) SetAutoRelaunch(ctx context.Context, id string, v bool) error {
+	return u.store.SetAutoRelaunch(ctx, id, v)
 }
 
 // Rename updates the title of a session. Returns session.ErrNotFound if no

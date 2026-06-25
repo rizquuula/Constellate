@@ -140,7 +140,7 @@ func (n *fakeNotifier) wait(t *testing.T, timeout time.Duration) exitCall {
 func newTestManager(pty *fakePTY) (*Manager, *fakeNotifier) {
 	factory := &fakeFactory{pty: pty}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m := NewManager(factory, 64*1024, log)
+	m := NewManager(factory, 64*1024, log, nil) // nil archive = persistence disabled
 	notifier := newFakeNotifier()
 	m.SetNotifier(notifier)
 	return m, notifier
@@ -599,7 +599,7 @@ func TestManagerScreenCreatedOnOpen(t *testing.T) {
 	fake := newFakePTY(10)
 	factory := &fakeFactory{pty: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m := NewManager(factory, 64*1024, log)
+	m := NewManager(factory, 64*1024, log, nil)
 
 	scr := &fakeScreen{rev: 7, screen: terminal.Screen{Cols: 80, Rows: 24}}
 	m.SetScreenFactory(&fakeScreenFactory{screen: scr})
@@ -627,7 +627,7 @@ func TestManagerReadPumpFeedsScreen(t *testing.T) {
 	fake := newFakePTY(11)
 	factory := &fakeFactory{pty: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m := NewManager(factory, 64*1024, log)
+	m := NewManager(factory, 64*1024, log, nil)
 
 	scr := &fakeScreen{}
 	m.SetScreenFactory(&fakeScreenFactory{screen: scr})
@@ -671,7 +671,7 @@ func TestManagerResizePropagatesScreen(t *testing.T) {
 	fake := newFakePTY(12)
 	factory := &fakeFactory{pty: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m := NewManager(factory, 64*1024, log)
+	m := NewManager(factory, 64*1024, log, nil)
 
 	scr := &fakeScreen{}
 	m.SetScreenFactory(&fakeScreenFactory{screen: scr})
@@ -720,7 +720,7 @@ func TestManagerActivities(t *testing.T) {
 	fake := newFakePTY(20)
 	factory := &fakeFactory{pty: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m := NewManager(factory, 64*1024, log)
+	m := NewManager(factory, 64*1024, log, nil)
 
 	scr := &fakeActivityScreen{
 		promptState: terminal.PromptUnknown,

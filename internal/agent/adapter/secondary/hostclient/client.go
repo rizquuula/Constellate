@@ -349,7 +349,7 @@ func (c *Client) Open(sessionID string, spec session.PTYSpec) (int, error) {
 	c.mu.Unlock()
 
 	if err := c.sendControl(transport.NewOpenSession(
-		sessionID, spec.Cwd, spec.Shell, spec.Cols, spec.Rows, spec.CreateDir,
+		sessionID, spec.Cwd, spec.Shell, spec.Cols, spec.Rows, spec.CreateDir, false,
 	)); err != nil {
 		c.mu.Lock()
 		c.pendingOpen = nil

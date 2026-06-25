@@ -8,6 +8,7 @@ import {
   createProject as apiCreateProject,
   deleteProject as apiDeleteProject,
   renameSession as apiRenameSession,
+  setAutoRelaunch as apiSetAutoRelaunch,
   closeSession as apiCloseSession,
   deleteSession as apiDeleteSession,
   getDashboard,
@@ -131,6 +132,7 @@ interface Store {
   createProject: (input: { machineID: string; name: string; path: string; color?: string }) => Promise<Project>
   deleteProject: (id: string) => Promise<void>
   renameSession: (id: string, title: string) => Promise<void>
+  setAutoRelaunch: (id: string, autoRelaunch: boolean) => Promise<void>
   closeSession: (id: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
 
@@ -240,6 +242,22 @@ export const useStore = create<Store>((set, get) => ({
     await apiRenameSession(id, title)
     const sessions = await listSessions()
     set({ sessions })
+  },
+
+  setAutoRelaunch: async (id, autoRelaunch) => {
+    // Optimistic update: flip the flag immediately so the UI responds at once.
+    set((s) => ({
+      sessions: s.sessions.map((x) => (x.id === id ? { ...x, autoRelaunch } : x)),
+    }))
+    try {
+      await apiSetAutoRelaunch(id, autoRelaunch)
+    } catch (err) {
+      // Revert on failure.
+      set((s) => ({
+        sessions: s.sessions.map((x) => (x.id === id ? { ...x, autoRelaunch: !autoRelaunch } : x)),
+      }))
+      throw err
+    }
   },
 
   closeSession: async (id) => {

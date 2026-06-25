@@ -13,16 +13,20 @@ type SessionStore interface {
 	ByID(ctx context.Context, id string) (session.Session, error)
 	List(ctx context.Context) ([]session.Session, error)
 	ListByMachine(ctx context.Context, machineID string) ([]session.Session, error)
+	AutoRelaunchSessions(ctx context.Context, machineID string) ([]session.Session, error)
 	SetExited(ctx context.Context, id string, exitCode int, ts int64) error
 	MarkRunningLost(ctx context.Context, machineID string, ts int64) error
+	SetRunning(ctx context.Context, id string) error
+	SetLost(ctx context.Context, id string, ts int64) error
 	SetTitle(ctx context.Context, id, title string) error
+	SetAutoRelaunch(ctx context.Context, id string, v bool) error
 	SetActivity(ctx context.Context, id, activity string, lastActiveAt int64) error
 	Delete(ctx context.Context, id string) error
 }
 
 // AgentGateway is the outbound port for controlling agent PTY sessions.
 type AgentGateway interface {
-	OpenSession(ctx context.Context, machineID, sessionID, cwd, shell string, cols, rows int, createDir bool) (pid int, err error)
+	OpenSession(ctx context.Context, machineID, sessionID, cwd, shell string, cols, rows int, createDir, revive bool) (pid int, err error)
 	CloseSession(ctx context.Context, machineID, sessionID string) error
 }
 

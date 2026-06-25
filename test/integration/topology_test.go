@@ -30,9 +30,9 @@ import (
 // noopEvents satisfies wsagent.SessionEvents for tests that don't exercise session lifecycle.
 type noopEvents struct{}
 
-func (noopEvents) MarkExited(_ context.Context, _ string, _ int) error            { return nil }
-func (noopEvents) MarkMachineSessionsLost(_ context.Context, _ string) error      { return nil }
-func (noopEvents) RecordActivity(_ context.Context, _, _ string) error            { return nil }
+func (noopEvents) MarkExited(_ context.Context, _ string, _ int) error           { return nil }
+func (noopEvents) ReconcileMachineRestart(_ context.Context, _ string) error     { return nil }
+func (noopEvents) RecordActivity(_ context.Context, _, _ string) error           { return nil }
 
 // stubSessionService satisfies httpapi.SessionService for tests that don't exercise sessions.
 type stubSessionService struct{}
@@ -46,9 +46,10 @@ func (stubSessionService) List(_ context.Context) ([]session.Session, error) {
 func (stubSessionService) ListByMachine(_ context.Context, _ string) ([]session.Session, error) {
 	return []session.Session{}, nil
 }
-func (stubSessionService) Close(_ context.Context, _ string) error     { return nil }
-func (stubSessionService) Delete(_ context.Context, _ string) error    { return nil }
-func (stubSessionService) Rename(_ context.Context, _, _ string) error { return nil }
+func (stubSessionService) Close(_ context.Context, _ string) error                    { return nil }
+func (stubSessionService) Delete(_ context.Context, _ string) error                   { return nil }
+func (stubSessionService) Rename(_ context.Context, _, _ string) error                { return nil }
+func (stubSessionService) SetAutoRelaunch(_ context.Context, _ string, _ bool) error  { return nil }
 
 // stubProjectService satisfies httpapi.ProjectService for tests that don't exercise projects.
 type stubProjectService struct{}

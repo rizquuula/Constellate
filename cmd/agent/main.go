@@ -30,6 +30,7 @@ import (
 	"github.com/rizquuula/Constellate/internal/agent/adapter/primary/localhost"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/hostclient"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/pty"
+	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/scrollbackfile"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/sysmetrics"
 	"github.com/rizquuula/Constellate/internal/agent/adapter/secondary/vt"
 	"github.com/rizquuula/Constellate/internal/agent/app/session"
@@ -322,7 +323,15 @@ func cmdSessionHost(args []string) {
 	// Generate the durable instanceID for this host process lifetime.
 	instanceID := id.New()
 
-	mgr := session.NewManager(pty.Factory{}, cfg.ScrollbackBytes, log)
+	// Build the scrollback archive if persistence is enabled.
+	var archive session.ScrollbackArchive
+	if cfg.IsPersistScrollback() {
+		sbDir := cfg.ScrollbackDirPath()
+		archive = scrollbackfile.New(sbDir, cfg.ScrollbackCapBytes())
+		log.Info("session-host: scrollback persistence enabled", "dir", sbDir, "cap", cfg.ScrollbackCapBytes())
+	}
+
+	mgr := session.NewManager(pty.Factory{}, cfg.ScrollbackBytes, log, archive)
 	mgr.SetScreenFactory(vtScreenFactory{})
 
 	srv := localhost.New(instanceID, &managerAdapter{mgr}, log)
@@ -354,6 +363,13 @@ func cmdSessionHost(args []string) {
 	}
 
 	_ = ln.Close()
+
+	// Flush all session scrollbacks before exit so the last bytes survive a
+	// graceful shutdown (SIGTERM from systemd / WSL). Best-effort: bounded by
+	// the time it takes to write each snapshot.
+	log.Info("session-host: flushing scrollbacks before shutdown")
+	mgr.FlushAll()
+
 	mgr.Shutdown()
 	log.Info("session-host: shut down")
 }

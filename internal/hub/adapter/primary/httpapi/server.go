@@ -60,7 +60,7 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	mux.HandleFunc("GET /api/machines/{id}/sessions", s.handleListSessionsByMachine)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleCloseSession)
-	mux.HandleFunc("PATCH /api/sessions/{id}", s.handleRenameSession)
+	mux.HandleFunc("PATCH /api/sessions/{id}", s.handlePatchSession)
 	mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)

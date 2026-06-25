@@ -93,6 +93,12 @@ type OpenSession struct {
 	// before starting the shell. Additive/optional field — older agents ignore
 	// it and report cwd_not_found, so no protocol bump is required.
 	CreateDir bool `json:"createDir,omitempty"`
+	// Revive signals that this open is a restart-revival: the hub is
+	// re-opening a session that was running before an agent process restart.
+	// The agent already replays scrollback on any Open with a known sessionID
+	// (Phase-1 behaviour); this flag is an intent/audit hint. Additive —
+	// agents on protocol ≤4 ignore it via JSON omitempty on their decoders.
+	Revive bool `json:"revive,omitempty"`
 }
 
 // Resize instructs the agent to resize an existing session's PTY.
@@ -174,7 +180,7 @@ func NewSessionExited(sessionID string, exitCode int) SessionExited {
 }
 
 // NewOpenSession constructs an OpenSession message with the Type field pre-set.
-func NewOpenSession(sessionID, cwd, shell string, cols, rows int, createDir bool) OpenSession {
+func NewOpenSession(sessionID, cwd, shell string, cols, rows int, createDir, revive bool) OpenSession {
 	return OpenSession{
 		Type:      TypeOpenSession,
 		SessionID: sessionID,
@@ -183,6 +189,7 @@ func NewOpenSession(sessionID, cwd, shell string, cols, rows int, createDir bool
 		Cols:      cols,
 		Rows:      rows,
 		CreateDir: createDir,
+		Revive:    revive,
 	}
 }
 

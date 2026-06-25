@@ -168,6 +168,75 @@ func TestScrollbackDoneCancelsBlockedReader(t *testing.T) {
 	}
 }
 
+// --- Snapshot and NewScrollbackWithData tests ---
+
+func TestScrollbackSnapshotReturnsCopy(t *testing.T) {
+	sb := NewScrollback(1024)
+	sb.Write([]byte("abc"))
+	snap := sb.Snapshot()
+	if !bytes.Equal(snap, []byte("abc")) {
+		t.Errorf("Snapshot: got %q, want %q", snap, "abc")
+	}
+	// Mutating the snapshot must not affect the buffer.
+	snap[0] = 'Z'
+	snap2 := sb.Snapshot()
+	if snap2[0] != 'a' {
+		t.Errorf("Snapshot copy was not independent: got %q", snap2)
+	}
+}
+
+func TestScrollbackSnapshotEmpty(t *testing.T) {
+	sb := NewScrollback(1024)
+	snap := sb.Snapshot()
+	if len(snap) != 0 {
+		t.Errorf("Snapshot of empty buffer: got %q, want empty", snap)
+	}
+}
+
+func TestNewScrollbackWithDataPreloads(t *testing.T) {
+	prior := []byte("prior-history")
+	sb := NewScrollbackWithData(1024, prior)
+
+	done := make(chan struct{})
+	data, _, ok := sb.ReadFrom(sb.Oldest(), done)
+	if !ok {
+		t.Fatal("ReadFrom returned ok=false")
+	}
+	if !bytes.Equal(data, prior) {
+		t.Errorf("preload: got %q, want %q", data, prior)
+	}
+}
+
+func TestNewScrollbackWithDataThenWriteAppends(t *testing.T) {
+	prior := []byte("old")
+	sb := NewScrollbackWithData(1024, prior)
+	sb.Write([]byte("new"))
+
+	done := make(chan struct{})
+	data, _, ok := sb.ReadFrom(sb.Oldest(), done)
+	if !ok {
+		t.Fatal("ReadFrom returned ok=false")
+	}
+	if !bytes.Equal(data, []byte("oldnew")) {
+		t.Errorf("preload+write: got %q, want %q", data, "oldnew")
+	}
+}
+
+func TestNewScrollbackWithDataExceedsCapTruncates(t *testing.T) {
+	// Preload 10 bytes into a 5-byte buffer — should keep only last 5.
+	prior := []byte("0123456789")
+	sb := NewScrollbackWithData(5, prior)
+
+	done := make(chan struct{})
+	data, _, ok := sb.ReadFrom(sb.Oldest(), done)
+	if !ok {
+		t.Fatal("ReadFrom returned ok=false")
+	}
+	if !bytes.Equal(data, []byte("56789")) {
+		t.Errorf("truncation: got %q, want %q", data, "56789")
+	}
+}
+
 func TestScrollbackConcurrentWriterReader(t *testing.T) {
 	sb := NewScrollback(4096)
 	done := make(chan struct{})

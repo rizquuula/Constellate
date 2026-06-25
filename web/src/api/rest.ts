@@ -90,6 +90,10 @@ export function renameSession(id: string, title: string): Promise<void> {
   return request<void>('PATCH', `/api/sessions/${id}`, { title })
 }
 
+export function setAutoRelaunch(id: string, autoRelaunch: boolean): Promise<void> {
+  return request<void>('PATCH', `/api/sessions/${id}`, { autoRelaunch })
+}
+
 export function closeSession(id: string): Promise<void> {
   return request<void>('DELETE', `/api/sessions/${id}`)
 }

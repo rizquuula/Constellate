@@ -67,6 +67,20 @@ func (s *SessionStore) ListByMachine(_ context.Context, machineID string) ([]ses
 	return out, nil
 }
 
+// AutoRelaunchSessions returns running sessions for the given machine that have auto_relaunch=true.
+func (s *SessionStore) AutoRelaunchSessions(_ context.Context, machineID string) ([]session.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var out []session.Session
+	for _, ss := range s.data {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning && ss.AutoRelaunch() {
+			out = append(out, ss)
+		}
+	}
+	return out, nil
+}
+
 // CountByProject returns the number of sessions that reference the given
 // project ID (regardless of status).
 func (s *SessionStore) CountByProject(_ context.Context, projectID string) (int, error) {
@@ -97,18 +111,50 @@ func (s *SessionStore) SetExited(_ context.Context, id string, exitCode int, ts 
 	return nil
 }
 
-// MarkRunningLost bulk-marks all running sessions for a machine as lost.
+// MarkRunningLost bulk-marks all running sessions (with auto_relaunch=false) for a machine as lost.
+// Sessions with auto_relaunch=true are handled by the relaunch path.
 func (s *SessionStore) MarkRunningLost(_ context.Context, machineID string, ts int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for id, ss := range s.data {
-		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning && !ss.AutoRelaunch() {
 			ss.SetStatus(session.StatusLost)
 			ss.Touch(ts)
 			s.data[id] = ss
 		}
 	}
+	return nil
+}
+
+// SetRunning sets a single session's status to running.
+// Returns session.ErrNotFound (wrapped) if no session with the given id exists.
+func (s *SessionStore) SetRunning(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ss, ok := s.data[id]
+	if !ok {
+		return fmt.Errorf("memory: set running %q: %w", id, session.ErrNotFound)
+	}
+	ss.SetStatus(session.StatusRunning)
+	s.data[id] = ss
+	return nil
+}
+
+// SetLost marks a single session as lost.
+// Returns session.ErrNotFound (wrapped) if no session with the given id exists.
+func (s *SessionStore) SetLost(_ context.Context, id string, ts int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ss, ok := s.data[id]
+	if !ok {
+		return fmt.Errorf("memory: set lost %q: %w", id, session.ErrNotFound)
+	}
+	ss.SetStatus(session.StatusLost)
+	ss.Touch(ts)
+	s.data[id] = ss
 	return nil
 }
 
@@ -123,6 +169,21 @@ func (s *SessionStore) SetTitle(_ context.Context, id, title string) error {
 		return fmt.Errorf("memory: set title %q: %w", id, session.ErrNotFound)
 	}
 	ss.SetTitle(title)
+	s.data[id] = ss
+	return nil
+}
+
+// SetAutoRelaunch updates the auto_relaunch flag for a session.
+// Returns session.ErrNotFound (wrapped) if no session with the given id exists.
+func (s *SessionStore) SetAutoRelaunch(_ context.Context, id string, v bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ss, ok := s.data[id]
+	if !ok {
+		return fmt.Errorf("memory: set auto_relaunch %q: %w", id, session.ErrNotFound)
+	}
+	ss.SetAutoRelaunch(v)
 	s.data[id] = ss
 	return nil
 }

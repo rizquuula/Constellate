@@ -36,7 +36,7 @@ func TestOverviewSnapshotPipeline(t *testing.T) {
 	defer ts.Close()
 
 	// Wire the agent with a vt screen factory and snapshot producer (mirrors cmd/agent/main.go).
-	mgr := session.NewManager(agentpty.Factory{}, 256*1024, logger)
+	mgr := session.NewManager(agentpty.Factory{}, 256*1024, logger, nil)
 	mgr.SetScreenFactory(vtScreenFactory{})
 
 	agentCtx, cancelAgent := context.WithCancel(context.Background())

@@ -78,7 +78,7 @@ func discardLogger() *slog.Logger {
 // --- tests ---
 
 func TestOpenStream_ResolvesAndOpens(t *testing.T) {
-	s := session.New("s1", "m1", "p1", "title", "/bin/bash", 1000)
+	s := session.New("s1", "m1", "p1", "title", "/bin/bash", "", 1000)
 	store := &fakeSessionStore{data: map[string]session.Session{"s1": s}}
 	gw := &fakeGateway{}
 	sink := &fakeAuditSink{}
@@ -127,7 +127,7 @@ func TestOpenStream_SessionNotFound(t *testing.T) {
 }
 
 func TestResize_Routes(t *testing.T) {
-	s := session.New("s1", "m1", "p1", "title", "/bin/bash", 1000)
+	s := session.New("s1", "m1", "p1", "title", "/bin/bash", "", 1000)
 	store := &fakeSessionStore{data: map[string]session.Session{"s1": s}}
 	gw := &fakeGateway{}
 	uc := attach.New(store, gw, discardLogger(), &fakeAuditSink{})

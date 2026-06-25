@@ -21,6 +21,7 @@ type SessionService interface {
 	Close(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	Rename(ctx context.Context, id, title string) error
+	SetAutoRelaunch(ctx context.Context, id string, v bool) error
 }
 
 type openSessionRequest struct {
@@ -118,25 +119,40 @@ func (s *Server) handleCloseSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type renameSessionRequest struct {
-	Title string `json:"title"`
+// patchSessionRequest accepts optional title and/or autoRelaunch fields.
+// At least one must be non-nil.
+type patchSessionRequest struct {
+	Title        *string `json:"title"`
+	AutoRelaunch *bool   `json:"autoRelaunch"`
 }
 
-func (s *Server) handleRenameSession(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var req renameSessionRequest
+	var req patchSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
 		return
 	}
-	title := strings.TrimSpace(req.Title)
-	if title == "" {
-		writeError(w, http.StatusBadRequest, "empty_title", "title must not be empty")
+	if req.Title == nil && req.AutoRelaunch == nil {
+		writeError(w, http.StatusBadRequest, "no_fields", "at least one of title or autoRelaunch must be provided")
 		return
 	}
-	if err := s.sessions.Rename(r.Context(), id, title); err != nil {
-		writeError(w, statusFor(err), "rename_failed", err.Error())
-		return
+	if req.Title != nil {
+		title := strings.TrimSpace(*req.Title)
+		if title == "" {
+			writeError(w, http.StatusBadRequest, "empty_title", "title must not be empty")
+			return
+		}
+		if err := s.sessions.Rename(r.Context(), id, title); err != nil {
+			writeError(w, statusFor(err), "rename_failed", err.Error())
+			return
+		}
+	}
+	if req.AutoRelaunch != nil {
+		if err := s.sessions.SetAutoRelaunch(r.Context(), id, *req.AutoRelaunch); err != nil {
+			writeError(w, statusFor(err), "set_auto_relaunch_failed", err.Error())
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

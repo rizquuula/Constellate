@@ -423,7 +423,7 @@ func TestVersionSkewNegotiatesDown(t *testing.T) {
 	// the server should reply with SessionOpened.
 	const sid = "skew-sess-1"
 	mgr.register(sid, newFakeSession(77))
-	if err := enc.Encode(transport.NewOpenSession(sid, "", "/bin/sh", 80, 24, false)); err != nil {
+	if err := enc.Encode(transport.NewOpenSession(sid, "", "/bin/sh", 80, 24, false, false)); err != nil {
 		t.Fatalf("send OpenSession: %v", err)
 	}
 	reply, err := dec.Next()

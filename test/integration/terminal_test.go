@@ -88,7 +88,7 @@ func TestTerminalLifecycle(t *testing.T) {
 	defer ts.Close()
 
 	// --- Wire agent: real PTY manager + hub client ---
-	mgr := session.NewManager(agentpty.Factory{}, 256*1024, logger)
+	mgr := session.NewManager(agentpty.Factory{}, 256*1024, logger, nil)
 	machineID, agentKey := enrollAgent(t, enrollUC, "e2e-term")
 
 	agentCtx, cancelAgent := context.WithCancel(context.Background())
@@ -278,7 +278,7 @@ func TestSessionLostOnAgentRestart(t *testing.T) {
 	machineID, agentKey := enrollAgent(t, enrollUC, "lost-test")
 
 	// --- Start first agent instance ("inst-A") ---
-	mgrA := session.NewManager(agentpty.Factory{}, 256*1024, logger)
+	mgrA := session.NewManager(agentpty.Factory{}, 256*1024, logger, nil)
 	ctxA, cancelA := context.WithCancel(context.Background())
 
 	clientA := hubclient.New(hubclient.Config{
@@ -338,7 +338,7 @@ func TestSessionLostOnAgentRestart(t *testing.T) {
 	t.Log("inst-A: machine is offline")
 
 	// --- Start second agent instance ("inst-B") with the same machineID ---
-	mgrB := session.NewManager(agentpty.Factory{}, 256*1024, logger)
+	mgrB := session.NewManager(agentpty.Factory{}, 256*1024, logger, nil)
 	ctxB, cancelB := context.WithCancel(context.Background())
 	defer cancelB()
 

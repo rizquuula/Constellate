@@ -40,14 +40,14 @@ func NewGateway(reg *Registry) *Gateway {
 // OpenSession instructs the agent identified by machineID to start a new PTY session.
 // It blocks until the agent replies with SessionOpened or an error, the context is
 // cancelled, or a 10-second timeout expires.
-func (g *Gateway) OpenSession(ctx context.Context, machineID, sessionID, cwd, shell string, cols, rows int, createDir bool) (pid int, err error) {
+func (g *Gateway) OpenSession(ctx context.Context, machineID, sessionID, cwd, shell string, cols, rows int, createDir, revive bool) (pid int, err error) {
 	conn, ok := g.reg.Get(machineID)
 	if !ok {
 		return 0, ErrAgentOffline
 	}
 
 	ch := conn.awaitOpen(sessionID)
-	if err := conn.sendControl(transport.NewOpenSession(sessionID, cwd, shell, cols, rows, createDir)); err != nil {
+	if err := conn.sendControl(transport.NewOpenSession(sessionID, cwd, shell, cols, rows, createDir, revive)); err != nil {
 		conn.cancelOpen(sessionID)
 		return 0, err
 	}

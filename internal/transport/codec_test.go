@@ -183,7 +183,10 @@ func TestHeartbeatWithoutMetrics(t *testing.T) {
 	}
 }
 
-func TestProtocolSupported4(t *testing.T) {
+func TestProtocolSupported5(t *testing.T) {
+	if !ProtocolSupported(5) {
+		t.Error("ProtocolSupported(5): got false, want true")
+	}
 	if !ProtocolSupported(4) {
 		t.Error("ProtocolSupported(4): got false, want true")
 	}
@@ -193,7 +196,7 @@ func TestProtocolSupported4(t *testing.T) {
 	if ProtocolSupported(0) {
 		t.Error("ProtocolSupported(0): got true, want false (below min)")
 	}
-	if ProtocolSupported(5) {
-		t.Error("ProtocolSupported(5): got true, want false (above max)")
+	if ProtocolSupported(6) {
+		t.Error("ProtocolSupported(6): got true, want false (above max)")
 	}
 }

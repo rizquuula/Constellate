@@ -70,6 +70,16 @@ func (s *fakeSessionStore) ListByMachine(_ context.Context, machineID string) ([
 	return out, nil
 }
 
+func (s *fakeSessionStore) AutoRelaunchSessions(_ context.Context, machineID string) ([]session.Session, error) {
+	var out []session.Session
+	for _, ss := range s.data {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning && ss.AutoRelaunch() {
+			out = append(out, ss)
+		}
+	}
+	return out, nil
+}
+
 func (s *fakeSessionStore) SetExited(_ context.Context, id string, exitCode int, ts int64) error {
 	ss, ok := s.data[id]
 	if !ok {
@@ -82,12 +92,33 @@ func (s *fakeSessionStore) SetExited(_ context.Context, id string, exitCode int,
 
 func (s *fakeSessionStore) MarkRunningLost(_ context.Context, machineID string, ts int64) error {
 	for id, ss := range s.data {
-		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning && !ss.AutoRelaunch() {
 			ss.SetStatus(session.StatusLost)
 			ss.Touch(ts)
 			s.data[id] = ss
 		}
 	}
+	return nil
+}
+
+func (s *fakeSessionStore) SetRunning(_ context.Context, id string) error {
+	ss, ok := s.data[id]
+	if !ok {
+		return session.ErrNotFound
+	}
+	ss.SetStatus(session.StatusRunning)
+	s.data[id] = ss
+	return nil
+}
+
+func (s *fakeSessionStore) SetLost(_ context.Context, id string, ts int64) error {
+	ss, ok := s.data[id]
+	if !ok {
+		return session.ErrNotFound
+	}
+	ss.SetStatus(session.StatusLost)
+	ss.Touch(ts)
+	s.data[id] = ss
 	return nil
 }
 
@@ -97,6 +128,16 @@ func (s *fakeSessionStore) SetTitle(_ context.Context, id, title string) error {
 		return session.ErrNotFound
 	}
 	ss.SetTitle(title)
+	s.data[id] = ss
+	return nil
+}
+
+func (s *fakeSessionStore) SetAutoRelaunch(_ context.Context, id string, v bool) error {
+	ss, ok := s.data[id]
+	if !ok {
+		return session.ErrNotFound
+	}
+	ss.SetAutoRelaunch(v)
 	s.data[id] = ss
 	return nil
 }
@@ -127,10 +168,12 @@ type fakeGateway struct {
 	closeCalls []string
 	openCalls  int
 	pidReturn  int
+	lastRevive bool
 }
 
-func (g *fakeGateway) OpenSession(_ context.Context, _, sessionID, _, _ string, _, _ int, _ bool) (int, error) {
+func (g *fakeGateway) OpenSession(_ context.Context, _, sessionID, _, _ string, _, _ int, _, revive bool) (int, error) {
 	g.openCalls++
+	g.lastRevive = revive
 	return g.pidReturn, g.openErr
 }
 
@@ -191,6 +234,30 @@ func TestOpen_SpawnsThenPersists(t *testing.T) {
 	}
 }
 
+func TestOpen_StoresCwd(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+
+	_, err := uc.Open(context.Background(), sessions.OpenInput{
+		MachineID: "m1",
+		Cwd:       "/home/user/work",
+		Shell:     "/bin/bash",
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	got, err := store.ByID(context.Background(), "generated-id")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Cwd() != "/home/user/work" {
+		t.Errorf("Cwd: got %q, want /home/user/work", got.Cwd())
+	}
+}
+
 func TestOpen_DefaultsDimensions(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 1}
@@ -218,8 +285,6 @@ func TestOpen_GeneratesNameWhenTitleEmpty(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 
-	// Generated names are "<adjective>-<noun>", both lowercase a–z, joined by a
-	// single hyphen (e.g. "brave-otter").
 	title := s.Title()
 	parts := strings.Split(title, "-")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -426,7 +491,6 @@ func TestRecordActivity_NotFound_IsIgnored(t *testing.T) {
 	clk := &fixedClock{ts: 1000}
 	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
-	// Must not return an error for a missing session.
 	if err := uc.RecordActivity(context.Background(), "no-such-id", session.ActivityActive); err != nil {
 		t.Errorf("RecordActivity not-found: expected nil, got %v", err)
 	}
@@ -444,11 +508,9 @@ func TestRecordActivity_UnknownActivityIsIgnored(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 
-	// An unrecognised value should be a no-op with nil error.
 	if err := uc.RecordActivity(ctx, s.ID(), "bogus-value"); err != nil {
 		t.Errorf("RecordActivity bogus: expected nil, got %v", err)
 	}
-	// Empty string also a no-op.
 	if err := uc.RecordActivity(ctx, s.ID(), ""); err != nil {
 		t.Errorf("RecordActivity empty: expected nil, got %v", err)
 	}
@@ -469,21 +531,19 @@ func TestMarkMachineSessionsLost(t *testing.T) {
 	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 	ctx := context.Background()
 
-	// Open a running session.
 	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
-	// Seed a pre-exited session manually into the store.
 	exitedID := "exited-session"
-	es := session.New(exitedID, "m1", "", "", "", 1000)
+	es := session.New(exitedID, "m1", "", "", "", "", 1000)
 	es.SetExited(0, 1000)
 	store.data[exitedID] = es
 
 	clk.ts = 2000
-	if err := uc.MarkMachineSessionsLost(ctx, "m1"); err != nil {
-		t.Fatalf("MarkMachineSessionsLost: %v", err)
+	if err := uc.ReconcileMachineRestart(ctx, "m1"); err != nil {
+		t.Fatalf("ReconcileMachineRestart: %v", err)
 	}
 
 	gotRun, err := store.ByID(ctx, s.ID())
@@ -537,9 +597,8 @@ func TestDelete_RemovesExitedAndAudits(t *testing.T) {
 	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), sink)
 	ctx := context.Background()
 
-	// Seed an already-exited session.
 	id := "exited-session"
-	es := session.New(id, "m1", "", "", "", 1000)
+	es := session.New(id, "m1", "", "", "", "", 1000)
 	es.SetExited(0, 1000)
 	store.data[id] = es
 
@@ -576,7 +635,6 @@ func TestDelete_RunningRefused(t *testing.T) {
 	if err := uc.Delete(ctx, s.ID()); !errors.Is(err, sessions.ErrSessionRunning) {
 		t.Errorf("Delete running: got %v, want ErrSessionRunning", err)
 	}
-	// Record must survive a refused delete.
 	if _, err := store.ByID(ctx, s.ID()); err != nil {
 		t.Errorf("running session must remain after refused delete; got %v", err)
 	}
@@ -605,7 +663,7 @@ func TestClose_AuditsCloseEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	sink.calls = nil // reset after Open
+	sink.calls = nil
 
 	if err := uc.Close(ctx, s.ID()); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -619,5 +677,163 @@ func TestClose_AuditsCloseEvent(t *testing.T) {
 	}
 	if sink.calls[0].sessionID != s.ID() {
 		t.Errorf("audit sessionID: got %q, want %q", sink.calls[0].sessionID, s.ID())
+	}
+}
+
+// --- ReconcileMachineRestart tests ---
+
+func TestReconcileMachineRestart_AutoRelaunchSessions(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 99}
+	clk := &fixedClock{ts: 1000}
+	sink := &fakeAuditSink{}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), sink)
+	ctx := context.Background()
+
+	s := session.New("s-revival", "m1", "", "title", "/bin/bash", "/work", 900)
+	s.SetAutoRelaunch(true)
+	store.data["s-revival"] = s
+
+	clk.ts = 2000
+	if err := uc.ReconcileMachineRestart(ctx, "m1"); err != nil {
+		t.Fatalf("ReconcileMachineRestart: %v", err)
+	}
+
+	if gw.openCalls != 1 {
+		t.Errorf("openCalls: got %d, want 1", gw.openCalls)
+	}
+	if !gw.lastRevive {
+		t.Error("revive flag: got false, want true")
+	}
+
+	got, err := store.ByID(ctx, "s-revival")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Status() != session.StatusRunning {
+		t.Errorf("status after relaunch: got %q, want running", got.Status())
+	}
+
+	found := false
+	for _, c := range sink.calls {
+		if c.action == audit.ActionRelaunch && c.sessionID == "s-revival" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("audit: want relaunch event for s-revival; got %v", sink.calls)
+	}
+}
+
+func TestReconcileMachineRestart_NonAutoRelaunchSessionsMarkedLost(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s := session.New("s-lost", "m1", "", "", "", "", 900)
+	store.data["s-lost"] = s
+
+	clk.ts = 2000
+	if err := uc.ReconcileMachineRestart(ctx, "m1"); err != nil {
+		t.Fatalf("ReconcileMachineRestart: %v", err)
+	}
+
+	if gw.openCalls != 0 {
+		t.Errorf("openCalls: got %d, want 0", gw.openCalls)
+	}
+
+	got, err := store.ByID(ctx, "s-lost")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Status() != session.StatusLost {
+		t.Errorf("status: got %q, want lost", got.Status())
+	}
+}
+
+func TestReconcileMachineRestart_FailedRelaunchMarkedLost(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{openErr: errors.New("agent offline"), pidReturn: 0}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s := session.New("s-fail", "m1", "", "", "", "", 900)
+	s.SetAutoRelaunch(true)
+	store.data["s-fail"] = s
+
+	clk.ts = 2000
+	if err := uc.ReconcileMachineRestart(ctx, "m1"); err != nil {
+		t.Fatalf("ReconcileMachineRestart: %v", err)
+	}
+
+	got, err := store.ByID(ctx, "s-fail")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Status() != session.StatusLost {
+		t.Errorf("status after failed relaunch: got %q, want lost", got.Status())
+	}
+}
+
+func TestReconcileMachineRestart_MixedSessions(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 42}
+	clk := &fixedClock{ts: 1000}
+	sink := &fakeAuditSink{}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), sink)
+	ctx := context.Background()
+
+	sRevive := session.New("s-revive", "m1", "", "", "/bin/bash", "/work", 900)
+	sRevive.SetAutoRelaunch(true)
+	store.data["s-revive"] = sRevive
+
+	sLost := session.New("s-lost", "m1", "", "", "", "", 900)
+	store.data["s-lost"] = sLost
+
+	clk.ts = 2000
+	if err := uc.ReconcileMachineRestart(ctx, "m1"); err != nil {
+		t.Fatalf("ReconcileMachineRestart: %v", err)
+	}
+
+	gotRevive, _ := store.ByID(ctx, "s-revive")
+	if gotRevive.Status() != session.StatusRunning {
+		t.Errorf("s-revive: got %q, want running", gotRevive.Status())
+	}
+
+	gotLost, _ := store.ByID(ctx, "s-lost")
+	if gotLost.Status() != session.StatusLost {
+		t.Errorf("s-lost: got %q, want lost", gotLost.Status())
+	}
+
+	if gw.openCalls != 1 {
+		t.Errorf("openCalls: got %d, want 1", gw.openCalls)
+	}
+}
+
+func TestSetAutoRelaunch_Persists(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if err := uc.SetAutoRelaunch(ctx, s.ID(), true); err != nil {
+		t.Fatalf("SetAutoRelaunch: %v", err)
+	}
+
+	got, err := store.ByID(ctx, s.ID())
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if !got.AutoRelaunch() {
+		t.Error("AutoRelaunch: got false, want true after SetAutoRelaunch(true)")
 	}
 }

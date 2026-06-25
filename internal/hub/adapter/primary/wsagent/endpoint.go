@@ -15,7 +15,7 @@ import (
 // SessionEvents is a consumer-side port for async session lifecycle events.
 type SessionEvents interface {
 	MarkExited(ctx context.Context, sessionID string, exitCode int) error
-	MarkMachineSessionsLost(ctx context.Context, machineID string) error
+	ReconcileMachineRestart(ctx context.Context, machineID string) error
 	RecordActivity(ctx context.Context, sessionID, activity string) error
 }
 

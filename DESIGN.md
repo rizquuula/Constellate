@@ -772,9 +772,10 @@ Two axes, deliberately separate:
   `1.4.0` and agent `0.9.2` talk fine as long as their protocols are in range. M4 bumped the protocol
   to **2** (adds `EnableSnaps` + the snapshot stream) with the window held open at **[1, 2]**: the
   additions are backward compatible, so a v1 and a v2 peer still interoperate — just without the
-  overview feed. Protocol is now **4** (window **[1, 4]**): v4 adds `Heartbeat.metrics` (host
-  CPU/RAM via gopsutil); host metrics live in-memory on the live `Conn` and are absent when the
-  agent is offline. All additions are additive; older peers ignore unknown fields.
+  overview feed. Protocol is now **5** (window **[1, 5]**): v5 adds `OpenSession.Revive` as an
+  intent/audit hint for restart auto-relaunch (hub→agent; additive, older agents ignore it).
+  v4 added `Heartbeat.metrics` (host CPU/RAM via gopsutil); metrics are absent when the agent
+  is offline. All additions are additive; older peers ignore unknown fields.
 
 Both `version` commands print all three for skew debugging, e.g.
 `constellate-agent 0.9.2 (commit a1b2c3d, proto 4)`.
@@ -1023,6 +1024,24 @@ Sessions survive an agent restart. The single-process agent is split into two ro
 - **Survival scope**: connect restart/update ✓ · network drop/hub restart ✓ · machine reboot ✗ (session-host dies with the OS) · session-host crash ✗ (new host = new instanceID = sessions correctly marked `lost`).
 - **Rejected alternatives**: tmux-backed PTYs (extra runtime dep; external process lifecycle outside Go); SCM_RIGHTS fd-passing (Linux-only, fragile, non-portable); keeping D6's in-process model (restart-drops-sessions trade-off, now unacceptable given the update UX).
 - **Test**: `test/docker/run_connect_restart.sh` + `compose.connect-restart.yaml` — supervisor-mode container kills only the connect PID; asserts hub never logs "process restart detected, marking running sessions lost" between the two agent-online events.
+
+### Phase 2 — auto-relaunch sessions after restart (hub-side) *(done)*
+- **`auto_relaunch` flag**: new `INTEGER NOT NULL DEFAULT 0` column on `sessions` (migration
+  `0005_session_relaunch.sql`). Opt-in per session, default OFF. Toggled via
+  `PATCH /api/sessions/{id}` with `{"autoRelaunch": true/false}`. Also accepts `{"title": ...}`
+  in the same request. Both `cwd` and `autoRelaunch` are now included in the session DTO.
+- **`cwd` persistence**: `cwd TEXT` column added to `sessions` (same migration). Populated on
+  `Open`; used by the relaunch path to re-issue `OpenSession` with the original working dir.
+- **Relaunch policy** (in `app/sessions.ReconcileMachineRestart`, replaces blanket mark-lost):
+  when the registry detects a process restart (new `instanceID` on `Hello`), the hub:
+  1. fetches running sessions with `auto_relaunch=1` via `AutoRelaunchSessions`;
+  2. re-issues `OpenSession{SessionID: <same id>, ..., Revive: true}` — same session ID preserves scrollback (Phase-1 agent behaviour already handles replay);
+  3. on success: `SetRunning` (no-op status change) + audit `relaunch` event;
+  4. on failure: `SetLost` for that session;
+  5. calls `MarkRunningLost` for all `auto_relaunch=0` sessions (exact prior behaviour).
+- **Idempotency**: `registry.Register` returns `restarted=true` only once per instanceID change; subsequent Hellos with the same instanceID return `restarted=false`, so `ReconcileMachineRestart` is called at most once per actual restart.
+- **Wire protocol bump to v5** (window [1,5]): adds `OpenSession.Revive bool` (`json:"revive,omitempty"`). Additive; agents on ≤v4 ignore the field. The v4 session-host always replays scrollback on Open regardless of `Revive` (Phase-1 behaviour), so the flag is an intent/audit hint only.
+- **Decisions:** `SessionEvents.ReconcileMachineRestart` replaces `MarkMachineSessionsLost` in the wsagent interface; `sessions.UseCase` satisfies it. No agent changes required.
 
 ### Post-M7 — project delete
 - Closes the M3 deferral. `DELETE /api/projects/{id}` (session-gated like the rest of `/api/*`)

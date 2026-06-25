@@ -57,6 +57,18 @@ type ScreenFactory interface {
 	NewScreen(cols, rows int) Screen
 }
 
+// ScrollbackArchive is the driven port (SPI) for persisting per-session scrollback
+// to durable storage. A nil implementation means persistence is disabled.
+//
+//   - Save atomically persists the current scrollback bytes for sessionID.
+//   - Load retrieves previously saved bytes; (nil, nil) when none exist.
+//   - Delete removes the archive for sessionID (called when a session is explicitly closed).
+type ScrollbackArchive interface {
+	Save(sessionID string, data []byte) error
+	Load(sessionID string) ([]byte, error)
+	Delete(sessionID string) error
+}
+
 // Screen consumes raw PTY output and tracks the current visible grid.
 // Implementations are safe for concurrent Write/Resize/Render/Rev.
 type Screen interface {

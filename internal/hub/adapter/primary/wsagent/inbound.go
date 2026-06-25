@@ -72,8 +72,16 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 		return
 	}
 	if restarted && e.events != nil {
-		e.log.Info("wsagent: process restart detected, marking running sessions lost", "machineID", hello.MachineID)
-		_ = e.events.MarkMachineSessionsLost(ctx, hello.MachineID)
+		e.log.Info("wsagent: process restart detected, reconciling sessions", "machineID", hello.MachineID)
+		// Run reconciliation off the handshake goroutine: relaunch dispatches
+		// OpenSession and blocks waiting for the agent's SessionOpened reply,
+		// which is only resolved by the control read loop below. Calling it
+		// synchronously here would deadlock until the 10s OpenSession timeout.
+		go func() {
+			if rerr := e.events.ReconcileMachineRestart(ctx, hello.MachineID); rerr != nil {
+				e.log.Error("wsagent: reconcile machine restart failed", "machineID", hello.MachineID, "err", rerr)
+			}
+		}()
 	}
 	e.log.Info("agent online", "machineID", hello.MachineID, "name", hello.Name)
 

@@ -6,13 +6,14 @@ import "context"
 type Action string
 
 const (
-	ActionLogin  Action = "login"
-	ActionEnroll Action = "enroll"
-	ActionAttach Action = "attach"
-	ActionOpen   Action = "open"
-	ActionClose  Action = "close"
-	ActionDelete Action = "delete"
-	ActionRevoke Action = "revoke"
+	ActionLogin    Action = "login"
+	ActionEnroll   Action = "enroll"
+	ActionAttach   Action = "attach"
+	ActionOpen     Action = "open"
+	ActionClose    Action = "close"
+	ActionDelete   Action = "delete"
+	ActionRevoke   Action = "revoke"
+	ActionRelaunch Action = "relaunch"
 )
 
 // Event is an immutable record of a single security-relevant action.

@@ -11,6 +11,9 @@ import (
 	"github.com/rizquuula/Constellate/internal/agent/domain/terminal"
 )
 
+// flushInterval is how often the background flusher persists dirty scrollbacks.
+const flushInterval = 2 * time.Second
+
 // liveSession holds runtime state for a single open PTY session.
 type liveSession struct {
 	pty    PTY
@@ -20,6 +23,10 @@ type liveSession struct {
 	// lastOutputAt is the unix-second timestamp of the most recent PTY output
 	// chunk. Updated atomically by readPump; read by Activities.
 	lastOutputAt atomic.Int64
+
+	// dirty is set to 1 by readPump whenever new bytes arrive. The flusher
+	// goroutine resets it to 0 after a successful Save.
+	dirty atomic.Int32
 }
 
 // noopNotifier is the default Notifier used until SetNotifier is called.
@@ -32,6 +39,7 @@ type Manager struct {
 	factory         PTYFactory
 	scrollbackBytes int
 	notifier        Notifier
+	archive         ScrollbackArchive // nil = persistence disabled
 	log             *slog.Logger
 
 	// screens is set by SetScreenFactory; nil means no screen tracking.
@@ -42,19 +50,29 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sessions map[string]*liveSession
+
+	// flusherStop is closed by Shutdown to stop the background flusher goroutine.
+	flusherStop chan struct{}
+	flusherDone chan struct{}
 }
 
 // NewManager creates a Manager. scrollbackBytes sets the per-session scrollback
 // buffer capacity (<=0 uses the default). The notifier defaults to a no-op;
 // call SetNotifier after construction to wire up real notifications.
-func NewManager(factory PTYFactory, scrollbackBytes int, log *slog.Logger) *Manager {
-	return &Manager{
+// archive may be nil to disable scrollback persistence.
+func NewManager(factory PTYFactory, scrollbackBytes int, log *slog.Logger, archive ScrollbackArchive) *Manager {
+	m := &Manager{
 		factory:         factory,
 		scrollbackBytes: scrollbackBytes,
 		notifier:        noopNotifier{},
+		archive:         archive,
 		log:             log,
 		sessions:        make(map[string]*liveSession),
+		flusherStop:     make(chan struct{}),
+		flusherDone:     make(chan struct{}),
 	}
+	go m.runFlusher()
+	return m
 }
 
 // SetNotifier replaces the notifier. Call before any sessions are opened
@@ -76,6 +94,8 @@ func (m *Manager) SetScreenFactory(f ScreenFactory) {
 
 // Open starts a new PTY session with the given sessionID and spec.
 // Returns an error if sessionID already exists.
+// If a ScrollbackArchive is configured and a prior archive exists for sessionID,
+// its bytes are preloaded into the scrollback so replay shows history first.
 func (m *Manager) Open(sessionID string, spec PTYSpec) (pid int, err error) {
 	m.mu.Lock()
 	if _, exists := m.sessions[sessionID]; exists {
@@ -84,6 +104,24 @@ func (m *Manager) Open(sessionID string, spec PTYSpec) (pid int, err error) {
 	}
 	m.mu.Unlock()
 
+	// Load prior scrollback if persistence is enabled.
+	var sb *terminal.Scrollback
+	if m.archive != nil {
+		prior, loadErr := m.archive.Load(sessionID)
+		if loadErr != nil {
+			m.log.Warn("session: load scrollback archive", "sessionID", sessionID, "err", loadErr)
+		}
+		if len(prior) > 0 {
+			sb = terminal.NewScrollbackWithData(m.scrollbackBytes, prior)
+			// Append a visible separator so the operator can tell history from live.
+			sb.Write([]byte("\r\n──── session restored after restart ────\r\n"))
+			m.log.Info("session: preloaded scrollback from archive", "sessionID", sessionID, "bytes", len(prior))
+		}
+	}
+	if sb == nil {
+		sb = terminal.NewScrollback(m.scrollbackBytes)
+	}
+
 	pty, err := m.factory.Open(spec)
 	if err != nil {
 		return 0, fmt.Errorf("session: open PTY: %w", err)
@@ -91,7 +129,7 @@ func (m *Manager) Open(sessionID string, spec PTYSpec) (pid int, err error) {
 
 	ls := &liveSession{
 		pty: pty,
-		sb:  terminal.NewScrollback(m.scrollbackBytes),
+		sb:  sb,
 	}
 
 	m.mu.Lock()
@@ -184,17 +222,111 @@ func (m *Manager) Resize(sessionID string, cols, rows int) error {
 }
 
 // Close terminates the PTY for the given session. The readPump will detect
-// the closed PTY and perform cleanup.
+// the closed PTY and perform cleanup. If an archive exists for the session it
+// is deleted — this is an explicit operator-initiated close, not a restart.
 func (m *Manager) Close(sessionID string) error {
 	ls, err := m.lookup(sessionID)
 	if err != nil {
 		return err
 	}
-	return ls.pty.Close()
+	closeErr := ls.pty.Close()
+
+	// Delete the archive on an explicit close so stale data does not surface on a
+	// future open of a brand-new session that happens to reuse the ID.
+	if m.archive != nil {
+		if delErr := m.archive.Delete(sessionID); delErr != nil {
+			m.log.Warn("session: delete scrollback archive", "sessionID", sessionID, "err", delErr)
+		}
+	}
+	return closeErr
+}
+
+// FlushAll synchronously persists the scrollback for every open session.
+// It is best-effort: individual failures are logged but do not prevent flushing
+// other sessions. Intended for the SIGTERM handler so the last bytes survive a
+// graceful shutdown.
+func (m *Manager) FlushAll() {
+	if m.archive == nil {
+		return
+	}
+	m.mu.Lock()
+	type entry struct {
+		id string
+		ls *liveSession
+	}
+	entries := make([]entry, 0, len(m.sessions))
+	for id, ls := range m.sessions {
+		entries = append(entries, entry{id, ls})
+	}
+	m.mu.Unlock()
+
+	for _, e := range entries {
+		data := e.ls.sb.Snapshot()
+		if len(data) == 0 {
+			continue
+		}
+		if err := m.archive.Save(e.id, data); err != nil {
+			m.log.Warn("session: FlushAll save", "sessionID", e.id, "err", err)
+		} else {
+			e.ls.dirty.Store(0)
+		}
+	}
+}
+
+// runFlusher is a background goroutine that periodically persists dirty
+// scrollbacks. It exits when flusherStop is closed.
+func (m *Manager) runFlusher() {
+	defer close(m.flusherDone)
+	if m.archive == nil {
+		return
+	}
+	ticker := time.NewTicker(flushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.flusherStop:
+			return
+		case <-ticker.C:
+			m.flushDirty()
+		}
+	}
+}
+
+// flushDirty saves the scrollback for every session flagged as dirty.
+func (m *Manager) flushDirty() {
+	m.mu.Lock()
+	type entry struct {
+		id string
+		ls *liveSession
+	}
+	entries := make([]entry, 0, len(m.sessions))
+	for id, ls := range m.sessions {
+		entries = append(entries, entry{id, ls})
+	}
+	m.mu.Unlock()
+
+	for _, e := range entries {
+		if e.ls.dirty.Load() == 0 {
+			continue
+		}
+		data := e.ls.sb.Snapshot()
+		if len(data) == 0 {
+			continue
+		}
+		if err := m.archive.Save(e.id, data); err != nil {
+			m.log.Warn("session: flusher save", "sessionID", e.id, "err", err)
+		} else {
+			e.ls.dirty.Store(0)
+		}
+	}
 }
 
 // Shutdown closes all open sessions gracefully (agent shutdown path).
 func (m *Manager) Shutdown() {
+	// Stop the flusher goroutine.
+	close(m.flusherStop)
+	<-m.flusherDone
+
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.sessions))
 	for id := range m.sessions {
@@ -203,7 +335,13 @@ func (m *Manager) Shutdown() {
 	m.mu.Unlock()
 
 	for _, id := range ids {
-		_ = m.Close(id)
+		// Use the internal pty.Close path that doesn't delete archives — we want
+		// the archive to survive for the next session-host startup.
+		ls, err := m.lookup(id)
+		if err != nil {
+			continue
+		}
+		_ = ls.pty.Close()
 	}
 }
 
@@ -341,6 +479,7 @@ func (m *Manager) readPump(sessionID string, ls *liveSession) {
 		if n > 0 {
 			ls.lastOutputAt.Store(time.Now().Unix())
 			ls.sb.Write(buf[:n])
+			ls.dirty.Store(1)
 			if ls.screen != nil {
 				ls.screen.Write(buf[:n])
 			}
