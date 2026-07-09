@@ -1,4 +1,4 @@
-//go:build linux
+//go:build unix
 
 package main
 
@@ -14,8 +14,8 @@ import (
 
 // spawnHostIfNeeded checks whether the session-host UDS at socketPath is
 // responsive. If not, it spawns a detached constellate-agent session-host
-// process (setsid — own process group, not in connect's group) and polls until
-// the socket answers.
+// process (setsid — own session/process group, not in connect's group) and
+// polls until the socket answers.
 //
 // configPath is passed through to the spawned host via --config so it uses the
 // same config file. An empty configPath means no --config flag (default config).
