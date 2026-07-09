@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useId } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { useStore } from '../../store'
 import type { Machine, Project, Session } from '../../types'
@@ -6,6 +6,7 @@ import { ApiError } from '../../api/rest'
 import { findLeaf } from '../terminal/paneTree'
 import { ActivityBadge } from '../activity/ActivityBadge'
 import type { SessionDragData } from '../terminal/dnd'
+import { machineKey, projectKey, ungroupedKey } from './collapse'
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
@@ -324,7 +325,8 @@ interface ProjectSectionProps {
 
 function ProjectSection({ project, sessions, focusedSessionId, onOpenShell, onAssign }: ProjectSectionProps) {
   const deleteProject = useStore((s) => s.deleteProject)
-  const [collapsed, setCollapsed] = useState(false)
+  const collapsed = useStore((s) => s.collapsed.has(projectKey(project.id)))
+  const toggleCollapsed = useStore((s) => s.toggleCollapsed)
   const [busy, setBusy] = useState(false)
   const [confirmCreateDir, setConfirmCreateDir] = useState(false)
   const [shellError, setShellError] = useState<string | null>(null)
@@ -383,8 +385,8 @@ function ProjectSection({ project, sessions, focusedSessionId, onOpenShell, onAs
     <div className="project-section">
       <div className="project-header" style={project.color ? { borderLeftColor: project.color } : undefined}>
         <button
-          className="project-collapse-btn"
-          onClick={() => setCollapsed((c) => !c)}
+          className="collapse-btn"
+          onClick={() => toggleCollapsed(projectKey(project.id))}
           title={collapsed ? 'Expand' : 'Collapse'}
           aria-label={`${project.name} sessions`}
           aria-expanded={!collapsed}
@@ -563,6 +565,10 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
   const focusedSessionId = useStore((s) => findLeaf(s.paneRoot, s.focusedPaneId)?.sessionId ?? null)
   const assignSessionFromSidebar = useStore((s) => s.assignSessionFromSidebar)
   const openSessionInPane = useStore((s) => s.openSessionInPane)
+  const collapsed = useStore((s) => s.collapsed.has(machineKey(machine.id)))
+  const ungroupedCollapsed = useStore((s) => s.collapsed.has(ungroupedKey(machine.id)))
+  const toggleCollapsed = useStore((s) => s.toggleCollapsed)
+  const bodyId = useId()
 
   const [addingProject, setAddingProject] = useState(false)
   const [shellBusy, setShellBusy] = useState(false)
@@ -599,15 +605,43 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
     [focusedPaneId, assignSessionFromSidebar],
   )
 
+  // Opening "New project" while the machine is collapsed must expand it first,
+  // otherwise the form would render inside the hidden body. Expanding always
+  // opens the form rather than toggling it, so the click can never leave the
+  // machine expanded with no form to show.
+  const handleToggleAddingProject = useCallback(() => {
+    if (collapsed) {
+      toggleCollapsed(machineKey(machine.id))
+      setAddingProject(true)
+      return
+    }
+    setAddingProject((v) => !v)
+  }, [collapsed, toggleCollapsed, machine.id])
+
   return (
     <div className={`machine-group${revoked ? ' machine-group-revoked' : ''}`}>
       <div className="machine-item">
         <div className="machine-info">
+          <button
+            className="collapse-btn"
+            onClick={() => toggleCollapsed(machineKey(machine.id))}
+            title={collapsed ? 'Expand' : 'Collapse'}
+            aria-label={`${machine.name} projects and sessions`}
+            aria-expanded={!collapsed}
+            aria-controls={bodyId}
+          >
+            {collapsed ? '▶' : '▼'}
+          </button>
           <span
             className={`dot ${machine.online ? 'dot-online' : 'dot-offline'}`}
             aria-label={machine.online ? 'online' : 'offline'}
           />
           <span className="machine-name">{machine.name}</span>
+          {collapsed && (
+            <span className="machine-session-count">
+              {sessions.length} session{sessions.length === 1 ? '' : 's'}
+            </span>
+          )}
           {revoked && <span className="machine-revoked-badge" aria-label="revoked">revoked</span>}
           {machine.online && (
             <div className="machine-actions">
@@ -625,7 +659,7 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
                 title="New project"
                 aria-label="New project"
                 aria-expanded={addingProject}
-                onClick={() => setAddingProject((v) => !v)}
+                onClick={handleToggleAddingProject}
               >
                 <FolderPlusIcon />
               </button>
@@ -649,38 +683,58 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
         </div>
       </div>
 
-      {addingProject && (
-        <NewProjectForm machineID={machine.id} onDone={() => setAddingProject(false)} />
-      )}
+      {!collapsed && (
+        <div id={bodyId}>
+          {addingProject && (
+            <NewProjectForm machineID={machine.id} onDone={() => setAddingProject(false)} />
+          )}
 
-      {/* Projects */}
-      {projects.map((p) => (
-        <ProjectSection
-          key={p.id}
-          project={p}
-          sessions={sessions}
-          focusedSessionId={focusedSessionId}
-          onOpenShell={(projectID, cwd, createDir) => handleOpenShell(projectID, cwd, createDir)}
-          onAssign={handleAssign}
-        />
-      ))}
+          {/* Projects */}
+          {projects.map((p) => (
+            <ProjectSection
+              key={p.id}
+              project={p}
+              sessions={sessions}
+              focusedSessionId={focusedSessionId}
+              onOpenShell={(projectID, cwd, createDir) => handleOpenShell(projectID, cwd, createDir)}
+              onAssign={handleAssign}
+            />
+          ))}
 
-      {/* Ungrouped sessions */}
-      {ungroupedSessions.length > 0 && (
-        <div className="project-section">
-          <div className="project-header project-header-ungrouped">
-            <span className="project-name">Ungrouped</span>
-          </div>
-          <div className="project-sessions">
-            {ungroupedSessions.map((s) => (
-              <SessionRow
-                key={s.id}
-                session={s}
-                isTargetPane={s.id === focusedSessionId}
-                onAssign={() => handleAssign(s.id)}
-              />
-            ))}
-          </div>
+          {/* Ungrouped sessions */}
+          {ungroupedSessions.length > 0 && (
+            <div className="project-section">
+              <div className="project-header project-header-ungrouped">
+                <button
+                  className="collapse-btn"
+                  onClick={() => toggleCollapsed(ungroupedKey(machine.id))}
+                  title={ungroupedCollapsed ? 'Expand' : 'Collapse'}
+                  aria-label="Ungrouped sessions"
+                  aria-expanded={!ungroupedCollapsed}
+                >
+                  {ungroupedCollapsed ? '▶' : '▼'}
+                </button>
+                <span className="project-name">Ungrouped</span>
+                {ungroupedCollapsed && (
+                  <span className="machine-session-count">
+                    {ungroupedSessions.length} session{ungroupedSessions.length === 1 ? '' : 's'}
+                  </span>
+                )}
+              </div>
+              {!ungroupedCollapsed && (
+                <div className="project-sessions">
+                  {ungroupedSessions.map((s) => (
+                    <SessionRow
+                      key={s.id}
+                      session={s}
+                      isTargetPane={s.id === focusedSessionId}
+                      onAssign={() => handleAssign(s.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

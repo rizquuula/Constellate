@@ -294,6 +294,13 @@ body {
   color: var(--text-faint);
 }
 
+.machine-session-count {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
 /* ── Revoked machine — dimmed row + badge ─────────────────────────────────── */
 
 .machine-group-revoked {
@@ -412,7 +419,7 @@ body {
   color: var(--accent);
 }
 
-.project-collapse-btn {
+.collapse-btn {
   background: transparent;
   border: none;
   color: var(--text-faint);
@@ -428,11 +435,11 @@ body {
   border-radius: var(--radius-sm);
 }
 
-.project-collapse-btn:hover {
+.collapse-btn:hover {
   color: var(--text-secondary);
 }
 
-.project-collapse-btn:focus-visible {
+.collapse-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent);
 }
@@ -2482,7 +2489,7 @@ body {
 /* ── Touch devices: larger hit targets + zoom-safe inputs ───────────────── */
 @media (pointer: coarse) {
   .session-action-btn,
-  .project-collapse-btn,
+  .collapse-btn,
   .pane-btn,
   .session-confirm-yes,
   .session-confirm-no,

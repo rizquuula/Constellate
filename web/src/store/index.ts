@@ -29,6 +29,7 @@ import {
   firstLeafId,
   splitPaneWithSession as treeSplitPaneWithSession,
 } from '../features/terminal/paneTree'
+import { COLLAPSED_KEY, parseCollapsed, serializeCollapsed, toggleKey } from '../features/sidebar/collapse'
 
 // Safe localStorage accessor — guards against SSR or restricted environments.
 function lsGet(key: string, fallback: string): string {
@@ -114,6 +115,8 @@ interface Store {
   setSidebarOpen: (open: boolean) => void
   showRevokedMachines: boolean
   setShowRevokedMachines: (v: boolean) => void
+  collapsed: Set<string>
+  toggleCollapsed: (key: string) => void
 
   // ── dashboard ─────────────────────────────────────────────────────────────
   dashboard: Dashboard | null
@@ -181,6 +184,12 @@ export const useStore = create<Store>((set, get) => ({
   setShowRevokedMachines: (v) => {
     lsSet('constellate.showRevokedMachines', String(v))
     set({ showRevokedMachines: v })
+  },
+  collapsed: parseCollapsed(lsGet(COLLAPSED_KEY, '')),
+  toggleCollapsed: (key) => {
+    const next = toggleKey(get().collapsed, key)
+    lsSet(COLLAPSED_KEY, serializeCollapsed(next))
+    set({ collapsed: next })
   },
 
   dashboard: null,
