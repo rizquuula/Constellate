@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -164,6 +165,80 @@ func TestRenderUnit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTeardownUnits(t *testing.T) {
+	// connect Requires= the session-host, so it must be stopped first —
+	// the reverse of the order install enables them in.
+	wantOrder := []string{unitServiceName, hostUnitServiceName}
+
+	t.Run("system", func(t *testing.T) {
+		got, err := teardownUnits(false)
+		if err != nil {
+			t.Fatalf("teardownUnits(false): %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("got %d units, want 2", len(got))
+		}
+		for i, want := range wantOrder {
+			if got[i].Name != want {
+				t.Errorf("unit[%d].Name = %q, want %q", i, got[i].Name, want)
+			}
+		}
+		if got[0].Path != systemUnitPath {
+			t.Errorf("connect path = %q, want %q", got[0].Path, systemUnitPath)
+		}
+		if got[1].Path != systemHostUnitPath {
+			t.Errorf("host path = %q, want %q", got[1].Path, systemHostUnitPath)
+		}
+	})
+
+	t.Run("rootless", func(t *testing.T) {
+		// os.UserConfigDir honours XDG_CONFIG_HOME, so the paths are pinned.
+		dir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", dir)
+
+		got, err := teardownUnits(true)
+		if err != nil {
+			t.Fatalf("teardownUnits(true): %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("got %d units, want 2", len(got))
+		}
+		for i, want := range wantOrder {
+			if got[i].Name != want {
+				t.Errorf("unit[%d].Name = %q, want %q", i, got[i].Name, want)
+			}
+		}
+		wantUserDir := filepath.Join(dir, "systemd", "user")
+		for _, u := range got {
+			if d := filepath.Dir(u.Path); d != wantUserDir {
+				t.Errorf("unit %s in dir %q, want %q", u.Name, d, wantUserDir)
+			}
+			if filepath.Base(u.Path) != u.Name {
+				t.Errorf("unit %s has mismatched filename %q", u.Name, filepath.Base(u.Path))
+			}
+		}
+	})
+
+	t.Run("paths match install targets", func(t *testing.T) {
+		// Guard against install and uninstall drifting apart: whatever install
+		// writes, uninstall must remove.
+		got, err := teardownUnits(false)
+		if err != nil {
+			t.Fatalf("teardownUnits(false): %v", err)
+		}
+		installed := map[string]bool{systemUnitPath: true, systemHostUnitPath: true}
+		for _, u := range got {
+			if !installed[u.Path] {
+				t.Errorf("uninstall targets %q, which install never writes", u.Path)
+			}
+			delete(installed, u.Path)
+		}
+		for path := range installed {
+			t.Errorf("install writes %q, but uninstall never removes it", path)
+		}
+	})
 }
 
 func TestShouldRestartHost(t *testing.T) {

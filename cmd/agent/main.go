@@ -87,6 +87,8 @@ func main() {
 		cmdReset(args)
 	case "install":
 		cmdInstall(args)
+	case "uninstall":
+		cmdUninstall(args)
 	case "update":
 		cmdUpdate(args)
 	default:
@@ -109,6 +111,7 @@ Commands:
   status        Show local enrollment status
   reset         Remove local enrollment (id + credential)
   install       Install + start a systemd service (Linux; requires enrollment)
+  uninstall     Stop + remove the systemd service (--purge also drops enrollment)
   update        Download + install the latest agent release, then restart the service
   version       Print version and protocol info
 
@@ -913,6 +916,116 @@ func cmdInstall(args []string) {
 		fmt.Printf("  systemctl status %s\n", unitServiceName)
 		fmt.Printf("  journalctl -u %s -f\n", unitServiceName)
 	}
+}
+
+// installedUnit pairs a systemd unit name with the file install wrote for it.
+type installedUnit struct {
+	Name string
+	Path string
+}
+
+// teardownUnits lists the units in stop order: connect first, then the
+// session-host it Requires=. This is the reverse of the install order.
+func teardownUnits(rootless bool) ([]installedUnit, error) {
+	if !rootless {
+		return []installedUnit{
+			{Name: unitServiceName, Path: systemUnitPath},
+			{Name: hostUnitServiceName, Path: systemHostUnitPath},
+		}, nil
+	}
+	connect, err := userUnitPath()
+	if err != nil {
+		return nil, err
+	}
+	host, err := userHostUnitPath()
+	if err != nil {
+		return nil, err
+	}
+	return []installedUnit{
+		{Name: unitServiceName, Path: connect},
+		{Name: hostUnitServiceName, Path: host},
+	}, nil
+}
+
+func cmdUninstall(args []string) {
+	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
+	// --config is only consulted under --purge, to locate the id/cred files.
+	configPath := platcli.ConfigFlag(fs)
+	rootless := platcli.Bool(fs, "rootless", "r", false, "uninstall the rootless systemd *user* service (~/.config/systemd/user, systemctl --user) — no root required")
+	purge := fs.Bool("purge", false, "also remove local enrollment (machine id + private key), as `reset` does")
+	_ = fs.Parse(args)
+
+	if runtime.GOOS != "linux" {
+		fmt.Fprintf(os.Stderr, "uninstall: only supported on Linux (systemd); see docs/usage.agent.md for %s\n", runtime.GOOS)
+		os.Exit(1)
+	}
+
+	// Removing /etc/systemd/system units and driving the system manager need root.
+	if !*rootless && os.Geteuid() != 0 {
+		fmt.Fprintln(os.Stderr, "uninstall: must run as root — re-run with sudo (or use --rootless for a user service)")
+		os.Exit(1)
+	}
+
+	// Resolve the enrollment paths up front so a bad --config fails before we
+	// start tearing down units, rather than halfway through.
+	var idFile, credFile string
+	if *purge {
+		cfg, err := platconfig.LoadAgent(*configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "uninstall: load config: %v\n", err)
+			os.Exit(1)
+		}
+		idFile, credFile = cfg.IDFile, cfg.CredFile
+	}
+
+	units, err := teardownUnits(*rootless)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "uninstall: resolve unit paths: %v\n", err)
+		os.Exit(1)
+	}
+
+	removed := 0
+	for _, u := range units {
+		// Skip a unit we never wrote: `systemctl disable` on a missing unit
+		// fails noisily, and uninstall should be idempotent.
+		if _, err := os.Stat(u.Path); os.IsNotExist(err) {
+			continue
+		}
+		// Best-effort: a unit file can exist while the unit is already stopped
+		// or was never enabled. Warn and keep going so the file still gets removed.
+		if err := runSystemctl(*rootless, "disable", "--now", u.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "uninstall: systemctl disable --now %s: %v (continuing)\n", u.Name, err)
+		}
+		if err := os.Remove(u.Path); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "uninstall: remove %s: %v\n", u.Path, err)
+			os.Exit(1)
+		}
+		fmt.Printf("removed %s\n", u.Path)
+		removed++
+	}
+
+	if removed == 0 {
+		fmt.Println("no service installed (nothing to remove)")
+	} else if err := runSystemctl(*rootless, "daemon-reload"); err != nil {
+		fmt.Fprintf(os.Stderr, "uninstall: systemctl daemon-reload: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *purge {
+		for _, path := range []string{idFile, credFile} {
+			if path == "" {
+				continue
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "uninstall: remove %s: %v\n", path, err)
+				os.Exit(1)
+			}
+		}
+		fmt.Println("purged local enrollment (id + credential)")
+		fmt.Println("Note: the hub still lists this machine — run `hub revoke <machineID>` there to revoke it.")
+	}
+
+	fmt.Println("uninstall done")
 }
 
 // resolveServiceUser picks the user the service runs as: the --user override,

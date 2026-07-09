@@ -350,6 +350,29 @@ journalctl --user -u constellate-agent -f         # connect logs
 systemctl --user restart constellate-agent        # restart connect only (sessions stay alive)
 ```
 
+### Linux — uninstalling the service
+
+`uninstall` reverses `install`: it stops and disables the units in the opposite order (connect first,
+since it `Requires=` the session-host), removes both unit files, and reloads the manager.
+
+```bash
+sudo constellate-agent uninstall              # system service
+constellate-agent uninstall --rootless        # rootless user service
+```
+
+It is **idempotent** — a unit that was never installed is skipped, not an error — and it leaves the
+enrollment alone, so a later `install` just works. Killing the units **terminates running sessions**;
+the hub marks them `lost`, and the machine goes offline.
+
+To also drop the local machine ID and private key (what `reset` does), add `--purge`:
+
+```bash
+sudo constellate-agent uninstall --purge --config ~/.constellate/agent.yaml
+```
+
+`--purge` only clears **local** state. The hub still lists the machine — revoke it there with
+`hub revoke <machineID>`.
+
 > **Logout caveat:** a `systemd --user` service stops when your login session ends. To keep the agent
 > running after you log out, enable [lingering](https://www.freedesktop.org/software/systemd/man/loginctl.html):
 >
@@ -549,6 +572,7 @@ and `session-host` also accept `--log-level` / `-l`.
 | `connect` | Volatile relay: auto-spawns the session-host if needed, then dials home. Long-running. Makes the machine **online**. |
 | `session-host` | Durable host: owns PTYs + scrollback + instanceID, listens on UDS. Normally started automatically by `connect` or systemd; rarely run manually. |
 | `install` | Write and start both systemd units (`constellate-session-host.service` + `constellate-agent.service`) with correct ordering. Linux only; requires enrollment. |
+| `uninstall` | Stop, disable, and remove both systemd units (reverse order). Idempotent. `--purge` also drops the local enrollment. Linux only. |
 | `update` | Download + verify latest release, replace binary, restart the **connect** unit only (sessions survive). |
 | `status` | Print local enrollment identity (no live connectivity check). |
 | `reset` | Delete the local machine ID + credential. |
