@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useId } from 'react'
 import { useDraggable } from '@dnd-kit/core'
-import { useStore } from '../../store'
+import { useStore, activeWindowOf } from '../../store'
 import type { Machine, Project, Session } from '../../types'
 import { ApiError } from '../../api/rest'
 import { findLeaf } from '../terminal/paneTree'
@@ -561,8 +561,12 @@ interface MachineGroupProps {
 function MachineGroup({ machine, revoked }: MachineGroupProps) {
   const projects = useStore((s) => s.projects.filter((p) => p.machineID === machine.id))
   const sessions = useStore((s) => s.sessions.filter((s) => s.machineID === machine.id))
-  const focusedPaneId = useStore((s) => s.focusedPaneId)
-  const focusedSessionId = useStore((s) => findLeaf(s.paneRoot, s.focusedPaneId)?.sessionId ?? null)
+  // The sidebar always targets the pane focused in the *active* window.
+  const focusedPaneId = useStore((s) => activeWindowOf(s).focusedPaneId)
+  const focusedSessionId = useStore((s) => {
+    const active = activeWindowOf(s)
+    return findLeaf(active.root, active.focusedPaneId)?.sessionId ?? null
+  })
   const assignSessionFromSidebar = useStore((s) => s.assignSessionFromSidebar)
   const openSessionInPane = useStore((s) => s.openSessionInPane)
   const collapsed = useStore((s) => s.collapsed.has(machineKey(machine.id)))

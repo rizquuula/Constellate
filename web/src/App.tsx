@@ -11,11 +11,12 @@ import {
 } from '@dnd-kit/core'
 import { ProjectTree } from './features/sidebar/ProjectTree'
 import { TerminalView } from './features/terminal/TerminalView'
+import { WindowTabs } from './features/terminal/WindowTabs'
 import { OverviewGrid } from './features/overview/OverviewGrid'
 import { DashboardView } from './features/dashboard/DashboardView'
 import { Login } from './features/auth/Login'
 import { Snackbar, type SnackbarVariant } from './components/Snackbar'
-import { useStore, hashToView } from './store'
+import { useStore, hashToView, activeWindowOf } from './store'
 import { authStatus, logout, passkeyRegister } from './api/rest'
 import { parsePaneDropId } from './features/terminal/dnd'
 import type { SessionDragData } from './features/terminal/dnd'
@@ -126,25 +127,42 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [authState, setViewMode])
 
-  // Shift+Alt pane controls act on the focused pane: split H (−), split V (=),
-  // close (W), detach (E), reload (R). Physical e.code keeps them
-  // layout-independent (Alt often rewrites the produced character). Capture
-  // phase + stop/prevent so the shortcut wins even while a terminal is focused
-  // and xterm would otherwise swallow the keystroke. State is read live via
-  // getState() so the handler always targets the currently focused pane without
-  // re-registering.
+  // Shift+Alt pane controls act on the focused pane of the active window: split
+  // H (−), split V (=), close (W), detach (E), reload (R). The same family also
+  // drives windows: new window (T), previous/next window (PageUp/PageDown).
+  // Physical e.code keeps them layout-independent (Alt often rewrites the
+  // produced character). Capture phase + stop/prevent so the shortcut wins even
+  // while a terminal is focused and xterm would otherwise swallow the keystroke.
+  // State is read live via getState() so the handler always targets the current
+  // focus without re-registering.
   useEffect(() => {
     if (authState !== 'authed') return
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.shiftKey || !e.altKey || e.ctrlKey || e.metaKey) return
-      const { viewMode, focusedPaneId, splitPane, closePane, detachPane, reloadPane } = useStore.getState()
-      if (viewMode !== 'workspace') return
+      const state = useStore.getState()
+      if (state.viewMode !== 'workspace') return
+      const { splitPane, closePane, detachPane, reloadPane, addWindow, setActiveWindow } = state
+      const { focusedPaneId } = activeWindowOf(state)
+
+      // step wraps around the window strip, so PageDown on the last window
+      // returns to the first — the tabs read as a ring, not a dead end.
+      const step = (delta: number) => {
+        const { windows, activeWindowId } = state
+        const idx = windows.findIndex((w) => w.id === activeWindowId)
+        if (idx === -1 || windows.length < 2) return
+        const next = (idx + delta + windows.length) % windows.length
+        setActiveWindow(windows[next].id)
+      }
+
       switch (e.code) {
-        case 'Minus': splitPane(focusedPaneId, 'horizontal'); break
-        case 'Equal': splitPane(focusedPaneId, 'vertical'); break
-        case 'KeyW':  closePane(focusedPaneId); break
-        case 'KeyE':  detachPane(focusedPaneId); break
-        case 'KeyR':  reloadPane(focusedPaneId); break
+        case 'Minus':    splitPane(focusedPaneId, 'horizontal'); break
+        case 'Equal':    splitPane(focusedPaneId, 'vertical'); break
+        case 'KeyW':     closePane(focusedPaneId); break
+        case 'KeyE':     detachPane(focusedPaneId); break
+        case 'KeyR':     reloadPane(focusedPaneId); break
+        case 'KeyT':     addWindow(); break
+        case 'PageUp':   step(-1); break
+        case 'PageDown': step(1); break
         default: return
       }
       e.preventDefault()
@@ -291,12 +309,15 @@ export function App() {
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className={`layout${sidebarOpen ? ' drawer-open' : ''}`}>
-            {sidebarOpen && (
-              <div className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
-            )}
-            <ProjectTree />
-            <TerminalView />
+          <div className="workspace-shell">
+            <div className={`layout${sidebarOpen ? ' drawer-open' : ''}`}>
+              {sidebarOpen && (
+                <div className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+              )}
+              <ProjectTree />
+              <TerminalView />
+            </div>
+            <WindowTabs />
           </div>
           <DragOverlay>
             {activeDragLabel && (

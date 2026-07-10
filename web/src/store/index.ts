@@ -16,19 +16,32 @@ import {
 import {
   type PaneNode,
   type PaneDirection,
-  makeLeaf,
   splitPane,
   closePane,
   detachPane,
   assignSession,
-  clearSession,
   collectSessionIds,
   findLeaf,
-  findLeafBySession,
   firstEmptyLeafId,
   firstLeafId,
   splitPaneWithSession as treeSplitPaneWithSession,
 } from '../features/terminal/paneTree'
+import {
+  type WorkspaceWindow,
+  makeWindow,
+  findWindow,
+  findWindowByPane,
+  findWindowBySession,
+  updateWindow,
+  updateWindowByPane,
+  clearSessionEverywhere,
+  collectWindowPaneIds,
+  addWindow as listAddWindow,
+  removeWindow as listRemoveWindow,
+  renameWindow as listRenameWindow,
+  reorderWindow as listReorderWindow,
+  normalizeFocus,
+} from '../features/terminal/windowList'
 import { COLLAPSED_KEY, parseCollapsed, serializeCollapsed, toggleKey } from '../features/sidebar/collapse'
 
 // Safe localStorage accessor — guards against SSR or restricted environments.
@@ -43,6 +56,14 @@ function lsGet(key: string, fallback: string): string {
 function lsSet(key: string, value: string): void {
   try {
     if (typeof window !== 'undefined') window.localStorage.setItem(key, value)
+  } catch {
+    // ignore
+  }
+}
+
+function lsRemove(key: string): void {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(key)
   } catch {
     // ignore
   }
@@ -66,8 +87,17 @@ export function hashToView(hash: string): ViewMode {
   }
 }
 
-const PANE_ROOT_KEY = 'constellate.paneRoot'
-const FOCUSED_PANE_KEY = 'constellate.focusedPaneId'
+const WORKSPACE_KEY = 'constellate.workspace'
+// Pre-multi-window keys. Read once at startup to migrate, then deleted.
+const LEGACY_PANE_ROOT_KEY = 'constellate.paneRoot'
+const LEGACY_FOCUSED_PANE_KEY = 'constellate.focusedPaneId'
+
+const WORKSPACE_VERSION = 2
+
+interface WorkspaceState {
+  windows: WorkspaceWindow[]
+  activeWindowId: string
+}
 
 // isPaneNode structurally validates a parsed value as a PaneNode before it is
 // trusted as restored state — guards against corrupt or stale localStorage from
@@ -91,20 +121,96 @@ function isPaneNode(v: unknown): v is PaneNode {
   return false
 }
 
-// loadPaneRoot restores the persisted pane layout, falling back to a single
-// empty leaf on missing or corrupt data. Session bindings are reconciled
-// against the server later (refreshSessions) — here we only restore the shape.
-function loadPaneRoot(): PaneNode {
-  const raw = lsGet(PANE_ROOT_KEY, '')
-  if (raw) {
-    try {
-      const parsed: unknown = JSON.parse(raw)
-      if (isPaneNode(parsed)) return parsed
-    } catch {
-      // corrupt JSON — fall through to a fresh leaf
-    }
+function isWorkspaceWindow(v: unknown): v is WorkspaceWindow {
+  if (!v || typeof v !== 'object') return false
+  const w = v as Record<string, unknown>
+  return (
+    typeof w.id === 'string' &&
+    typeof w.name === 'string' &&
+    typeof w.focusedPaneId === 'string' &&
+    isPaneNode(w.root)
+  )
+}
+
+// isWorkspaceState validates the persisted multi-window blob: shape, a non-empty
+// window list, and activeWindowId naming a real window. A focusedPaneId pointing
+// at a pane that no longer exists is *not* grounds for rejection — that is a
+// repairable inconsistency, handled by normalizeFocus, and throwing away the
+// user's whole layout over it would be a poor trade.
+function isWorkspaceState(v: unknown): v is WorkspaceState {
+  if (!v || typeof v !== 'object') return false
+  const s = v as Record<string, unknown>
+  if (s.version !== WORKSPACE_VERSION) return false
+  if (!Array.isArray(s.windows) || s.windows.length === 0) return false
+  if (!(s.windows as unknown[]).every(isWorkspaceWindow)) return false
+  if (typeof s.activeWindowId !== 'string') return false
+  return (s.windows as WorkspaceWindow[]).some((w) => w.id === s.activeWindowId)
+}
+
+// parseWorkspace decodes and repairs the persisted multi-window blob, or returns
+// null when it is absent, malformed, or from an unknown schema version.
+// Exported for tests: it is pure, whereas loadWorkspace touches localStorage.
+export function parseWorkspace(raw: string): WorkspaceState | null {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
   }
-  return makeLeaf(null)
+  if (!isWorkspaceState(parsed)) return null
+  return {
+    windows: parsed.windows.map(normalizeFocus),
+    activeWindowId: parsed.activeWindowId,
+  }
+}
+
+// migrateLegacy converts the single-pane-tree layout written by versions before
+// multi-window into one window named "Window 1". Returns null when there is
+// nothing (valid) to migrate. Pure, so it is exercised directly by tests.
+export function migrateLegacy(rawRoot: string, rawFocus: string): WorkspaceState | null {
+  if (!rawRoot) return null
+  let root: PaneNode
+  try {
+    const parsed: unknown = JSON.parse(rawRoot)
+    if (!isPaneNode(parsed)) return null
+    root = parsed
+  } catch {
+    return null
+  }
+  const focusedPaneId = rawFocus && findLeaf(root, rawFocus) ? rawFocus : firstLeafId(root)
+  const win: WorkspaceWindow = { id: crypto.randomUUID(), name: 'Window 1', root, focusedPaneId }
+  return { windows: [win], activeWindowId: win.id }
+}
+
+// loadWorkspace restores the persisted windows, migrating the pre-multi-window
+// layout when present and falling back to a single empty window otherwise.
+// Session bindings are reconciled against the server later (refreshSessions) —
+// here we only restore the shape.
+function loadWorkspace(): WorkspaceState {
+  const restored = parseWorkspace(lsGet(WORKSPACE_KEY, ''))
+  if (restored) return restored
+
+  const migrated = migrateLegacy(lsGet(LEGACY_PANE_ROOT_KEY, ''), lsGet(LEGACY_FOCUSED_PANE_KEY, ''))
+  if (migrated) {
+    // Drop the old keys only after the new blob is safely written, so an
+    // interrupted migration is retried next load rather than losing the layout.
+    lsSet(WORKSPACE_KEY, serializeWorkspace(migrated))
+    lsRemove(LEGACY_PANE_ROOT_KEY)
+    lsRemove(LEGACY_FOCUSED_PANE_KEY)
+    return migrated
+  }
+
+  const win = makeWindow('Window 1')
+  return { windows: [win], activeWindowId: win.id }
+}
+
+function serializeWorkspace(s: WorkspaceState): string {
+  return JSON.stringify({
+    version: WORKSPACE_VERSION,
+    activeWindowId: s.activeWindowId,
+    windows: s.windows,
+  })
 }
 
 interface Store {
@@ -139,12 +245,18 @@ interface Store {
   closeSession: (id: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
 
-  // ── workspace (pane tree) ─────────────────────────────────────────────────
-  paneRoot: PaneNode
-  focusedPaneId: string
+  // ── workspace (windows of pane trees) ─────────────────────────────────────
+  windows: WorkspaceWindow[]
+  activeWindowId: string
   // Per-pane reload counter; bumping a pane's entry forces its terminal to tear
   // down and reattach (fresh socket, scrollback replayed) to recover a wedged term.
   paneReloads: Record<string, number>
+
+  addWindow: () => void
+  closeWindow: (windowId: string) => void
+  renameWindow: (windowId: string, name: string) => void
+  setActiveWindow: (windowId: string) => void
+  reorderWindow: (windowId: string, toIndex: number) => void
 
   focusPane: (id: string) => void
   splitPane: (paneId: string, direction: PaneDirection) => void
@@ -161,12 +273,17 @@ interface Store {
   ) => Promise<void>
 }
 
-const initialPaneRoot = loadPaneRoot()
-const storedFocus = lsGet(FOCUSED_PANE_KEY, '')
-// Restore the focused pane only if it still exists in the restored tree;
-// otherwise fall back to the first leaf so the focus is always valid.
-const initialFocusedPaneId =
-  storedFocus && findLeaf(initialPaneRoot, storedFocus) ? storedFocus : firstLeafId(initialPaneRoot)
+// activeWindowOf resolves the active window, falling back to the first one if
+// activeWindowId ever drifts. Components read derived scalars through this
+// rather than storing a duplicate copy of the active window in state.
+export function activeWindowOf(s: {
+  windows: WorkspaceWindow[]
+  activeWindowId: string
+}): WorkspaceWindow {
+  return findWindow(s.windows, s.activeWindowId) ?? s.windows[0]
+}
+
+const initial = loadWorkspace()
 
 export const useStore = create<Store>((set, get) => ({
   viewMode: hashToView(typeof window !== 'undefined' ? window.location.hash : ''),
@@ -220,18 +337,20 @@ export const useStore = create<Store>((set, get) => ({
 
   refreshSessions: async () => {
     const sessions = await listSessions()
-    // Reconcile the restored/live pane tree against the server: drop any pane
-    // binding to a session the server no longer knows about (deleted
-    // elsewhere), turning that leaf back into an empty pane. Sessions that
-    // still exist — including exited/lost — stay bound; running ones re-attach
-    // and replay scrollback on mount.
+    // Reconcile every window against the server: drop any pane binding to a
+    // session the server no longer knows about (deleted elsewhere), turning that
+    // leaf back into an empty pane. Sessions that still exist — including
+    // exited/lost — stay bound; running ones re-attach and replay scrollback on
+    // mount.
     set((s) => {
       const known = new Set(sessions.map((x) => x.id))
-      let paneRoot = s.paneRoot
-      for (const id of collectSessionIds(paneRoot)) {
-        if (!known.has(id)) paneRoot = clearSession(paneRoot, id)
+      let windows = s.windows
+      for (const w of s.windows) {
+        for (const id of collectSessionIds(w.root)) {
+          if (!known.has(id)) windows = clearSessionEverywhere(windows, id)
+        }
       }
-      return { sessions, paneRoot }
+      return { sessions, windows }
     })
   },
 
@@ -281,38 +400,105 @@ export const useStore = create<Store>((set, get) => ({
 
   deleteSession: async (id) => {
     await apiDeleteSession(id)
-    // Drop the record from the list and detach it from any pane still showing it.
+    // Drop the record from the list and detach it from any pane, in any window,
+    // still showing it.
     set((s) => ({
       sessions: s.sessions.filter((x) => x.id !== id),
-      paneRoot: clearSession(s.paneRoot, id),
+      windows: clearSessionEverywhere(s.windows, id),
     }))
   },
 
-  // ── workspace ──────────────────────────────────────────────────────────────
-  paneRoot: initialPaneRoot,
-  focusedPaneId: initialFocusedPaneId,
+  // ── windows ────────────────────────────────────────────────────────────────
+  windows: initial.windows,
+  activeWindowId: initial.activeWindowId,
   paneReloads: {},
 
-  focusPane: (id) => set({ focusedPaneId: id }),
+  addWindow: () => {
+    const [windows, win] = listAddWindow(get().windows)
+    set({ windows, activeWindowId: win.id })
+  },
+
+  // closeWindow removes the window and nothing else. Sessions bound inside it
+  // are merely unbound along with their panes — the shells keep running on the
+  // agent and stay reachable from the sidebar and Overview, the same semantics
+  // as detachPane. Closing the last window resets it to one empty window.
+  closeWindow: (windowId) => {
+    const { windows, activeWindowId, paneReloads } = get()
+    const doomed = findWindow(windows, windowId)
+    const [next, nextActiveId] = listRemoveWindow(windows, windowId, activeWindowId)
+    if (next === windows) return
+
+    // Drop reload counters for panes that no longer exist.
+    let reloads = paneReloads
+    if (doomed) {
+      reloads = { ...paneReloads }
+      for (const paneId of collectWindowPaneIds(doomed.root)) delete reloads[paneId]
+    }
+    set({ windows: next, activeWindowId: nextActiveId, paneReloads: reloads })
+  },
+
+  renameWindow: (windowId, name) => {
+    set((s) => ({ windows: listRenameWindow(s.windows, windowId, name) }))
+  },
+
+  setActiveWindow: (windowId) => {
+    if (!findWindow(get().windows, windowId)) return
+    set({ activeWindowId: windowId })
+  },
+
+  reorderWindow: (windowId, toIndex) => {
+    set((s) => ({ windows: listReorderWindow(s.windows, windowId, toIndex) }))
+  },
+
+  // ── panes ──────────────────────────────────────────────────────────────────
+  // Every pane action resolves its owning window from the pane id rather than
+  // assuming the active one: drag-and-drop and keyboard handlers pass a bare
+  // paneId, and acting on a pane always brings its window to the front.
+
+  focusPane: (id) => {
+    const owner = findWindowByPane(get().windows, id)
+    if (!owner) return
+    set((s) => ({
+      windows: updateWindow(s.windows, owner.id, (w) => ({ ...w, focusedPaneId: id })),
+      activeWindowId: owner.id,
+    }))
+  },
 
   splitPane: (paneId, direction) => {
-    const [newRoot, newLeafId] = splitPane(get().paneRoot, paneId, direction)
-    set({ paneRoot: newRoot, focusedPaneId: newLeafId })
+    const owner = findWindowByPane(get().windows, paneId)
+    if (!owner) return
+    const [root, newLeafId] = splitPane(owner.root, paneId, direction)
+    set((s) => ({
+      windows: updateWindow(s.windows, owner.id, (w) => ({ ...w, root, focusedPaneId: newLeafId })),
+      activeWindowId: owner.id,
+    }))
   },
 
   closePane: (paneId) => {
-    const [newRoot, nextFocusId] = closePane(get().paneRoot, paneId)
+    const owner = findWindowByPane(get().windows, paneId)
+    if (!owner) return
+    const [root, nextFocusId] = closePane(owner.root, paneId)
     // Drop the pane's reload-counter entry so paneReloads doesn't accumulate
     // stale keys for panes that no longer exist.
     const { [paneId]: _removed, ...paneReloads } = get().paneReloads
-    set({ paneRoot: newRoot, focusedPaneId: nextFocusId, paneReloads })
+    set((s) => ({
+      windows: updateWindow(s.windows, owner.id, (w) => ({ ...w, root, focusedPaneId: nextFocusId })),
+      activeWindowId: owner.id,
+      paneReloads,
+    }))
   },
 
   // detachPane unbinds the session from a pane without removing the pane or
   // touching the shell. The pane stays in the layout as an empty leaf; the
   // session keeps running and remains reachable from the sidebar.
   detachPane: (paneId) => {
-    set({ paneRoot: detachPane(get().paneRoot, paneId), focusedPaneId: paneId })
+    set((s) => ({
+      windows: updateWindowByPane(s.windows, paneId, (w) => ({
+        ...w,
+        root: detachPane(w.root, paneId),
+        focusedPaneId: paneId,
+      })),
+    }))
   },
 
   // reloadPane bumps the pane's reload counter, forcing useTerminal to rebuild
@@ -322,41 +508,62 @@ export const useStore = create<Store>((set, get) => ({
     set({ paneReloads: { ...reloads, [paneId]: (reloads[paneId] ?? 0) + 1 } })
   },
 
+  // assignSessionToPane enforces global single occupancy: the session is cleared
+  // from every other window first, so dropping it into window B moves it out of
+  // window A rather than duplicating the attach.
   assignSessionToPane: (paneId, sessionId) => {
-    const newRoot = assignSession(get().paneRoot, paneId, sessionId)
-    set({ paneRoot: newRoot, focusedPaneId: paneId })
+    const owner = findWindowByPane(get().windows, paneId)
+    if (!owner) return
+    set((s) => {
+      const cleared = clearSessionEverywhere(s.windows, sessionId)
+      return {
+        windows: updateWindow(cleared, owner.id, (w) => ({
+          ...w,
+          root: assignSession(w.root, paneId, sessionId),
+          focusedPaneId: paneId,
+        })),
+        activeWindowId: owner.id,
+      }
+    })
   },
 
   // assignSessionFromSidebar is the click-from-sidebar path. It refuses to touch
-  // the workspace while any pane already holds a live (running) terminal — a
-  // sidebar click should never silently clobber an active pane. Once the
-  // workspace has zero running terminals it behaves like assignSessionToPane.
-  // Drag-and-drop (assignSessionToPane / splitPaneWithSession) remains the
-  // deliberate way to reassign sessions when terminals are live.
+  // the workspace while a pane *in the active window* already holds a live
+  // (running) terminal — a sidebar click should never silently clobber an active
+  // pane. The gate is deliberately scoped to the active window: were it global,
+  // a single live terminal in any background window would disable sidebar clicks
+  // outright. Drag-and-drop (assignSessionToPane / splitPaneWithSession) remains
+  // the deliberate way to reassign sessions when terminals are live.
   assignSessionFromSidebar: (paneId, sessionId) => {
-    const { paneRoot, sessions } = get()
-    const hasLiveTerminal = collectSessionIds(paneRoot).some((id) =>
-      sessions.some((s) => s.id === id && s.status === 'running'),
+    const state = get()
+    const active = activeWindowOf(state)
+    const hasLiveTerminal = collectSessionIds(active.root).some((id) =>
+      state.sessions.some((s) => s.id === id && s.status === 'running'),
     )
     if (hasLiveTerminal) return
-    set({ paneRoot: assignSession(paneRoot, paneId, sessionId), focusedPaneId: paneId })
+    get().assignSessionToPane(paneId, sessionId)
   },
 
   // diveToSession is the Overview click-to-dive path: open the selected window
-  // as the active pane. If it is already bound to a pane, just focus that pane;
-  // otherwise load it into the currently focused pane. The split layout is
-  // preserved either way (no collapse to a single pane).
+  // as the active pane. If it is already bound to a pane in any window, activate
+  // that window and focus the pane; otherwise load it into the focused pane of
+  // the active window. Split layouts are preserved either way.
   diveToSession: (sessionId) => {
-    const { paneRoot, focusedPaneId } = get()
-    const existing = findLeafBySession(paneRoot, sessionId)
-    if (existing) {
-      set({ focusedPaneId: existing.id })
+    const state = get()
+    const hit = findWindowBySession(state.windows, sessionId)
+    if (hit) {
+      set({
+        windows: updateWindow(state.windows, hit.windowId, (w) => ({ ...w, focusedPaneId: hit.leafId })),
+        activeWindowId: hit.windowId,
+      })
       return
     }
-    set({ paneRoot: assignSession(paneRoot, focusedPaneId, sessionId), focusedPaneId })
+    get().assignSessionToPane(activeWindowOf(state).focusedPaneId, sessionId)
   },
 
   splitPaneWithSession: (paneId, edge, sessionId) => {
+    const owner = findWindowByPane(get().windows, paneId)
+    if (!owner) return
     const directionMap: Record<'top' | 'bottom' | 'left' | 'right', [PaneDirection, boolean]> = {
       left:   ['horizontal', true],
       right:  ['horizontal', false],
@@ -364,58 +571,68 @@ export const useStore = create<Store>((set, get) => ({
       bottom: ['vertical',   false],
     }
     const [direction, before] = directionMap[edge]
-    const [newRoot, newLeafId] = treeSplitPaneWithSession(get().paneRoot, paneId, direction, sessionId, before)
-    set({ paneRoot: newRoot, focusedPaneId: newLeafId })
+    set((s) => {
+      // Vacate the session from every other window before splitting, so a
+      // cross-window edge-drop moves rather than duplicates it.
+      const cleared = clearSessionEverywhere(s.windows, sessionId)
+      const target = findWindow(cleared, owner.id)
+      if (!target) return {}
+      const [root, newLeafId] = treeSplitPaneWithSession(target.root, paneId, direction, sessionId, before)
+      return {
+        windows: updateWindow(cleared, owner.id, (w) => ({ ...w, root, focusedPaneId: newLeafId })),
+        activeWindowId: owner.id,
+      }
+    })
   },
 
-  // New Shell mirrors the sidebar gate, but for the active pane only: a new
-  // shell must never clobber a live (running) terminal in the focused pane.
-  // If the focused pane is free (empty or holding a dead session) it opens
-  // there as before. If the focused pane is live, the shell lands in the first
-  // empty pane instead; if there is none, the session is created but left
-  // unbound — it surfaces in the sidebar and the layout is untouched, so no
-  // live terminal is ever replaced.
+  // New Shell mirrors the sidebar gate, but for the target pane only: a new
+  // shell must never clobber a live (running) terminal in that pane. If the pane
+  // is free (empty or holding a dead session) it opens there. If it is live, the
+  // shell lands in the first empty pane *of the same window*; if there is none,
+  // the session is created but left unbound — it surfaces in the sidebar and the
+  // layout is untouched, so no live terminal is ever replaced. The search never
+  // crosses into another window: a new shell must not silently appear elsewhere.
   openSessionInPane: async (paneId, { machineID, projectID, cwd, createDir }) => {
     const session = await createSession({ machineID, projectID, cwd, createDir, cols: 80, rows: 24 })
     const sessions = await listSessions()
-    const root = get().paneRoot
+    const owner = findWindowByPane(get().windows, paneId)
+    if (!owner) {
+      set({ sessions })
+      return
+    }
 
-    const activeLeaf = findLeaf(root, paneId)
+    const activeLeaf = findLeaf(owner.root, paneId)
     const activeIsLive =
       !!activeLeaf?.sessionId &&
       sessions.some((s) => s.id === activeLeaf.sessionId && s.status === 'running')
 
-    if (!activeIsLive) {
-      set({ sessions, paneRoot: assignSession(root, paneId, session.id), focusedPaneId: paneId })
+    const targetPaneId = activeIsLive ? firstEmptyLeafId(owner.root) : paneId
+    if (!targetPaneId) {
+      // Target pane is live and no empty pane exists in this window — keep the
+      // new session unplaced rather than overwrite a running terminal.
+      set({ sessions })
       return
     }
 
-    const emptyPaneId = firstEmptyLeafId(root)
-    if (emptyPaneId) {
-      set({ sessions, paneRoot: assignSession(root, emptyPaneId, session.id), focusedPaneId: emptyPaneId })
-      return
-    }
-
-    // Active pane is live and no empty pane exists — keep the new session
-    // unplaced rather than overwrite a running terminal.
     set({ sessions })
+    get().assignSessionToPane(targetPaneId, session.id)
   },
 }))
 
-// Persist the workspace layout (per browser) so a reload restores the same
-// panes and their session bindings. We write only when paneRoot/focusedPaneId
-// actually change — a serialize-and-compare guard keeps the frequent session
-// polls from thrashing localStorage on every store update.
-let lastPaneRootJSON = JSON.stringify(useStore.getState().paneRoot)
-let lastFocusedPaneId = useStore.getState().focusedPaneId
+// Persist the workspace (per browser) so a reload restores the same windows,
+// panes and session bindings. We write only when the workspace actually
+// changes — a serialize-and-compare guard keeps the frequent session polls from
+// thrashing localStorage on every store update.
+let lastWorkspaceJSON = serializeWorkspace(useStore.getState())
 useStore.subscribe((state) => {
-  const json = JSON.stringify(state.paneRoot)
-  if (json !== lastPaneRootJSON) {
-    lastPaneRootJSON = json
-    lsSet(PANE_ROOT_KEY, json)
-  }
-  if (state.focusedPaneId !== lastFocusedPaneId) {
-    lastFocusedPaneId = state.focusedPaneId
-    lsSet(FOCUSED_PANE_KEY, state.focusedPaneId)
+  const json = serializeWorkspace(state)
+  if (json !== lastWorkspaceJSON) {
+    lastWorkspaceJSON = json
+    lsSet(WORKSPACE_KEY, json)
   }
 })
+
+// Re-exported so tests and components can build workspace state without
+// reaching into the window-list module directly.
+export { makeWindow, normalizeFocus }
+export type { WorkspaceWindow }
