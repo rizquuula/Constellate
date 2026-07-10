@@ -20,6 +20,7 @@ type SessionService interface {
 	ListByMachine(ctx context.Context, machineID string) ([]session.Session, error)
 	Close(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
+	ForceDelete(ctx context.Context, id string) error
 	Rename(ctx context.Context, id, title string) error
 	SetAutoRelaunch(ctx context.Context, id string, v bool) error
 }
@@ -105,6 +106,16 @@ func (s *Server) handleCloseSession(w http.ResponseWriter, r *http.Request) {
 	// ?purge permanently deletes an already-closed (exited/lost) session record.
 	// Without it, DELETE closes a running session (signals the agent to exit).
 	if r.URL.Query().Has("purge") {
+		// ?force additionally signals the agent to stop the PTY and removes the
+		// record even when it is still running (bypasses the running-refused guard).
+		if r.URL.Query().Has("force") {
+			if err := s.sessions.ForceDelete(r.Context(), id); err != nil {
+				writeError(w, statusFor(err), "delete_failed", err.Error())
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if err := s.sessions.Delete(r.Context(), id); err != nil {
 			writeError(w, statusFor(err), "delete_failed", err.Error())
 			return

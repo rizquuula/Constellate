@@ -9,10 +9,10 @@ import (
 
 	"github.com/rizquuula/Constellate/internal/hub/adapter/primary/httpapi"
 	"github.com/rizquuula/Constellate/internal/hub/adapter/secondary/memory"
-	"github.com/rizquuula/Constellate/internal/hub/app/projects"
 	appauth "github.com/rizquuula/Constellate/internal/hub/app/auth"
-	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
+	"github.com/rizquuula/Constellate/internal/hub/app/projects"
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
+	"github.com/rizquuula/Constellate/internal/hub/app/sessions"
 	"github.com/rizquuula/Constellate/internal/hub/domain/audit"
 	"github.com/rizquuula/Constellate/internal/hub/domain/project"
 	"github.com/rizquuula/Constellate/internal/hub/domain/session"
@@ -59,10 +59,11 @@ func (s stubSessionSvcMW) List(_ context.Context) ([]session.Session, error) {
 func (s stubSessionSvcMW) ListByMachine(_ context.Context, _ string) ([]session.Session, error) {
 	return nil, nil
 }
-func (s stubSessionSvcMW) Close(_ context.Context, _ string) error                    { return nil }
-func (s stubSessionSvcMW) Delete(_ context.Context, _ string) error                   { return nil }
-func (s stubSessionSvcMW) Rename(_ context.Context, _, _ string) error                { return nil }
-func (s stubSessionSvcMW) SetAutoRelaunch(_ context.Context, _ string, _ bool) error  { return nil }
+func (s stubSessionSvcMW) Close(_ context.Context, _ string) error                   { return nil }
+func (s stubSessionSvcMW) Delete(_ context.Context, _ string) error                  { return nil }
+func (s stubSessionSvcMW) ForceDelete(_ context.Context, _ string) error             { return nil }
+func (s stubSessionSvcMW) Rename(_ context.Context, _, _ string) error               { return nil }
+func (s stubSessionSvcMW) SetAutoRelaunch(_ context.Context, _ string, _ bool) error { return nil }
 
 // stubProjectSvcMW satisfies httpapi.ProjectService.
 type stubProjectSvcMW struct{}

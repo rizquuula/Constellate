@@ -170,6 +170,7 @@ func (s *fakeSessionStore) Delete(_ context.Context, id string) error {
 
 type fakeGateway struct {
 	openErr    error
+	closeErr   error
 	closeCalls []string
 	openCalls  int
 	pidReturn  int
@@ -184,7 +185,7 @@ func (g *fakeGateway) OpenSession(_ context.Context, _, sessionID, _, _ string, 
 
 func (g *fakeGateway) CloseSession(_ context.Context, _, sessionID string) error {
 	g.closeCalls = append(g.closeCalls, sessionID)
-	return nil
+	return g.closeErr
 }
 
 type fixedClock struct{ ts int64 }
@@ -715,6 +716,137 @@ func TestDelete_NotFound(t *testing.T) {
 
 	if err := uc.Delete(context.Background(), "no-such-id"); !errors.Is(err, session.ErrNotFound) {
 		t.Errorf("Delete missing: got %v, want session.ErrNotFound", err)
+	}
+}
+
+func TestForceDelete_RunningSignalsAndRemoves(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	sink := &fakeAuditSink{}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), sink)
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	sink.calls = nil
+
+	if err := uc.ForceDelete(ctx, s.ID()); err != nil {
+		t.Fatalf("ForceDelete: %v", err)
+	}
+
+	if _, err := store.ByID(ctx, s.ID()); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("running session should be gone after ForceDelete; got %v", err)
+	}
+	if len(gw.closeCalls) != 1 || gw.closeCalls[0] != s.ID() {
+		t.Errorf("ForceDelete must signal the agent for a running session; got close calls %v", gw.closeCalls)
+	}
+	if len(sink.calls) != 1 || sink.calls[0].action != audit.ActionDelete {
+		t.Errorf("audit after ForceDelete: got %v, want one delete event", sink.calls)
+	}
+	if len(sink.calls) == 1 && sink.calls[0].sessionID != s.ID() {
+		t.Errorf("audit sessionID: got %q, want %q", sink.calls[0].sessionID, s.ID())
+	}
+}
+
+func TestForceDelete_ExitedDoesNotSignal(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	sink := &fakeAuditSink{}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), sink)
+	ctx := context.Background()
+
+	id := "exited-session"
+	es := session.New(id, "m1", "", "", "", "", 1000)
+	es.SetExited(0, 1000)
+	store.data[id] = es
+
+	if err := uc.ForceDelete(ctx, id); err != nil {
+		t.Fatalf("ForceDelete: %v", err)
+	}
+
+	if _, err := store.ByID(ctx, id); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("session should be gone after ForceDelete; got %v", err)
+	}
+	if gw.closeCalls != nil {
+		t.Errorf("ForceDelete must not signal the agent for a non-running session; got close calls %v", gw.closeCalls)
+	}
+	if len(sink.calls) != 1 || sink.calls[0].action != audit.ActionDelete {
+		t.Errorf("audit after ForceDelete: got %v, want one delete event", sink.calls)
+	}
+}
+
+func TestForceDelete_LostDoesNotSignal(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	id := "lost-session"
+	ls := session.New(id, "m1", "", "", "", "", 1000)
+	ls.SetStatus(session.StatusLost)
+	store.data[id] = ls
+
+	if err := uc.ForceDelete(ctx, id); err != nil {
+		t.Fatalf("ForceDelete: %v", err)
+	}
+
+	if _, err := store.ByID(ctx, id); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("session should be gone after ForceDelete; got %v", err)
+	}
+	if gw.closeCalls != nil {
+		t.Errorf("ForceDelete must not signal the agent for a lost session; got close calls %v", gw.closeCalls)
+	}
+}
+
+func TestForceDelete_NotFound(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+
+	if err := uc.ForceDelete(context.Background(), "no-such-id"); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("ForceDelete missing: got %v, want session.ErrNotFound", err)
+	}
+}
+
+func TestForceDelete_CloseErrorIsIgnored(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1, closeErr: errors.New("agent offline")}
+	clk := &fixedClock{ts: 1000}
+	sink := &fakeAuditSink{}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), sink)
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	sink.calls = nil
+
+	if err := uc.ForceDelete(ctx, s.ID()); err != nil {
+		t.Fatalf("ForceDelete must ignore a close error and still delete; got %v", err)
+	}
+	if _, err := store.ByID(ctx, s.ID()); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("session should be gone even when close signal errored; got %v", err)
+	}
+	if len(sink.calls) != 1 || sink.calls[0].action != audit.ActionDelete {
+		t.Errorf("audit after ForceDelete: got %v, want one delete event", sink.calls)
+	}
+}
+
+func TestMarkExited_NotFound_IsIgnored(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+
+	if err := uc.MarkExited(context.Background(), "no-such-id", 0); err != nil {
+		t.Errorf("MarkExited not-found: expected nil, got %v", err)
 	}
 }
 

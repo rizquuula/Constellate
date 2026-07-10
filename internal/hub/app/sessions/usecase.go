@@ -133,9 +133,38 @@ func (u *UseCase) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// ForceDelete signals the agent to stop the PTY (best-effort — an offline or
+// erroring agent is ignored) and unconditionally removes the record, including
+// running sessions. Returns session.ErrNotFound if no record exists.
+func (u *UseCase) ForceDelete(ctx context.Context, id string) error {
+	s, err := u.store.ByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if s.Status() == session.StatusRunning {
+		if cerr := u.gateway.CloseSession(ctx, s.MachineID(), id); cerr != nil {
+			u.log.Debug("sessions: ForceDelete: close signal failed (ignored)", "sessionID", id, "err", cerr)
+		}
+	}
+	if err := u.store.Delete(ctx, id); err != nil {
+		return err
+	}
+	_ = u.audit.Record(ctx, audit.ActionDelete, s.MachineID(), id, "force")
+	return nil
+}
+
 // MarkExited records that a session has exited. Satisfies wsagent.SessionEvents.
+// A not-found session is silently ignored: it may have been force-deleted before
+// the agent's asynchronous exit report arrived (a benign race).
 func (u *UseCase) MarkExited(ctx context.Context, id string, exitCode int) error {
-	return u.store.SetExited(ctx, id, exitCode, u.clock.Now())
+	if err := u.store.SetExited(ctx, id, exitCode, u.clock.Now()); err != nil {
+		if errors.Is(err, session.ErrNotFound) {
+			u.log.Debug("sessions: MarkExited: session not found (may have been force-deleted)", "sessionID", id)
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // ReconcileMachineRestart handles a detected agent process restart (new instanceID on Hello).
