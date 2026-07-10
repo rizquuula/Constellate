@@ -1,5 +1,7 @@
 // Shared DnD types, id helpers, and the PaneDropZones overlay component.
 import { useDndContext, useDroppable } from '@dnd-kit/core'
+import { useStore } from '../../store'
+import { findWindowByPane } from './windowList'
 
 export type DropZone = 'center' | 'top' | 'bottom' | 'left' | 'right'
 
@@ -63,7 +65,15 @@ interface PaneDropZonesProps {
 
 export function PaneDropZones({ paneId }: PaneDropZonesProps) {
   const { active } = useDndContext()
+  // All windows share identical geometry — hidden ones are stacked at inset:0 for
+  // xterm sizing — so dnd-kit's purely geometric collision detection can't tell them
+  // apart and ties resolve to registration order (window 1 always wins). Registering
+  // drop zones only for the active window's panes is what makes the drop land where
+  // the user actually sees it.
+  const activeWindowId = useStore((s) => s.activeWindowId)
+  const ownerId = useStore((s) => findWindowByPane(s.windows, paneId)?.id)
   if (!active) return null
+  if (ownerId !== activeWindowId) return null
 
   return (
     <div className="pane-drop-zones" aria-hidden="true">
