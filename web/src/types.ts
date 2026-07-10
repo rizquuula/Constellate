@@ -34,7 +34,8 @@ export interface Session {
   createdAt: number
   lastActiveAt: number
   activity: string
-  cwd: string
+  cwd: string // spawn directory, fixed at session creation
+  pwd?: string // live working directory, refreshed each poll ("" when unknown)
   autoRelaunch: boolean
 }
 

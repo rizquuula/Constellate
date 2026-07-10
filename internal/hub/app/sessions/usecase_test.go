@@ -142,12 +142,17 @@ func (s *fakeSessionStore) SetAutoRelaunch(_ context.Context, id string, v bool)
 	return nil
 }
 
-func (s *fakeSessionStore) SetActivity(_ context.Context, id, activity string, lastActiveAt int64) error {
+func (s *fakeSessionStore) SetStat(_ context.Context, id, activity, pwd string, lastActiveAt int64) error {
 	ss, ok := s.data[id]
 	if !ok {
 		return session.ErrNotFound
 	}
-	ss.SetActivity(activity)
+	if activity != "" {
+		ss.SetActivity(activity)
+	}
+	if pwd != "" {
+		ss.SetPwd(pwd)
+	}
 	if lastActiveAt > 0 {
 		ss.Touch(lastActiveAt)
 	}
@@ -426,7 +431,7 @@ func TestRename_NotFound(t *testing.T) {
 	}
 }
 
-func TestRecordActivity_SetsActivity(t *testing.T) {
+func TestRecordStat_SetsActivity(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 1}
 	clk := &fixedClock{ts: 1000}
@@ -439,8 +444,8 @@ func TestRecordActivity_SetsActivity(t *testing.T) {
 	}
 
 	clk.ts = 2000
-	if err := uc.RecordActivity(ctx, s.ID(), session.ActivityActive); err != nil {
-		t.Fatalf("RecordActivity active: %v", err)
+	if err := uc.RecordStat(ctx, s.ID(), session.ActivityActive, ""); err != nil {
+		t.Fatalf("RecordStat active: %v", err)
 	}
 
 	got, err := store.ByID(ctx, s.ID())
@@ -455,7 +460,7 @@ func TestRecordActivity_SetsActivity(t *testing.T) {
 	}
 }
 
-func TestRecordActivity_IdleDoesNotBumpLastActiveAt(t *testing.T) {
+func TestRecordStat_IdleDoesNotBumpLastActiveAt(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 1}
 	clk := &fixedClock{ts: 1000}
@@ -469,8 +474,8 @@ func TestRecordActivity_IdleDoesNotBumpLastActiveAt(t *testing.T) {
 	origLAT := s.LastActiveAt()
 
 	clk.ts = 5000
-	if err := uc.RecordActivity(ctx, s.ID(), session.ActivityIdle); err != nil {
-		t.Fatalf("RecordActivity idle: %v", err)
+	if err := uc.RecordStat(ctx, s.ID(), session.ActivityIdle, ""); err != nil {
+		t.Fatalf("RecordStat idle: %v", err)
 	}
 
 	got, err := store.ByID(ctx, s.ID())
@@ -485,18 +490,18 @@ func TestRecordActivity_IdleDoesNotBumpLastActiveAt(t *testing.T) {
 	}
 }
 
-func TestRecordActivity_NotFound_IsIgnored(t *testing.T) {
+func TestRecordStat_NotFound_IsIgnored(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{}
 	clk := &fixedClock{ts: 1000}
 	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
 
-	if err := uc.RecordActivity(context.Background(), "no-such-id", session.ActivityActive); err != nil {
-		t.Errorf("RecordActivity not-found: expected nil, got %v", err)
+	if err := uc.RecordStat(context.Background(), "no-such-id", session.ActivityActive, ""); err != nil {
+		t.Errorf("RecordStat not-found: expected nil, got %v", err)
 	}
 }
 
-func TestRecordActivity_UnknownActivityIsIgnored(t *testing.T) {
+func TestRecordStat_UnknownActivityIsIgnored(t *testing.T) {
 	store := newFakeSessionStore()
 	gw := &fakeGateway{pidReturn: 1}
 	clk := &fixedClock{ts: 1000}
@@ -508,11 +513,11 @@ func TestRecordActivity_UnknownActivityIsIgnored(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 
-	if err := uc.RecordActivity(ctx, s.ID(), "bogus-value"); err != nil {
-		t.Errorf("RecordActivity bogus: expected nil, got %v", err)
+	if err := uc.RecordStat(ctx, s.ID(), "bogus-value", ""); err != nil {
+		t.Errorf("RecordStat bogus: expected nil, got %v", err)
 	}
-	if err := uc.RecordActivity(ctx, s.ID(), ""); err != nil {
-		t.Errorf("RecordActivity empty: expected nil, got %v", err)
+	if err := uc.RecordStat(ctx, s.ID(), "", ""); err != nil {
+		t.Errorf("RecordStat empty: expected nil, got %v", err)
 	}
 
 	got, err := store.ByID(ctx, s.ID())
@@ -521,6 +526,68 @@ func TestRecordActivity_UnknownActivityIsIgnored(t *testing.T) {
 	}
 	if got.Activity() != "" {
 		t.Errorf("Activity should be unchanged (empty): got %q", got.Activity())
+	}
+}
+
+// TestRecordStat_EmptyActivityStillPersistsPwd guards the latent bug where an
+// empty/unknown activity used to return early, dropping a valid pwd from the
+// same heartbeat.
+func TestRecordStat_EmptyActivityStillPersistsPwd(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Empty activity but a valid pwd: pwd must still be persisted.
+	if err := uc.RecordStat(ctx, s.ID(), "", "/some/dir"); err != nil {
+		t.Fatalf("RecordStat empty-activity/valid-pwd: %v", err)
+	}
+
+	got, err := store.ByID(ctx, s.ID())
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Pwd() != "/some/dir" {
+		t.Errorf("Pwd: got %q, want /some/dir", got.Pwd())
+	}
+	if got.Activity() != "" {
+		t.Errorf("Activity should be unchanged (empty): got %q", got.Activity())
+	}
+}
+
+// TestRecordStat_BogusActivityPersistsPwdNotActivity confirms a bogus activity
+// is dropped while a valid pwd on the same stat is still persisted.
+func TestRecordStat_BogusActivityPersistsPwdNotActivity(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 1}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s, err := uc.Open(ctx, sessions.OpenInput{MachineID: "m1"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if err := uc.RecordStat(ctx, s.ID(), "bogus-activity", "/some/dir"); err != nil {
+		t.Fatalf("RecordStat bogus-activity/valid-pwd: %v", err)
+	}
+
+	got, err := store.ByID(ctx, s.ID())
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Pwd() != "/some/dir" {
+		t.Errorf("Pwd: got %q, want /some/dir", got.Pwd())
+	}
+	if got.Activity() != "" {
+		t.Errorf("Activity should not persist a bogus value: got %q", got.Activity())
 	}
 }
 

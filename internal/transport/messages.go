@@ -33,11 +33,16 @@ type Hello struct {
 }
 
 // SessionStat carries per-session status within a Heartbeat.
+//
+// Pwd is the session's live working directory, re-read on every heartbeat as
+// the shell chdirs. It is distinct from OpenSession.Cwd, which is the spawn
+// directory fixed at open time. Empty when the agent cannot read it.
 type SessionStat struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	BytesOut int64  `json:"bytesOut"`
 	Activity string `json:"activity,omitempty"`
+	Pwd      string `json:"pwd,omitempty"`
 }
 
 // Metrics carries host-level resource usage sampled by the agent.

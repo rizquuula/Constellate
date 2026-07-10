@@ -46,9 +46,13 @@ type ListSessions struct {
 // LocalSessionActivity is a per-session activity signal shipped from host to
 // connect in a LocalStat frame. It mirrors terminal.SessionActivity but lives
 // in transport so no domain type crosses the wire boundary.
+//
+// Pwd is relayed because the PTYs live in the host process; connect cannot read
+// a session's working directory itself. Added in local protocol v3.
 type LocalSessionActivity struct {
 	ID       string `json:"id"`
 	Activity string `json:"activity"`
+	Pwd      string `json:"pwd,omitempty"`
 }
 
 // LocalStat is a periodic frame sent by the host → connect over the local

@@ -167,14 +167,16 @@ model mirrors the hub model:
 
 | Stream | Direction | Carries |
 |--------|-----------|---------|
-| **local-control** (first stream) | bidirectional | `HostHello` (connect→host), `HostInfo` (host→connect: instanceID + session list), `OpenSession`, `Resize`, `CloseSession`, `EnableSnaps`, `LocalStat` (host→connect: activity), errors |
+| **local-control** (first stream) | bidirectional | `HostHello` (connect→host), `HostInfo` (host→connect: instanceID + session list), `OpenSession`, `Resize`, `CloseSession`, `EnableSnaps`, `LocalStat` (host→connect: activity + pwd), errors |
 | **local-data** (one per attached session) | connect-opened / host-accepted | `AttachHeader{sessionID}` + raw PTY bytes (same format as hub data streams) |
 | **local-snapshot** (one per connect) | host-opened / connect-accepted | NDJSON `Snapshot` frames relayed to hub snapshot stream |
 
 The local control stream opens with a version handshake: connect sends `HostHello{localProtocol}`,
 host replies `HostInfo{instanceID, localProtocol, sessions}`. Both sides negotiate
-`min(localProtocol)` and gate features on the negotiated version. `LocalProtocolVersion = 2`
-(v1 = basic relay; v2 = adds `LocalStat` + host-side snapshot production).
+`min(localProtocol)` and gate features on the negotiated version. `LocalProtocolVersion = 3`
+(v1 = basic relay; v2 = adds `LocalStat` + host-side snapshot production; v3 = adds
+`LocalSessionActivity.pwd`). The v3 bump is provenance only — `LocalStat` already ships at the `≥ 2`
+gate and `pwd` is additive JSON, so a v2/v3 pair interoperates in both directions.
 
 The socket is at `<runtime_dir>/host.sock` (default `$XDG_RUNTIME_DIR/constellate/host.sock`),
 created `0600` under a `0700` directory. The session-host verifies the connecting process's UID
@@ -239,7 +241,8 @@ touching use cases.
 Agent → Hub:
 ```
 Hello         { machineID, name, os, arch, agentVersion, protocolVersion }
-Heartbeat     { ts, sessions: [{ id, status, bytesOut }], metrics? }   // metrics: { cpuPercent, memUsedMB, memTotalMB } — added in protocol v4
+Heartbeat     { ts, sessions: [{ id, status, bytesOut, activity?, pwd? }], metrics? }   // metrics: { cpuPercent, memUsedMB, memTotalMB } — added in protocol v4
+                                                                       // activity added in v3; pwd (live cwd) added in v6
 SessionOpened { sessionID, pid }
 SessionExited { sessionID, exitCode }
 Error         { sessionID?, code, message }
@@ -1056,6 +1059,44 @@ Sessions survive an agent restart. The single-process agent is split into two ro
   auto-cancel, mirroring `SessionRow`) and a 409-aware error message.
 - **Done when:** an empty project can be deleted from the sidebar; a project with live/closed
   sessions is refused with a clear message until its sessions are moved or closed.
+
+### Post-M7 — live pwd in the pane header *(done)*
+- Each pane header showed `<machine> | <title>` but not *where* the shell was. Sessions already
+  carried a `cwd`, but it is the **spawn directory** captured once at `OpenSession` and never
+  updated — showing it would lie the moment the user ran `cd`. So a **distinct `pwd` field** was
+  added for the **live** working directory. Naming convention throughout: **`cwd` = spawn dir,
+  `pwd` = live dir.**
+- **Source:** the agent reads the *shell process's own* cwd from the PTY's child PID each heartbeat
+  (`cd` mutates the shell's cwd, which is exactly "pwd" — no `TIOCGPGRP` / foreground-pgrp dance
+  needed). `os.Readlink("/proc/<pid>/cwd")` fast path on Linux, falling back to gopsutil
+  `process.Process.Cwd()` elsewhere. gopsutil was already a dependency and is cgo-free on darwin
+  (purego libproc), so `CGO_ENABLED=0` holds; its `process_fallback.go` defines `CwdWithContext`,
+  so the agent still compiles on any GOOS and unsupported platforms simply report an empty pwd.
+  The read happens **outside** the session-manager lock — it is a syscall.
+- **Wire protocol bump to v6** (window [1,6]): adds `SessionStat.pwd`
+  (`json:"pwd,omitempty"`). Additive; a ≤v5 hub ignores the field. `LocalProtocolVersion` → 3 for
+  `LocalSessionActivity.pwd` (the PTYs live in the session-host, so pwd must be relayed to connect
+  on the periodic `LocalStat`; `HostInfo` is a one-shot handshake snapshot and cannot carry a value
+  that changes). The local bump is **provenance only** — no negotiated behaviour depends on v3.
+- **Compatibility is one-directional.** An agent advertises a single `ProtocolVersion`, not a range,
+  so a v6 agent is rejected by a ≤v5 hub (`unsupported_protocol`). This is true of *every* bump.
+  **Operational rule: upgrade the hub before the agents.** The reverse (new hub, old agent) degrades
+  cleanly: no `pwd` on the wire → column stays NULL → DTO `""` → the frontend hides the element.
+- **Persistence:** migration `0006_session_pwd.sql` adds a nullable `sessions.pwd`. The heartbeat
+  ingest writes activity + pwd in **one** `UPDATE`, so the store port `SetActivity` widened and was
+  renamed `SetStat` (and the use case `RecordActivity` → `RecordStat`). Both columns are guarded
+  with `COALESCE(NULLIF(?, ''), col)` so an agent that cannot read the pwd (macOS EPERM, an old
+  split-mode host, an exited process) **never clobbers a known value with an empty one**.
+- Fixed a latent bug uncovered while widening `RecordActivity`: it validated `activity` and
+  `return nil`-ed on an unrecognised value *before* touching the store, which would have silently
+  dropped a valid pwd riding the same heartbeat. It now blanks a bogus activity and bails only when
+  both fields are empty.
+- **Frontend:** `SessionDTO.pwd` → `Session.pwd`; `TerminalPane` renders a `.pane-title-dir` sibling
+  span (not folded into `paneLabel`, which feeds the dnd-kit drag overlay) showing the last 8
+  characters with a leading `…` (`/home/amm/dev/Constellate` → `…stellate`), full path on hover.
+  The existing 2 s session poll refreshes it; no new fetch.
+- **Done when:** a pane header shows where its shell is, and running `cd /etc` updates it within a
+  couple of heartbeats.
 
 ---
 

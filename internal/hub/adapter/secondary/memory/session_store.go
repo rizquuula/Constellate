@@ -201,18 +201,24 @@ func (s *SessionStore) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// SetActivity updates the session's activity. When lastActiveAt > 0,
-// last_active_at is also updated. Returns session.ErrNotFound (wrapped) if the
-// session does not exist.
-func (s *SessionStore) SetActivity(_ context.Context, id, activity string, lastActiveAt int64) error {
+// SetStat updates the session's activity and/or live working directory (pwd).
+// An empty activity or pwd leaves that value untouched (preserve-on-empty).
+// When lastActiveAt > 0, last_active_at is also updated. Returns
+// session.ErrNotFound (wrapped) if the session does not exist.
+func (s *SessionStore) SetStat(_ context.Context, id, activity, pwd string, lastActiveAt int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	ss, ok := s.data[id]
 	if !ok {
-		return fmt.Errorf("memory: set activity %q: %w", id, session.ErrNotFound)
+		return fmt.Errorf("memory: set stat %q: %w", id, session.ErrNotFound)
 	}
-	ss.SetActivity(activity)
+	if activity != "" {
+		ss.SetActivity(activity)
+	}
+	if pwd != "" {
+		ss.SetPwd(pwd)
+	}
 	if lastActiveAt > 0 {
 		ss.Touch(lastActiveAt)
 	}

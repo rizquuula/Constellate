@@ -72,11 +72,12 @@ func ComputeActivity(now, lastOutputAt int64, activeWindowSec int64, prompt Prom
 	}
 }
 
-// SessionActivity pairs a session ID with its computed activity.
-// It mirrors SessionRev for the same lightweight-list pattern.
+// SessionActivity pairs a session ID with its computed activity and its live
+// working directory. It mirrors SessionRev for the same lightweight-list pattern.
 type SessionActivity struct {
 	ID       string
 	Activity Activity
+	Pwd      string
 }
 
 // trailingQuestionMaxRunes is the maximum rune length a line may have for a

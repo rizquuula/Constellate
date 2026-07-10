@@ -32,6 +32,7 @@ type SessionDTO struct {
 	Title        string `json:"title"`
 	Shell        string `json:"shell"`
 	Cwd          string `json:"cwd"`
+	Pwd          string `json:"pwd"`
 	Status       string `json:"status"`
 	ExitCode     int    `json:"exitCode"`
 	CreatedAt    int64  `json:"createdAt"`
@@ -48,6 +49,7 @@ func sessionToDTO(s session.Session) SessionDTO {
 		Title:        s.Title(),
 		Shell:        s.Shell(),
 		Cwd:          s.Cwd(),
+		Pwd:          s.Pwd(),
 		Status:       string(s.Status()),
 		ExitCode:     s.ExitCode(),
 		CreatedAt:    s.CreatedAt(),

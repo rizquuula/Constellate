@@ -3,6 +3,7 @@ import { useDraggable } from '@dnd-kit/core'
 import { useStore } from '../../store'
 import { useTerminal } from './useTerminal'
 import { PaneDropZones } from './dnd'
+import { cropPwd } from './pwd'
 import type { SessionDragData } from './dnd'
 
 interface TerminalPaneProps {
@@ -142,13 +143,18 @@ function TerminalPaneImpl({
               )}
             </>
           ) : (
-            <span
-              className="pane-title-text"
-              onDoubleClick={session ? startRename : undefined}
-              title={session ? 'Double-click to rename' : undefined}
-            >
-              {paneLabel}
-            </span>
+            <>
+              <span
+                className="pane-title-text"
+                onDoubleClick={session ? startRename : undefined}
+                title={session ? 'Double-click to rename' : undefined}
+              >
+                {paneLabel}
+              </span>
+              {session?.pwd && (
+                <span className="pane-title-dir" title={session.pwd}>{cropPwd(session.pwd)}</span>
+              )}
+            </>
           )}
         </div>
         <div className="pane-controls">

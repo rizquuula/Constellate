@@ -39,6 +39,10 @@ type PTY interface {
 	Resize(cols, rows int) error
 	Pid() int
 	Wait() (exitCode int, err error)
+	// Cwd returns the shell process's current working directory (follows cd).
+	// The OS term "Cwd" is kept at this port; it surfaces as Pwd in the
+	// domain/wire layers to distinguish it from the spawn PTYSpec.Cwd.
+	Cwd() (string, error)
 }
 
 // PTYFactory opens a new PTY process according to the given spec.

@@ -57,7 +57,7 @@ func TestEncodeDecodeHeartbeat(t *testing.T) {
 
 	now := time.Now().Unix()
 	sessions := []SessionStat{
-		{ID: "sess-1", Status: "running", BytesOut: 1024},
+		{ID: "sess-1", Status: "running", BytesOut: 1024, Activity: "active", Pwd: "/home/amm/dev"},
 	}
 	want := NewHeartbeat(now, sessions, nil)
 	if err := enc.Encode(want); err != nil {
@@ -87,6 +87,12 @@ func TestEncodeDecodeHeartbeat(t *testing.T) {
 	}
 	if got.Sessions[0].BytesOut != sessions[0].BytesOut {
 		t.Errorf("BytesOut: got %d, want %d", got.Sessions[0].BytesOut, sessions[0].BytesOut)
+	}
+	if got.Sessions[0].Activity != sessions[0].Activity {
+		t.Errorf("Activity: got %q, want %q", got.Sessions[0].Activity, sessions[0].Activity)
+	}
+	if got.Sessions[0].Pwd != sessions[0].Pwd {
+		t.Errorf("Pwd: got %q, want %q", got.Sessions[0].Pwd, sessions[0].Pwd)
 	}
 }
 
@@ -183,20 +189,20 @@ func TestHeartbeatWithoutMetrics(t *testing.T) {
 	}
 }
 
-func TestProtocolSupported5(t *testing.T) {
-	if !ProtocolSupported(5) {
-		t.Error("ProtocolSupported(5): got false, want true")
+func TestProtocolSupported(t *testing.T) {
+	if !ProtocolSupported(ProtocolVersion) {
+		t.Errorf("ProtocolSupported(ProtocolVersion=%d): got false, want true", ProtocolVersion)
 	}
-	if !ProtocolSupported(4) {
-		t.Error("ProtocolSupported(4): got false, want true")
+	if !ProtocolSupported(MinSupportedProtocol) {
+		t.Errorf("ProtocolSupported(%d): got false, want true (min boundary)", MinSupportedProtocol)
 	}
-	if !ProtocolSupported(1) {
-		t.Error("ProtocolSupported(1): got false, want true (min boundary)")
+	if !ProtocolSupported(MaxSupportedProtocol) {
+		t.Errorf("ProtocolSupported(%d): got false, want true (max boundary)", MaxSupportedProtocol)
 	}
-	if ProtocolSupported(0) {
-		t.Error("ProtocolSupported(0): got true, want false (below min)")
+	if ProtocolSupported(MinSupportedProtocol - 1) {
+		t.Errorf("ProtocolSupported(%d): got true, want false (below min)", MinSupportedProtocol-1)
 	}
-	if ProtocolSupported(6) {
-		t.Error("ProtocolSupported(6): got true, want false (above max)")
+	if ProtocolSupported(MaxSupportedProtocol + 1) {
+		t.Errorf("ProtocolSupported(%d): got true, want false (above max)", MaxSupportedProtocol+1)
 	}
 }

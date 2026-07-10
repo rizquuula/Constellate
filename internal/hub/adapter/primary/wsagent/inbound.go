@@ -124,11 +124,11 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 				}
 				if e.events != nil {
 					for _, stat := range hb.Sessions {
-						if stat.Activity == "" {
+						if stat.Activity == "" && stat.Pwd == "" {
 							continue
 						}
-						if err := e.events.RecordActivity(ctx, stat.ID, stat.Activity); err != nil {
-							e.log.Debug("wsagent: RecordActivity failed", "sessionID", stat.ID, "err", err)
+						if err := e.events.RecordStat(ctx, stat.ID, stat.Activity, stat.Pwd); err != nil {
+							e.log.Debug("wsagent: RecordStat failed", "sessionID", stat.ID, "err", err)
 						}
 					}
 				}

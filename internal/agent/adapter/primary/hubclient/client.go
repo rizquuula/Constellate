@@ -450,6 +450,7 @@ func (c *Client) serve(ctx context.Context, sess *yamux.Session, ctrl net.Conn, 
 						stats[i] = transport.SessionStat{
 							ID:       a.ID,
 							Activity: string(a.Activity),
+							Pwd:      a.Pwd,
 						}
 					}
 				}

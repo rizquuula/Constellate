@@ -253,7 +253,7 @@ func TestSessionStore_ProjectID_NullAndSet(t *testing.T) {
 	}
 }
 
-func TestSessionStore_SetActivity_NoLastActiveAt(t *testing.T) {
+func TestSessionStore_SetStat_NoLastActiveAt(t *testing.T) {
 	ms, ss := openTestSessionDB(t)
 	ctx := context.Background()
 
@@ -265,9 +265,9 @@ func TestSessionStore_SetActivity_NoLastActiveAt(t *testing.T) {
 	}
 	origLAT := s.LastActiveAt()
 
-	// SetActivity with lastActiveAt=0 must NOT update last_active_at.
-	if err := ss.SetActivity(ctx, "s1", session.ActivityAwaitingInput, 0); err != nil {
-		t.Fatalf("SetActivity: %v", err)
+	// SetStat with lastActiveAt=0 must NOT update last_active_at.
+	if err := ss.SetStat(ctx, "s1", session.ActivityAwaitingInput, "", 0); err != nil {
+		t.Fatalf("SetStat: %v", err)
 	}
 
 	got, err := ss.ByID(ctx, "s1")
@@ -282,7 +282,7 @@ func TestSessionStore_SetActivity_NoLastActiveAt(t *testing.T) {
 	}
 }
 
-func TestSessionStore_SetActivity_WithLastActiveAt(t *testing.T) {
+func TestSessionStore_SetStat_WithLastActiveAt(t *testing.T) {
 	ms, ss := openTestSessionDB(t)
 	ctx := context.Background()
 
@@ -294,8 +294,8 @@ func TestSessionStore_SetActivity_WithLastActiveAt(t *testing.T) {
 	}
 
 	now := int64(9999)
-	if err := ss.SetActivity(ctx, "s1", session.ActivityActive, now); err != nil {
-		t.Fatalf("SetActivity: %v", err)
+	if err := ss.SetStat(ctx, "s1", session.ActivityActive, "", now); err != nil {
+		t.Fatalf("SetStat: %v", err)
 	}
 
 	got, err := ss.ByID(ctx, "s1")
@@ -310,11 +310,112 @@ func TestSessionStore_SetActivity_WithLastActiveAt(t *testing.T) {
 	}
 }
 
-func TestSessionStore_SetActivity_NotFound(t *testing.T) {
+func TestSessionStore_SetStat_NotFound(t *testing.T) {
 	_, ss := openTestSessionDB(t)
-	err := ss.SetActivity(context.Background(), "no-such-id", session.ActivityIdle, 0)
+	err := ss.SetStat(context.Background(), "no-such-id", session.ActivityIdle, "", 0)
 	if !errors.Is(err, session.ErrNotFound) {
-		t.Errorf("SetActivity missing: got %v, want session.ErrNotFound", err)
+		t.Errorf("SetStat missing: got %v, want session.ErrNotFound", err)
+	}
+}
+
+func TestSessionStore_SetStat_PwdRoundTrip(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	s := session.New("s1", "m1", "", "", "", "", 1000)
+	if err := ss.Create(ctx, s); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := ss.SetStat(ctx, "s1", session.ActivityActive, "/home/user/project", 0); err != nil {
+		t.Fatalf("SetStat: %v", err)
+	}
+
+	// Round-trip via ByID.
+	got, err := ss.ByID(ctx, "s1")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Pwd() != "/home/user/project" {
+		t.Errorf("Pwd via ByID: got %q, want /home/user/project", got.Pwd())
+	}
+
+	// Round-trip via List.
+	list, err := ss.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("List: got %d, want 1", len(list))
+	}
+	if list[0].Pwd() != "/home/user/project" {
+		t.Errorf("Pwd via List: got %q, want /home/user/project", list[0].Pwd())
+	}
+}
+
+func TestSessionStore_SetStat_EmptyPwdPreservesPwd(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	s := session.New("s1", "m1", "", "", "", "", 1000)
+	if err := ss.Create(ctx, s); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Seed a pwd.
+	if err := ss.SetStat(ctx, "s1", "", "/seeded/dir", 0); err != nil {
+		t.Fatalf("SetStat seed pwd: %v", err)
+	}
+	// A later stat carrying only an activity (empty pwd) must NOT clobber pwd.
+	if err := ss.SetStat(ctx, "s1", session.ActivityIdle, "", 0); err != nil {
+		t.Fatalf("SetStat empty pwd: %v", err)
+	}
+
+	got, err := ss.ByID(ctx, "s1")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Pwd() != "/seeded/dir" {
+		t.Errorf("Pwd must be preserved when pwd is empty: got %q, want /seeded/dir", got.Pwd())
+	}
+	if got.Activity() != session.ActivityIdle {
+		t.Errorf("Activity: got %q, want %q", got.Activity(), session.ActivityIdle)
+	}
+}
+
+func TestSessionStore_SetStat_EmptyActivityPreservesActivity(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	s := session.New("s1", "m1", "", "", "", "", 1000)
+	if err := ss.Create(ctx, s); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Seed an activity.
+	if err := ss.SetStat(ctx, "s1", session.ActivityAwaitingInput, "", 0); err != nil {
+		t.Fatalf("SetStat seed activity: %v", err)
+	}
+	// A later stat carrying only a pwd (empty activity) must NOT clobber activity.
+	if err := ss.SetStat(ctx, "s1", "", "/new/dir", 0); err != nil {
+		t.Fatalf("SetStat empty activity: %v", err)
+	}
+
+	got, err := ss.ByID(ctx, "s1")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Activity() != session.ActivityAwaitingInput {
+		t.Errorf("Activity must be preserved when activity is empty: got %q, want %q", got.Activity(), session.ActivityAwaitingInput)
+	}
+	if got.Pwd() != "/new/dir" {
+		t.Errorf("Pwd: got %q, want /new/dir", got.Pwd())
 	}
 }
 

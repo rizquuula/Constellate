@@ -47,6 +47,7 @@ func (f *fakePTY) Read(p []byte) (int, error)  { return f.outputR.Read(p) }
 func (f *fakePTY) Write(p []byte) (int, error) { return f.inputW.Write(p) }
 func (f *fakePTY) Pid() int                    { return f.pid }
 func (f *fakePTY) Resize(_, _ int) error       { return nil }
+func (f *fakePTY) Cwd() (string, error)        { return "", nil }
 
 func (f *fakePTY) Close() error {
 	f.exitOnce.Do(func() {

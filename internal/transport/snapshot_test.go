@@ -110,10 +110,19 @@ func TestEncodeDecodeEnableSnaps(t *testing.T) {
 }
 
 func TestProtocolWindow(t *testing.T) {
-	if !ProtocolSupported(1) || !ProtocolSupported(2) || !ProtocolSupported(3) || !ProtocolSupported(4) || !ProtocolSupported(5) {
-		t.Errorf("protocol window should accept 1, 2, 3, 4, and 5")
+	for v := MinSupportedProtocol; v <= MaxSupportedProtocol; v++ {
+		if !ProtocolSupported(v) {
+			t.Errorf("protocol window should accept %d", v)
+		}
 	}
-	if ProtocolSupported(0) || ProtocolSupported(6) {
-		t.Errorf("protocol window should reject 0 and 6")
+	if ProtocolSupported(MinSupportedProtocol - 1) {
+		t.Errorf("protocol window should reject %d", MinSupportedProtocol-1)
+	}
+	if ProtocolSupported(MaxSupportedProtocol + 1) {
+		t.Errorf("protocol window should reject %d", MaxSupportedProtocol+1)
+	}
+	if ProtocolVersion > MaxSupportedProtocol || ProtocolVersion < MinSupportedProtocol {
+		t.Errorf("advertised ProtocolVersion %d outside supported window [%d,%d]",
+			ProtocolVersion, MinSupportedProtocol, MaxSupportedProtocol)
 	}
 }

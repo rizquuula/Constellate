@@ -310,6 +310,7 @@ func (c *Client) dispatch(frame transport.Frame) {
 			acts[i] = terminal.SessionActivity{
 				ID:       a.ID,
 				Activity: terminal.Activity(a.Activity),
+				Pwd:      a.Pwd,
 			}
 		}
 		c.mu.Lock()

@@ -60,7 +60,7 @@ func (s *SessionStore) Create(ctx context.Context, ss session.Session) error {
 // Returns session.ErrNotFound (wrapped) if no row matches.
 func (s *SessionStore) ByID(ctx context.Context, id string) (session.Session, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity
+		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity, pwd
 		FROM sessions WHERE id = ?
 	`, id)
 	ss, err := scanSession(row)
@@ -76,7 +76,7 @@ func (s *SessionStore) ByID(ctx context.Context, id string) (session.Session, er
 // List returns all session records.
 func (s *SessionStore) List(ctx context.Context) ([]session.Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity
+		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity, pwd
 		FROM sessions
 	`)
 	if err != nil {
@@ -90,7 +90,7 @@ func (s *SessionStore) List(ctx context.Context) ([]session.Session, error) {
 // ListByMachine returns all sessions for the given machine.
 func (s *SessionStore) ListByMachine(ctx context.Context, machineID string) ([]session.Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity
+		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity, pwd
 		FROM sessions WHERE machine_id = ?
 	`, machineID)
 	if err != nil {
@@ -105,7 +105,7 @@ func (s *SessionStore) ListByMachine(ctx context.Context, machineID string) ([]s
 // auto_relaunch=1. Used during restart reconciliation.
 func (s *SessionStore) AutoRelaunchSessions(ctx context.Context, machineID string) ([]session.Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity
+		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity, pwd
 		FROM sessions WHERE machine_id = ? AND status = ? AND auto_relaunch = 1
 	`, machineID, string(session.StatusRunning))
 	if err != nil {
@@ -229,32 +229,41 @@ func (s *SessionStore) SetTitle(ctx context.Context, id, title string) error {
 	return nil
 }
 
-// SetActivity updates the session's activity column. When lastActiveAt > 0,
-// last_active_at is also updated (only when the session is "active").
+// SetStat updates the session's activity and/or live working directory (pwd)
+// columns. When lastActiveAt > 0, last_active_at is also updated (only when the
+// session is "active"). An empty activity or pwd leaves that column untouched
+// (preserve-on-empty via COALESCE(NULLIF(?, ''), col)).
 // Returns session.ErrNotFound (wrapped) if 0 rows are affected.
-func (s *SessionStore) SetActivity(ctx context.Context, id, activity string, lastActiveAt int64) error {
+func (s *SessionStore) SetStat(ctx context.Context, id, activity, pwd string, lastActiveAt int64) error {
 	var (
 		res sql.Result
 		err error
 	)
 	if lastActiveAt > 0 {
 		res, err = s.db.ExecContext(ctx, `
-			UPDATE sessions SET activity = ?, last_active_at = ? WHERE id = ?
-		`, activity, lastActiveAt, id)
+			UPDATE sessions
+			   SET activity = COALESCE(NULLIF(?, ''), activity),
+			       pwd      = COALESCE(NULLIF(?, ''), pwd),
+			       last_active_at = ?
+			 WHERE id = ?
+		`, activity, pwd, lastActiveAt, id)
 	} else {
 		res, err = s.db.ExecContext(ctx, `
-			UPDATE sessions SET activity = ? WHERE id = ?
-		`, activity, id)
+			UPDATE sessions
+			   SET activity = COALESCE(NULLIF(?, ''), activity),
+			       pwd      = COALESCE(NULLIF(?, ''), pwd)
+			 WHERE id = ?
+		`, activity, pwd, id)
 	}
 	if err != nil {
-		return fmt.Errorf("sqlite: set activity %q: %w", id, err)
+		return fmt.Errorf("sqlite: set stat %q: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("sqlite: set activity %q: %w", id, session.ErrNotFound)
+		return fmt.Errorf("sqlite: set stat %q: %w", id, session.ErrNotFound)
 	}
 	return nil
 }
@@ -317,8 +326,9 @@ func scanSession(s scanner) (session.Session, error) {
 		lastActiveAt  sql.NullInt64
 		createdAt     int64
 		activity      sql.NullString
+		pwd           sql.NullString
 	)
-	if err := s.Scan(&id, &projectID, &machineID, &title, &shell, &cwd, &autoRelaunch, &statusStr, &exitCode, &createdAt, &lastActiveAt, &activity); err != nil {
+	if err := s.Scan(&id, &projectID, &machineID, &title, &shell, &cwd, &autoRelaunch, &statusStr, &exitCode, &createdAt, &lastActiveAt, &activity, &pwd); err != nil {
 		return session.Session{}, err
 	}
 	var code int
@@ -344,6 +354,9 @@ func scanSession(s scanner) (session.Session, error) {
 	)
 	if activity.Valid && activity.String != "" {
 		ss.SetActivity(activity.String)
+	}
+	if pwd.Valid && pwd.String != "" {
+		ss.SetPwd(pwd.String)
 	}
 	return ss, nil
 }

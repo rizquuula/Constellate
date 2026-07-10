@@ -415,6 +415,7 @@ func (s *Server) handleConn(conn net.Conn) {
 					localActs[i] = transport.LocalSessionActivity{
 						ID:       a.ID,
 						Activity: string(a.Activity),
+						Pwd:      a.Pwd,
 					}
 				}
 				if err := enc.Encode(transport.NewLocalStat(localActs)); err != nil {

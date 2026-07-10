@@ -23,6 +23,7 @@ type fakePTY struct {
 	inputW *io.PipeWriter // Manager writes user keystrokes here
 
 	pid      int
+	cwd      string
 	exitOnce sync.Once
 	exitCode int
 	exitCh   chan struct{}
@@ -45,6 +46,7 @@ func (f *fakePTY) Read(p []byte) (int, error)  { return f.outputR.Read(p) }
 func (f *fakePTY) Write(p []byte) (int, error) { return f.inputW.Write(p) }
 func (f *fakePTY) Pid() int                    { return f.pid }
 func (f *fakePTY) Resize(_, _ int) error       { return nil }
+func (f *fakePTY) Cwd() (string, error)        { return f.cwd, nil }
 
 func (f *fakePTY) Close() error {
 	f.exitOnce.Do(func() {
@@ -780,10 +782,39 @@ func TestManagerActivities(t *testing.T) {
 	_ = fake.Close()
 }
 
-// TestManagerActivitiesNoScreen verifies that sessions without a screen
-// are omitted from Activities (no panic on nil screen).
+// TestManagerActivitiesPwd verifies Activities propagates the PTY's live
+// working directory (cwd) into SessionActivity.Pwd.
+func TestManagerActivitiesPwd(t *testing.T) {
+	fake := newFakePTY(22)
+	fake.cwd = "/home/user/project"
+	factory := &fakeFactory{pty: fake}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := NewManager(factory, 64*1024, log, nil)
+
+	scr := &fakeActivityScreen{promptState: terminal.PromptUnknown, tailText: ""}
+	m.SetScreenFactory(&fakeActivityScreenFactory{screen: scr})
+
+	if _, err := m.Open("pwd-sess", PTYSpec{Shell: "/bin/sh"}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	acts := m.Activities(1000)
+	if len(acts) != 1 {
+		t.Fatalf("Activities: got %d entries, want 1", len(acts))
+	}
+	if acts[0].Pwd != fake.cwd {
+		t.Errorf("Pwd: got %q, want %q", acts[0].Pwd, fake.cwd)
+	}
+
+	_ = fake.Close()
+}
+
+// TestManagerActivitiesNoScreen verifies that a session without a screen still
+// reports its pwd (activity is unavailable without the emulator, so it is left
+// empty rather than the session being dropped) and that nil screen never panics.
 func TestManagerActivitiesNoScreen(t *testing.T) {
 	fake := newFakePTY(21)
+	fake.cwd = "/srv/no-screen"
 	m, _ := newTestManager(fake)
 
 	if _, err := m.Open("no-screen-sess", PTYSpec{Shell: "/bin/sh"}); err != nil {
@@ -791,8 +822,14 @@ func TestManagerActivitiesNoScreen(t *testing.T) {
 	}
 
 	acts := m.Activities(1000)
-	if len(acts) != 0 {
-		t.Errorf("expected 0 activities without screen, got %d", len(acts))
+	if len(acts) != 1 {
+		t.Fatalf("Activities: got %d entries, want 1", len(acts))
+	}
+	if acts[0].Activity != "" {
+		t.Errorf("Activity without a screen: got %q, want empty", acts[0].Activity)
+	}
+	if acts[0].Pwd != fake.cwd {
+		t.Errorf("Pwd: got %q, want %q", acts[0].Pwd, fake.cwd)
 	}
 
 	_ = fake.Close()

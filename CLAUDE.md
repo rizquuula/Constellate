@@ -40,7 +40,7 @@ per-binary versions are read from the two `VERSION` files at build time. To cut 
 ## Status
 All planned features are implemented; the full test matrix has been run end-to-end and passes —
 `make test` (unit + integration + in-proc E2E), `make test-e2e` (single-machine Playwright), and
-`make test-docker` (hub + 2 agent containers). **Wire protocol is 5** (supported window [1,5]); the
+`make test-docker` (hub + 2 agent containers). **Wire protocol is 6** (supported window [1,6]); the
 milestone roadmap and decision history live in `DESIGN.md` §18.
 
 **Live terminals + persistence.** The agent spawns a PTY per session, keeps a per-session

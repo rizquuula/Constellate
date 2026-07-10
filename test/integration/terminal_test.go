@@ -371,6 +371,141 @@ func TestSessionLostOnAgentRestart(t *testing.T) {
 
 // sessionHasStatus GETs /api/sessions and returns true when the session with
 // the given id has the expected status.
+// TestSessionPwdFollowsCd verifies the live-pwd path end to end: the agent
+// reads the shell's working directory off the PTY, ships it in a Heartbeat
+// (SessionStat.pwd), the hub persists it, and it surfaces on the session DTO.
+// It then runs `cd` inside the real shell and asserts the reported pwd follows.
+//
+// This is the signal the pane header renders; the spawn-time `cwd` field must
+// stay pinned to the original directory throughout.
+func TestSessionPwdFollowsCd(t *testing.T) {
+	logger := log.New("error", "text")
+
+	// t.TempDir() lives under /var on macOS, which is a symlink to /private/var.
+	// The shell reports the resolved path, so resolve our expectations too.
+	startDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(startDir): %v", err)
+	}
+	targetDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(targetDir): %v", err)
+	}
+
+	ts, _, enrollUC, wsURL := newInProcessHub(t)
+	defer ts.Close()
+
+	mgr := session.NewManager(agentpty.Factory{}, 256*1024, logger, nil)
+	machineID, agentKey := enrollAgent(t, enrollUC, "e2e-pwd")
+
+	agentCtx, cancelAgent := context.WithCancel(context.Background())
+	defer cancelAgent()
+
+	client := hubclient.New(hubclient.Config{
+		HubURL:            wsURL("/ws/agent"),
+		AgentKey:          agentKey,
+		MachineID:         machineID,
+		Name:              "e2e-pwd",
+		HeartbeatInterval: 150 * time.Millisecond,
+		Sessions:          mgr,
+		Log:               logger,
+	})
+	mgr.SetNotifier(client)
+	go func() { _ = client.Run(agentCtx) }()
+
+	waitFor(t, 5*time.Second, "machine should come online", func() bool {
+		found, online := machineStatus(t, ts.URL, machineID)
+		return found && online
+	})
+
+	body := fmt.Sprintf(`{"machineID":%q,"cwd":%q,"cols":80,"rows":24}`, machineID, startDir)
+	resp, err := http.Post(ts.URL+"/api/sessions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/sessions: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /api/sessions: expected 201, got %d", resp.StatusCode)
+	}
+	var sessDTO struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sessDTO); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	sid := sessDTO.ID
+
+	// The first heartbeats must report the spawn directory as the live pwd.
+	waitFor(t, 5*time.Second, "pwd should reach the hub as the spawn dir", func() bool {
+		return sessionPwd(t, ts.URL, sid) == startDir
+	})
+	t.Logf("step 1: pwd reported as %s", startDir)
+
+	// Now chdir inside the real shell and watch the reported pwd follow.
+	wsCtx, wsCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer wsCancel()
+
+	c, _, err := websocket.Dial(wsCtx, wsURL("/ws/term?session="+sid), nil)
+	if err != nil {
+		t.Fatalf("ws/term dial: %v", err)
+	}
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "") }()
+
+	time.Sleep(100 * time.Millisecond) // let the shell emit its prompt
+
+	cmd := fmt.Sprintf("cd %s && echo pwd_cd_done\n", targetDir)
+	if err := c.Write(wsCtx, websocket.MessageBinary, []byte(cmd)); err != nil {
+		t.Fatalf("ws write cd: %v", err)
+	}
+	if !readUntil(t, wsCtx, c, "pwd_cd_done", 5*time.Second) {
+		t.Fatal("shell did not acknowledge the cd within deadline")
+	}
+
+	waitFor(t, 5*time.Second, "pwd should follow the cd", func() bool {
+		return sessionPwd(t, ts.URL, sid) == targetDir
+	})
+	t.Logf("step 2: pwd followed cd to %s", targetDir)
+
+	// The spawn-time cwd must be untouched by any of this.
+	if got := sessionCwd(t, ts.URL, sid); got != startDir {
+		t.Errorf("spawn cwd was mutated: got %q, want %q", got, startDir)
+	}
+
+	cancelAgent()
+}
+
+// sessionField fetches GET /api/sessions and returns the named string field of
+// the session with the given id, or "" if absent.
+func sessionField(t *testing.T, apiURL, sessionID, field string) string {
+	t.Helper()
+	resp, err := http.Get(apiURL + "/api/sessions")
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var list []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return ""
+	}
+	for _, s := range list {
+		if s["id"] == sessionID {
+			v, _ := s[field].(string)
+			return v
+		}
+	}
+	return ""
+}
+
+func sessionPwd(t *testing.T, apiURL, sessionID string) string {
+	t.Helper()
+	return sessionField(t, apiURL, sessionID, "pwd")
+}
+
+func sessionCwd(t *testing.T, apiURL, sessionID string) string {
+	t.Helper()
+	return sessionField(t, apiURL, sessionID, "cwd")
+}
+
 func sessionHasStatus(t *testing.T, apiURL, sessionID, status string) bool {
 	t.Helper()
 	resp, err := http.Get(apiURL + "/api/sessions")

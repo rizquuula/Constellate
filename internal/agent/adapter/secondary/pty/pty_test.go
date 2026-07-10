@@ -116,6 +116,40 @@ func TestFactoryCwdCreateDir(t *testing.T) {
 	}
 }
 
+// TestPTYCwd verifies Cwd reports the shell's live working directory. The
+// shell is spawned in a known temp dir, so Cwd should return that dir before
+// any cd. On macOS t.TempDir() lives under /var (a symlink to /private/var),
+// so the expected path is resolved with EvalSymlinks before comparing.
+func TestPTYCwd(t *testing.T) {
+	dir := t.TempDir()
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+	}
+
+	p, err := Factory{}.Open(session.PTYSpec{
+		Shell: "/bin/sh",
+		Cwd:   dir,
+		Cols:  80,
+		Rows:  24,
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	got, err := p.(*PTY).Cwd()
+	if err != nil {
+		t.Skipf("Cwd not supported on this platform: %v", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(got); err == nil {
+		got = resolved
+	}
+	if got != want {
+		t.Errorf("Cwd: got %q, want %q", got, want)
+	}
+}
+
 func TestFactoryIntegration(t *testing.T) {
 	p, err := Factory{}.Open(session.PTYSpec{
 		Shell: "/bin/sh",

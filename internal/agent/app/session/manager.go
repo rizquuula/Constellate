@@ -410,38 +410,45 @@ func (m *Manager) RenderScreen(id string) (terminal.SessionScreen, bool) {
 // this many seconds counts as "active".
 const activeWindowSec int64 = 2
 
-// Activities returns per-session activity signals for every running session
-// that has a screen emulator. Sessions without a screen are omitted.
+// Activities returns per-session activity and live working directory for every
+// running session. Activity requires a screen emulator; a session without one
+// reports an empty Activity (which the hub ignores) but still reports its Pwd.
 // now is the current unix-second timestamp (passed in to allow unit testing
 // without real-time dependency). The session map is snapshotted under the
 // manager lock; computation happens outside the lock, mirroring RunningScreens.
 func (m *Manager) Activities(now int64) []terminal.SessionActivity {
 	type entry struct {
 		id           string
-		screen       Screen
+		screen       Screen // nil when no ScreenFactory was installed
+		pty          PTY
 		lastOutputAt int64
 	}
 
 	m.mu.Lock()
 	entries := make([]entry, 0, len(m.sessions))
 	for id, ls := range m.sessions {
-		if ls.screen != nil {
-			entries = append(entries, entry{
-				id:           id,
-				screen:       ls.screen,
-				lastOutputAt: ls.lastOutputAt.Load(),
-			})
-		}
+		entries = append(entries, entry{
+			id:           id,
+			screen:       ls.screen,
+			pty:          ls.pty,
+			lastOutputAt: ls.lastOutputAt.Load(),
+		})
 	}
 	m.mu.Unlock()
 
 	result := make([]terminal.SessionActivity, 0, len(entries))
 	for _, e := range entries {
-		prompt := e.screen.PromptState()
-		tail := e.screen.TailText()
-		question := terminal.TailLooksLikeQuestion(tail)
-		act := terminal.ComputeActivity(now, e.lastOutputAt, activeWindowSec, prompt, question)
-		result = append(result, terminal.SessionActivity{ID: e.id, Activity: act})
+		var act terminal.Activity
+		if e.screen != nil {
+			prompt := e.screen.PromptState()
+			tail := e.screen.TailText()
+			question := terminal.TailLooksLikeQuestion(tail)
+			act = terminal.ComputeActivity(now, e.lastOutputAt, activeWindowSec, prompt, question)
+		}
+		// Best-effort live cwd. Cwd is a syscall, so it must not run under m.mu;
+		// on failure leave Pwd empty and the hub keeps the last known value.
+		cwd, _ := e.pty.Cwd()
+		result = append(result, terminal.SessionActivity{ID: e.id, Activity: act, Pwd: cwd})
 	}
 	return result
 }

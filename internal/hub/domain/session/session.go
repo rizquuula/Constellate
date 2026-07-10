@@ -15,6 +15,10 @@ type Session struct {
 	createdAt    int64
 	lastActiveAt int64
 	activity     string
+	// pwd is the session's live working directory (follows cd), refreshed from
+	// heartbeats. It is distinct from cwd, which is the fixed spawn directory set
+	// at open time and never changes.
+	pwd string
 }
 
 // New creates a Session at open time. status is StatusRunning; lastActiveAt equals createdAt.
@@ -63,6 +67,7 @@ func (s Session) AutoRelaunch() bool   { return s.autoRelaunch }
 func (s Session) CreatedAt() int64     { return s.createdAt }
 func (s Session) LastActiveAt() int64  { return s.lastActiveAt }
 func (s Session) Activity() string     { return s.activity }
+func (s Session) Pwd() string          { return s.pwd }
 
 // SetStatus updates the session status.
 func (s *Session) SetStatus(st Status) {
@@ -89,6 +94,12 @@ func (s *Session) SetTitle(t string) {
 // SetActivity updates the session activity state.
 func (s *Session) SetActivity(a string) {
 	s.activity = a
+}
+
+// SetPwd updates the session's live working directory (follows cd). This is
+// distinct from cwd, the fixed spawn directory.
+func (s *Session) SetPwd(p string) {
+	s.pwd = p
 }
 
 // SetAutoRelaunch updates whether this session should be relaunched after agent restart.

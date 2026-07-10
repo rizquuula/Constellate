@@ -901,6 +901,23 @@ body {
   cursor: default;
 }
 
+/* Live working directory (pwd), cropped in JS to the last 8 chars. Stays fully
+   legible (flex-shrink: 0) so .pane-title-text truncates first when space is
+   tight; a dot separator via ::before keeps it out of the selectable text. */
+.pane-title-dir {
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.pane-title-dir::before {
+  content: '·';
+  margin: 0 4px;
+  color: var(--text-faint);
+}
+
 .pane-title-input {
   flex: 1;
   background: var(--surface-input);
@@ -2412,6 +2429,13 @@ body {
   .app-header {
     padding: 0 8px;
     gap: 8px;
+  }
+
+  /* Pane header is cramped on narrow screens; the pwd (flex-shrink: 0) would
+     steal space from the machine|shell title, so drop it. Full path is still
+     available on wider layouts. */
+  .pane-title-dir {
+    display: none;
   }
 
   .app-wordmark {

@@ -20,7 +20,9 @@ type SessionStore interface {
 	SetLost(ctx context.Context, id string, ts int64) error
 	SetTitle(ctx context.Context, id, title string) error
 	SetAutoRelaunch(ctx context.Context, id string, v bool) error
-	SetActivity(ctx context.Context, id, activity string, lastActiveAt int64) error
+	// SetStat updates a session's activity and/or live working directory (pwd).
+	// An empty activity or pwd leaves that column untouched (preserve-on-empty).
+	SetStat(ctx context.Context, id, activity, pwd string, lastActiveAt int64) error
 	Delete(ctx context.Context, id string) error
 }
 

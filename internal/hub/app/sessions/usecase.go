@@ -190,15 +190,19 @@ func (u *UseCase) Rename(ctx context.Context, id, title string) error {
 	return u.store.SetTitle(ctx, id, title)
 }
 
-// RecordActivity persists the per-session activity from a heartbeat.
-// Empty or unrecognised activity values are silently ignored.
-// A not-found session (agent reported before the hub has created it) is also
-// silently ignored — this must not break the heartbeat path.
-func (u *UseCase) RecordActivity(ctx context.Context, sessionID, activity string) error {
+// RecordStat persists the per-session activity and/or live working directory
+// (pwd) from a heartbeat. An unrecognised activity is dropped (not persisted)
+// but a valid pwd on the same stat is still persisted. When both are empty the
+// call is a no-op. A not-found session (agent reported before the hub has
+// created it) is silently ignored — this must not break the heartbeat path.
+func (u *UseCase) RecordStat(ctx context.Context, sessionID, activity, pwd string) error {
 	switch activity {
 	case session.ActivityActive, session.ActivityIdle,
 		session.ActivityAwaitingInput, session.ActivityUnknown:
 	default:
+		activity = "" // don't persist a bogus activity, but still persist pwd
+	}
+	if activity == "" && pwd == "" {
 		return nil
 	}
 
@@ -207,9 +211,9 @@ func (u *UseCase) RecordActivity(ctx context.Context, sessionID, activity string
 		lastActiveAt = u.clock.Now()
 	}
 
-	if err := u.store.SetActivity(ctx, sessionID, activity, lastActiveAt); err != nil {
+	if err := u.store.SetStat(ctx, sessionID, activity, pwd, lastActiveAt); err != nil {
 		if errors.Is(err, session.ErrNotFound) {
-			u.log.Debug("sessions: RecordActivity: session not found (agent may precede hub record)", "sessionID", sessionID)
+			u.log.Debug("sessions: RecordStat: session not found (agent may precede hub record)", "sessionID", sessionID)
 			return nil
 		}
 		return err
