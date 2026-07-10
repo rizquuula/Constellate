@@ -4,9 +4,10 @@ package session
 type Status string
 
 const (
-	StatusRunning Status = "running"
-	StatusExited  Status = "exited"
-	StatusLost    Status = "lost"
+	StatusRunning      Status = "running"
+	StatusExited       Status = "exited"
+	StatusLost         Status = "lost"
+	StatusDisconnected Status = "disconnected"
 )
 
 // Activity constants for per-session AI-awareness state reported by heartbeats.

@@ -136,6 +136,20 @@ func (r *Registry) Remove(machineID string) {
 	delete(r.conns, machineID)
 }
 
+// RemoveIf deletes the entry for machineID only if the stored pointer is c,
+// reporting whether it removed. This makes connection teardown race-safe against
+// a fast reconnect: if a newer connection has already replaced c via Add, the
+// stale cleanup is a no-op and leaves the live entry intact.
+func (r *Registry) RemoveIf(machineID string, c *Conn) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.conns[machineID] == c {
+		delete(r.conns, machineID)
+		return true
+	}
+	return false
+}
+
 // Get returns the Conn for machineID and whether it was found.
 func (r *Registry) Get(machineID string) (*Conn, bool) {
 	r.mu.RLock()

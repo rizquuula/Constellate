@@ -101,13 +101,15 @@ func (s *SessionStore) ListByMachine(ctx context.Context, machineID string) ([]s
 	return collectSessions(rows)
 }
 
-// AutoRelaunchSessions returns running sessions for the given machine that have
-// auto_relaunch=1. Used during restart reconciliation.
+// AutoRelaunchSessions returns running or disconnected sessions for the given
+// machine that have auto_relaunch=1. Used during restart reconciliation; the
+// sessions are already disconnected by the time a restart is detected on
+// reconnect, so both statuses must match.
 func (s *SessionStore) AutoRelaunchSessions(ctx context.Context, machineID string) ([]session.Session, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_id, machine_id, title, shell, cwd, auto_relaunch, status, exit_code, created_at, last_active_at, activity, pwd
-		FROM sessions WHERE machine_id = ? AND status = ? AND auto_relaunch = 1
-	`, machineID, string(session.StatusRunning))
+		FROM sessions WHERE machine_id = ? AND status IN ('running', 'disconnected') AND auto_relaunch = 1
+	`, machineID)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: auto-relaunch sessions for machine %q: %w", machineID, err)
 	}
@@ -116,15 +118,46 @@ func (s *SessionStore) AutoRelaunchSessions(ctx context.Context, machineID strin
 	return collectSessions(rows)
 }
 
-// MarkRunningLost bulk-marks all running sessions (with auto_relaunch=0) for a machine as lost.
-// Sessions with auto_relaunch=1 are handled separately by the relaunch path.
+// MarkRunningLost bulk-marks all running or disconnected sessions (with
+// auto_relaunch=0) for a machine as lost. Sessions with auto_relaunch=1 are
+// handled separately by the relaunch path. Disconnected sessions match too:
+// by the time a restart is detected they were already marked disconnected on
+// the connection drop.
 func (s *SessionStore) MarkRunningLost(ctx context.Context, machineID string, ts int64) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE sessions SET status = ?, last_active_at = ?
-		WHERE machine_id = ? AND status = ? AND auto_relaunch = 0
-	`, string(session.StatusLost), ts, machineID, string(session.StatusRunning))
+		WHERE machine_id = ? AND status IN ('running', 'disconnected') AND auto_relaunch = 0
+	`, string(session.StatusLost), ts, machineID)
 	if err != nil {
 		return fmt.Errorf("sqlite: mark running lost for machine %q: %w", machineID, err)
+	}
+	return nil
+}
+
+// MarkRunningDisconnected bulk-marks all running sessions for a machine as
+// disconnected (all auto_relaunch values). Called on the connection-teardown
+// path: the machine is unreachable but the PTYs are presumed alive.
+func (s *SessionStore) MarkRunningDisconnected(ctx context.Context, machineID string, ts int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET status = ?, last_active_at = ?
+		WHERE machine_id = ? AND status = ?
+	`, string(session.StatusDisconnected), ts, machineID, string(session.StatusRunning))
+	if err != nil {
+		return fmt.Errorf("sqlite: mark running disconnected for machine %q: %w", machineID, err)
+	}
+	return nil
+}
+
+// MarkDisconnectedRunning bulk-restores all disconnected sessions for a machine
+// to running. Called on a same-instance reconnect: the blip is over and the
+// PTYs survived it.
+func (s *SessionStore) MarkDisconnectedRunning(ctx context.Context, machineID string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET status = ?
+		WHERE machine_id = ? AND status = ?
+	`, string(session.StatusRunning), machineID, string(session.StatusDisconnected))
+	if err != nil {
+		return fmt.Errorf("sqlite: mark disconnected running for machine %q: %w", machineID, err)
 	}
 	return nil
 }

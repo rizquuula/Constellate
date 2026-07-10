@@ -84,6 +84,7 @@ function RenderedRow({ runs, cols }: RenderedRowProps) {
 function statusDotClass(status: string): string {
   if (status === 'running') return 'pane-status-running'
   if (status === 'lost') return 'pane-status-lost'
+  if (status === 'disconnected') return 'pane-status-disconnected'
   return 'pane-status-exited'
 }
 

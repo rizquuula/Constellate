@@ -17,6 +17,12 @@ type SessionEvents interface {
 	MarkExited(ctx context.Context, sessionID string, exitCode int) error
 	ReconcileMachineRestart(ctx context.Context, machineID string) error
 	RecordStat(ctx context.Context, sessionID, activity, pwd string) error
+	// MarkMachineDisconnected marks a machine's running sessions as disconnected
+	// when its control connection drops (PTYs presumed alive).
+	MarkMachineDisconnected(ctx context.Context, machineID string) error
+	// RestoreMachineSessions restores a machine's disconnected sessions to running
+	// after a same-instanceID reconnect.
+	RestoreMachineSessions(ctx context.Context, machineID string) error
 }
 
 // OverviewSink is the consumer-side port for overview snapshot ingress.

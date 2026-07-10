@@ -57,7 +57,24 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 
 	conn := agentlink.NewConn(hello.MachineID, sess, enc, time.Now().Unix())
 	e.links.Add(hello.MachineID, conn)
-	defer e.links.Remove(hello.MachineID)
+	defer func() {
+		// Only tear down (and mark sessions disconnected) if this exact conn is
+		// still the live one — a fast reconnect may have replaced it via Add, in
+		// which case its sessions are already running under the new connection.
+		if !e.links.RemoveIf(hello.MachineID, conn) {
+			return
+		}
+		if e.events == nil {
+			return
+		}
+		// The request ctx is torn down as handleControl returns, so use a fresh
+		// background context for this cleanup-path write.
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if derr := e.events.MarkMachineDisconnected(bgCtx, hello.MachineID); derr != nil {
+			e.log.Error("wsagent: mark machine disconnected failed", "machineID", hello.MachineID, "err", derr)
+		}
+	}()
 
 	_, restarted, err := e.reg.Register(ctx, registry.RegisterInput{
 		MachineID:    hello.MachineID,
@@ -82,6 +99,13 @@ func (e *Endpoint) handleControl(ctx context.Context, sess *yamux.Session, ctrl 
 				e.log.Error("wsagent: reconcile machine restart failed", "machineID", hello.MachineID, "err", rerr)
 			}
 		}()
+	} else if e.events != nil {
+		// Same-instanceID reconnect (or first-ever connect): restore any sessions
+		// marked disconnected by a prior connection drop back to running. A
+		// first-ever connect finds no disconnected rows → harmless no-op.
+		if rerr := e.events.RestoreMachineSessions(ctx, hello.MachineID); rerr != nil {
+			e.log.Error("wsagent: restore machine sessions failed", "machineID", hello.MachineID, "err", rerr)
+		}
 	}
 	e.log.Info("agent online", "machineID", hello.MachineID, "name", hello.Name)
 

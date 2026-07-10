@@ -73,7 +73,7 @@ func (s *fakeSessionStore) ListByMachine(_ context.Context, machineID string) ([
 func (s *fakeSessionStore) AutoRelaunchSessions(_ context.Context, machineID string) ([]session.Session, error) {
 	var out []session.Session
 	for _, ss := range s.data {
-		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning && ss.AutoRelaunch() {
+		if ss.MachineID() == machineID && (ss.Status() == session.StatusRunning || ss.Status() == session.StatusDisconnected) && ss.AutoRelaunch() {
 			out = append(out, ss)
 		}
 	}
@@ -92,9 +92,30 @@ func (s *fakeSessionStore) SetExited(_ context.Context, id string, exitCode int,
 
 func (s *fakeSessionStore) MarkRunningLost(_ context.Context, machineID string, ts int64) error {
 	for id, ss := range s.data {
-		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning && !ss.AutoRelaunch() {
+		if ss.MachineID() == machineID && (ss.Status() == session.StatusRunning || ss.Status() == session.StatusDisconnected) && !ss.AutoRelaunch() {
 			ss.SetStatus(session.StatusLost)
 			ss.Touch(ts)
+			s.data[id] = ss
+		}
+	}
+	return nil
+}
+
+func (s *fakeSessionStore) MarkRunningDisconnected(_ context.Context, machineID string, ts int64) error {
+	for id, ss := range s.data {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning {
+			ss.SetStatus(session.StatusDisconnected)
+			ss.Touch(ts)
+			s.data[id] = ss
+		}
+	}
+	return nil
+}
+
+func (s *fakeSessionStore) MarkDisconnectedRunning(_ context.Context, machineID string) error {
+	for id, ss := range s.data {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusDisconnected {
+			ss.SetStatus(session.StatusRunning)
 			s.data[id] = ss
 		}
 	}
@@ -1034,5 +1055,156 @@ func TestSetAutoRelaunch_Persists(t *testing.T) {
 	}
 	if !got.AutoRelaunch() {
 		t.Error("AutoRelaunch: got false, want true after SetAutoRelaunch(true)")
+	}
+}
+
+// --- disconnect / restore tests ---
+
+func TestMarkMachineDisconnected_MarksRunning(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 5000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	// Two running sessions on m1 (mixed auto_relaunch), one exited on m1, one running on m2.
+	sRun := session.New("s-run", "m1", "", "", "", "", 900)
+	store.data["s-run"] = sRun
+	sAuto := session.New("s-auto", "m1", "", "", "", "", 900)
+	sAuto.SetAutoRelaunch(true)
+	store.data["s-auto"] = sAuto
+	sExit := session.New("s-exit", "m1", "", "", "", "", 900)
+	sExit.SetExited(0, 950)
+	store.data["s-exit"] = sExit
+	sOther := session.New("s-other", "m2", "", "", "", "", 900)
+	store.data["s-other"] = sOther
+
+	if err := uc.MarkMachineDisconnected(ctx, "m1"); err != nil {
+		t.Fatalf("MarkMachineDisconnected: %v", err)
+	}
+
+	for _, id := range []string{"s-run", "s-auto"} {
+		got, _ := store.ByID(ctx, id)
+		if got.Status() != session.StatusDisconnected {
+			t.Errorf("%s status: got %q, want disconnected", id, got.Status())
+		}
+	}
+	if got, _ := store.ByID(ctx, "s-exit"); got.Status() != session.StatusExited {
+		t.Errorf("s-exit status: got %q, want exited (untouched)", got.Status())
+	}
+	if got, _ := store.ByID(ctx, "s-other"); got.Status() != session.StatusRunning {
+		t.Errorf("s-other status: got %q, want running (other machine untouched)", got.Status())
+	}
+}
+
+func TestRestoreMachineSessions_RestoresDisconnected(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 5000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	sDisc := session.New("s-disc", "m1", "", "", "", "", 900)
+	sDisc.SetStatus(session.StatusDisconnected)
+	store.data["s-disc"] = sDisc
+	sLost := session.New("s-lost", "m1", "", "", "", "", 900)
+	sLost.SetStatus(session.StatusLost)
+	store.data["s-lost"] = sLost
+
+	if err := uc.RestoreMachineSessions(ctx, "m1"); err != nil {
+		t.Fatalf("RestoreMachineSessions: %v", err)
+	}
+
+	if got, _ := store.ByID(ctx, "s-disc"); got.Status() != session.StatusRunning {
+		t.Errorf("s-disc status: got %q, want running", got.Status())
+	}
+	if got, _ := store.ByID(ctx, "s-lost"); got.Status() != session.StatusLost {
+		t.Errorf("s-lost status: got %q, want lost (untouched)", got.Status())
+	}
+}
+
+func TestRestoreMachineSessions_NoDisconnectedIsNoop(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 5000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	// First-ever connect: no disconnected rows → harmless no-op.
+	if err := uc.RestoreMachineSessions(ctx, "m1"); err != nil {
+		t.Fatalf("RestoreMachineSessions: %v", err)
+	}
+}
+
+func TestDelete_DisconnectedRefused(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s := session.New("s-disc", "m1", "", "", "", "", 900)
+	s.SetStatus(session.StatusDisconnected)
+	store.data["s-disc"] = s
+
+	if err := uc.Delete(ctx, "s-disc"); !errors.Is(err, sessions.ErrSessionRunning) {
+		t.Errorf("Delete disconnected: got %v, want ErrSessionRunning", err)
+	}
+	if _, err := store.ByID(ctx, "s-disc"); err != nil {
+		t.Errorf("disconnected session must remain after refused delete; got %v", err)
+	}
+}
+
+func TestForceDelete_DisconnectedSignalsAndRemoves(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	s := session.New("s-disc", "m1", "", "", "", "", 900)
+	s.SetStatus(session.StatusDisconnected)
+	store.data["s-disc"] = s
+
+	if err := uc.ForceDelete(ctx, "s-disc"); err != nil {
+		t.Fatalf("ForceDelete: %v", err)
+	}
+	if len(gw.closeCalls) != 1 || gw.closeCalls[0] != "s-disc" {
+		t.Errorf("ForceDelete must signal the agent for disconnected; got close calls %v", gw.closeCalls)
+	}
+	if _, err := store.ByID(ctx, "s-disc"); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("disconnected session must be removed after ForceDelete; got %v", err)
+	}
+}
+
+func TestReconcileMachineRestart_FromDisconnected(t *testing.T) {
+	store := newFakeSessionStore()
+	gw := &fakeGateway{pidReturn: 7}
+	clk := &fixedClock{ts: 1000}
+	uc := sessions.New(store, gw, clk, nextID(), discardLogger(), &fakeAuditSink{})
+	ctx := context.Background()
+
+	// A restart is detected only after the drop marked sessions disconnected.
+	sAuto := session.New("s-auto", "m1", "", "", "/bin/bash", "/work", 900)
+	sAuto.SetAutoRelaunch(true)
+	sAuto.SetStatus(session.StatusDisconnected)
+	store.data["s-auto"] = sAuto
+	sPlain := session.New("s-plain", "m1", "", "", "", "", 900)
+	sPlain.SetStatus(session.StatusDisconnected)
+	store.data["s-plain"] = sPlain
+
+	clk.ts = 2000
+	if err := uc.ReconcileMachineRestart(ctx, "m1"); err != nil {
+		t.Fatalf("ReconcileMachineRestart: %v", err)
+	}
+
+	if gw.openCalls != 1 {
+		t.Errorf("openCalls: got %d, want 1 (auto-relaunch session relaunched)", gw.openCalls)
+	}
+	if got, _ := store.ByID(ctx, "s-auto"); got.Status() != session.StatusRunning {
+		t.Errorf("s-auto status: got %q, want running", got.Status())
+	}
+	if got, _ := store.ByID(ctx, "s-plain"); got.Status() != session.StatusLost {
+		t.Errorf("s-plain status: got %q, want lost", got.Status())
 	}
 }

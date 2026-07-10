@@ -463,6 +463,119 @@ func TestSessionStore_MarkRunningLost(t *testing.T) {
 	}
 }
 
+func TestSessionStore_MarkRunningLost_IncludesDisconnected(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	// A disconnected session (auto_relaunch=0) must also be swept to lost on restart.
+	s := session.New("s-disc", "m1", "", "", "", "", 1000)
+	if err := ss.Create(ctx, s); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ss.MarkRunningDisconnected(ctx, "m1", 1500); err != nil {
+		t.Fatalf("MarkRunningDisconnected: %v", err)
+	}
+	if got, _ := ss.ByID(ctx, "s-disc"); got.Status() != session.StatusDisconnected {
+		t.Fatalf("precondition: got %q, want disconnected", got.Status())
+	}
+
+	if err := ss.MarkRunningLost(ctx, "m1", 2000); err != nil {
+		t.Fatalf("MarkRunningLost: %v", err)
+	}
+	got, err := ss.ByID(ctx, "s-disc")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Status() != session.StatusLost {
+		t.Errorf("disconnected session: got status %q, want lost", got.Status())
+	}
+}
+
+func TestSessionStore_MarkRunningDisconnected(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	running := session.New("s-run", "m1", "", "", "", "", 1000)
+	if err := ss.Create(ctx, running); err != nil {
+		t.Fatalf("Create running: %v", err)
+	}
+	exited := session.New("s-exit", "m1", "", "", "", "", 1000)
+	if err := ss.Create(ctx, exited); err != nil {
+		t.Fatalf("Create exited: %v", err)
+	}
+	if err := ss.SetExited(ctx, "s-exit", 0, 1500); err != nil {
+		t.Fatalf("SetExited: %v", err)
+	}
+
+	if err := ss.MarkRunningDisconnected(ctx, "m1", 2000); err != nil {
+		t.Fatalf("MarkRunningDisconnected: %v", err)
+	}
+
+	gotRun, err := ss.ByID(ctx, "s-run")
+	if err != nil {
+		t.Fatalf("ByID s-run: %v", err)
+	}
+	if gotRun.Status() != session.StatusDisconnected {
+		t.Errorf("running session: got status %q, want disconnected", gotRun.Status())
+	}
+	if gotRun.LastActiveAt() != 2000 {
+		t.Errorf("running session: LastActiveAt got %d, want 2000", gotRun.LastActiveAt())
+	}
+
+	gotExit, err := ss.ByID(ctx, "s-exit")
+	if err != nil {
+		t.Fatalf("ByID s-exit: %v", err)
+	}
+	if gotExit.Status() != session.StatusExited {
+		t.Errorf("exited session must remain exited, got %q", gotExit.Status())
+	}
+}
+
+func TestSessionStore_MarkDisconnectedRunning(t *testing.T) {
+	ms, ss := openTestSessionDB(t)
+	ctx := context.Background()
+
+	insertMachine(t, ms, "m1")
+
+	disc := session.New("s-disc", "m1", "", "", "", "", 1000)
+	if err := ss.Create(ctx, disc); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	lost := session.New("s-lost", "m1", "", "", "", "", 1000)
+	if err := ss.Create(ctx, lost); err != nil {
+		t.Fatalf("Create lost: %v", err)
+	}
+	if err := ss.SetLost(ctx, "s-lost", 1500); err != nil {
+		t.Fatalf("SetLost: %v", err)
+	}
+	if err := ss.MarkRunningDisconnected(ctx, "m1", 1600); err != nil {
+		t.Fatalf("MarkRunningDisconnected: %v", err)
+	}
+
+	if err := ss.MarkDisconnectedRunning(ctx, "m1"); err != nil {
+		t.Fatalf("MarkDisconnectedRunning: %v", err)
+	}
+
+	gotDisc, err := ss.ByID(ctx, "s-disc")
+	if err != nil {
+		t.Fatalf("ByID s-disc: %v", err)
+	}
+	if gotDisc.Status() != session.StatusRunning {
+		t.Errorf("disconnected session: got status %q, want running", gotDisc.Status())
+	}
+	gotLost, err := ss.ByID(ctx, "s-lost")
+	if err != nil {
+		t.Fatalf("ByID s-lost: %v", err)
+	}
+	if gotLost.Status() != session.StatusLost {
+		t.Errorf("lost session must remain lost, got %q", gotLost.Status())
+	}
+}
+
 func TestSessionStore_SetAutoRelaunch(t *testing.T) {
 	ms, ss := openTestSessionDB(t)
 	ctx := context.Background()
@@ -540,6 +653,12 @@ func TestSessionStore_AutoRelaunchSessions(t *testing.T) {
 		t.Fatalf("SetExited s3: %v", err)
 	}
 
+	// Disconnected auto_relaunch sessions must also be returned: by the time a
+	// restart is detected on reconnect, the drop already marked them disconnected.
+	if err := ss.MarkRunningDisconnected(ctx, "m1", 1600); err != nil {
+		t.Fatalf("MarkRunningDisconnected: %v", err)
+	}
+
 	revivals, err := ss.AutoRelaunchSessions(ctx, "m1")
 	if err != nil {
 		t.Fatalf("AutoRelaunchSessions: %v", err)
@@ -547,13 +666,13 @@ func TestSessionStore_AutoRelaunchSessions(t *testing.T) {
 	if len(revivals) != 2 {
 		t.Fatalf("AutoRelaunchSessions: got %d sessions, want 2", len(revivals))
 	}
-	// Both should have auto_relaunch=true and status=running.
+	// Both should have auto_relaunch=true and status=disconnected (post-drop).
 	for _, r := range revivals {
 		if !r.AutoRelaunch() {
 			t.Errorf("session %q: AutoRelaunch want true, got false", r.ID())
 		}
-		if r.Status() != session.StatusRunning {
-			t.Errorf("session %q: Status want running, got %q", r.ID(), r.Status())
+		if r.Status() != session.StatusDisconnected {
+			t.Errorf("session %q: Status want disconnected, got %q", r.ID(), r.Status())
 		}
 	}
 }

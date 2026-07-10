@@ -184,6 +184,7 @@ func TestOverview_ProjectRollups_WithUngrouped(t *testing.T) {
 	sessions := []session.Session{
 		newSession("s1", "m1", "p1", session.StatusRunning),
 		newSession("s2", "m1", "p1", session.StatusExited),
+		newSession("s4", "m1", "p1", session.StatusDisconnected),
 		newSession("s3", "m1", "", session.StatusLost), // ungrouped
 	}
 
@@ -211,8 +212,8 @@ func TestOverview_ProjectRollups_WithUngrouped(t *testing.T) {
 	if pr.ID != "p1" {
 		t.Errorf("Projects[0].ID: got %q, want p1", pr.ID)
 	}
-	if pr.Running != 1 || pr.Exited != 1 || pr.Total != 2 {
-		t.Errorf("p1 rollup: Running=%d Exited=%d Total=%d", pr.Running, pr.Exited, pr.Total)
+	if pr.Running != 1 || pr.Exited != 1 || pr.Disconnected != 1 || pr.Total != 3 {
+		t.Errorf("p1 rollup: Running=%d Exited=%d Disconnected=%d Total=%d", pr.Running, pr.Exited, pr.Disconnected, pr.Total)
 	}
 
 	ug := v.Projects[1]
@@ -289,11 +290,12 @@ func TestOverview_AttentionItems_LostSession(t *testing.T) {
 	}
 }
 
-func TestOverview_AttentionItems_OfflineWithRunning(t *testing.T) {
+func TestOverview_AttentionItems_OfflineWithDisconnected(t *testing.T) {
 	m1 := newMachine("m1", "offline-machine")
 
+	// An offline machine's sessions are disconnected (marked on the drop), not running.
 	sessions := []session.Session{
-		newSession("s1", "m1", "", session.StatusRunning),
+		newSession("s1", "m1", "", session.StatusDisconnected),
 	}
 
 	uc := dashboard.New(
@@ -312,12 +314,16 @@ func TestOverview_AttentionItems_OfflineWithRunning(t *testing.T) {
 
 	found := false
 	for _, a := range v.AttentionItems {
-		if a.Kind == "offline_with_running" && a.MachineID == "m1" {
+		if a.Kind == "disconnected_sessions" && a.MachineID == "m1" {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected offline_with_running attention item for m1, not found")
+		t.Error("expected disconnected_sessions attention item for m1, not found")
+	}
+
+	if v.Totals.SessionsDisconnected != 1 {
+		t.Errorf("SessionsDisconnected: got %d, want 1", v.Totals.SessionsDisconnected)
 	}
 }
 

@@ -16,6 +16,12 @@ type SessionStore interface {
 	AutoRelaunchSessions(ctx context.Context, machineID string) ([]session.Session, error)
 	SetExited(ctx context.Context, id string, exitCode int, ts int64) error
 	MarkRunningLost(ctx context.Context, machineID string, ts int64) error
+	// MarkRunningDisconnected bulk-marks a machine's running sessions as
+	// disconnected (a dropped connection; PTYs presumed alive).
+	MarkRunningDisconnected(ctx context.Context, machineID string, ts int64) error
+	// MarkDisconnectedRunning restores a machine's disconnected sessions to
+	// running after a same-instance reconnect (the blip is over).
+	MarkDisconnectedRunning(ctx context.Context, machineID string) error
 	SetRunning(ctx context.Context, id string) error
 	SetLost(ctx context.Context, id string, ts int64) error
 	SetTitle(ctx context.Context, id, title string) error

@@ -29,6 +29,7 @@ type DashboardTotalsDTO struct {
 	SessionsRunning       int `json:"sessionsRunning"`
 	SessionsExited        int `json:"sessionsExited"`
 	SessionsLost          int `json:"sessionsLost"`
+	SessionsDisconnected  int `json:"sessionsDisconnected"`
 	SessionsTotal         int `json:"sessionsTotal"`
 	ProjectsTotal         int `json:"projectsTotal"`
 	SessionsActive        int `json:"sessionsActive"`
@@ -50,13 +51,14 @@ type DashboardMachineDTO struct {
 
 // DashboardProjectDTO carries per-project session status counts.
 type DashboardProjectDTO struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	MachineID string `json:"machineID"`
-	Running   int    `json:"running"`
-	Exited    int    `json:"exited"`
-	Lost      int    `json:"lost"`
-	Total     int    `json:"total"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	MachineID    string `json:"machineID"`
+	Running      int    `json:"running"`
+	Exited       int    `json:"exited"`
+	Lost         int    `json:"lost"`
+	Disconnected int    `json:"disconnected"`
+	Total        int    `json:"total"`
 }
 
 // DashboardAttentionDTO surfaces a condition requiring operator attention.
@@ -101,13 +103,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	projects := make([]DashboardProjectDTO, len(view.Projects))
 	for i, p := range view.Projects {
 		projects[i] = DashboardProjectDTO{
-			ID:        p.ID,
-			Name:      p.Name,
-			MachineID: p.MachineID,
-			Running:   p.Running,
-			Exited:    p.Exited,
-			Lost:      p.Lost,
-			Total:     p.Total,
+			ID:           p.ID,
+			Name:         p.Name,
+			MachineID:    p.MachineID,
+			Running:      p.Running,
+			Exited:       p.Exited,
+			Lost:         p.Lost,
+			Disconnected: p.Disconnected,
+			Total:        p.Total,
 		}
 	}
 
@@ -140,6 +143,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			SessionsRunning:       view.Totals.SessionsRunning,
 			SessionsExited:        view.Totals.SessionsExited,
 			SessionsLost:          view.Totals.SessionsLost,
+			SessionsDisconnected:  view.Totals.SessionsDisconnected,
 			SessionsTotal:         view.Totals.SessionsTotal,
 			ProjectsTotal:         view.Totals.ProjectsTotal,
 			SessionsActive:        view.Totals.SessionsActive,

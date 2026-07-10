@@ -123,7 +123,9 @@ func (u *UseCase) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if s.Status() == session.StatusRunning {
+	// A disconnected session may still be alive behind a transient blip; deleting
+	// it could orphan a live PTY. ForceDelete remains the escape hatch.
+	if s.Status() == session.StatusRunning || s.Status() == session.StatusDisconnected {
 		return ErrSessionRunning
 	}
 	if err := u.store.Delete(ctx, id); err != nil {
@@ -141,7 +143,7 @@ func (u *UseCase) ForceDelete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if s.Status() == session.StatusRunning {
+	if s.Status() == session.StatusRunning || s.Status() == session.StatusDisconnected {
 		if cerr := u.gateway.CloseSession(ctx, s.MachineID(), id); cerr != nil {
 			u.log.Debug("sessions: ForceDelete: close signal failed (ignored)", "sessionID", id, "err", cerr)
 		}
@@ -205,6 +207,20 @@ func (u *UseCase) ReconcileMachineRestart(ctx context.Context, machineID string)
 
 	// Mark remaining running sessions (auto_relaunch=false) as lost.
 	return u.store.MarkRunningLost(ctx, machineID, ts)
+}
+
+// MarkMachineDisconnected marks a machine's running sessions as disconnected
+// when its control connection drops. The PTYs are presumed alive; a same-instance
+// reconnect restores them via RestoreMachineSessions. Satisfies wsagent.SessionEvents.
+func (u *UseCase) MarkMachineDisconnected(ctx context.Context, machineID string) error {
+	return u.store.MarkRunningDisconnected(ctx, machineID, u.clock.Now())
+}
+
+// RestoreMachineSessions restores a machine's disconnected sessions to running
+// after a same-instanceID reconnect (the PTYs survived the blip). A first-ever
+// connect with no disconnected rows is a harmless no-op. Satisfies wsagent.SessionEvents.
+func (u *UseCase) RestoreMachineSessions(ctx context.Context, machineID string) error {
+	return u.store.MarkDisconnectedRunning(ctx, machineID)
 }
 
 // SetAutoRelaunch enables or disables auto-relaunch for a session.

@@ -33,6 +33,8 @@ type noopEvents struct{}
 func (noopEvents) MarkExited(_ context.Context, _ string, _ int) error       { return nil }
 func (noopEvents) ReconcileMachineRestart(_ context.Context, _ string) error { return nil }
 func (noopEvents) RecordStat(_ context.Context, _, _, _ string) error        { return nil }
+func (noopEvents) MarkMachineDisconnected(_ context.Context, _ string) error { return nil }
+func (noopEvents) RestoreMachineSessions(_ context.Context, _ string) error  { return nil }
 
 // stubSessionService satisfies httpapi.SessionService for tests that don't exercise sessions.
 type stubSessionService struct{}

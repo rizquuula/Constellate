@@ -45,6 +45,7 @@ export interface DashboardTotals {
   sessionsRunning: number
   sessionsExited: number
   sessionsLost: number
+  sessionsDisconnected: number
   sessionsTotal: number
   projectsTotal: number
   sessionsActive: number
@@ -70,11 +71,12 @@ export interface ProjectRollup {
   running: number
   exited: number
   lost: number
+  disconnected: number
   total: number
 }
 
 export interface AttentionItem {
-  kind: 'lost_session' | 'offline_with_running' | 'awaiting_input'
+  kind: 'lost_session' | 'disconnected_sessions' | 'awaiting_input'
   machineID: string
   sessionID: string
   label: string

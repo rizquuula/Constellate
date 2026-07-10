@@ -18,6 +18,7 @@ type Totals struct {
 	SessionsRunning          int
 	SessionsExited           int
 	SessionsLost             int
+	SessionsDisconnected     int
 	SessionsTotal            int
 	ProjectsTotal            int
 	SessionsActive           int
@@ -42,17 +43,20 @@ type MachineRollup struct {
 // project-less sessions across all machines. This mirrors the "Ungrouped"
 // bucket used by the frontend sidebar.
 type ProjectRollup struct {
-	ID        string
-	Name      string
-	MachineID string
-	Running   int
-	Exited    int
-	Lost      int
-	Total     int
+	ID           string
+	Name         string
+	MachineID    string
+	Running      int
+	Exited       int
+	Lost         int
+	Disconnected int
+	Total        int
 }
 
 // AttentionItem surfaces a condition that requires operator attention.
-// Kind is one of: "lost_session", "offline_with_running", "awaiting_input".
+// Kind is one of: "lost_session", "disconnected_sessions", "awaiting_input".
+// "disconnected_sessions" is machine-level: an offline machine still owns
+// sessions marked disconnected (its PTYs are presumed alive pending reconnect).
 type AttentionItem struct {
 	Kind      string
 	MachineID string
@@ -123,7 +127,8 @@ func (u *UseCase) Overview(ctx context.Context) (View, error) {
 
 	// --- machine index (id → rollup) ---
 	type machineEntry struct {
-		rollup MachineRollup
+		rollup       MachineRollup
+		disconnected int // sessions on this machine with status disconnected
 	}
 	machineMap := make(map[string]*machineEntry, len(machines))
 	totals := Totals{
@@ -184,6 +189,8 @@ func (u *UseCase) Overview(ctx context.Context) (View, error) {
 				SessionID: s.ID(),
 				Label:     label,
 			})
+		case session.StatusDisconnected:
+			totals.SessionsDisconnected++
 		}
 
 		// Activity counts — only tally the three named states for running sessions;
@@ -214,8 +221,11 @@ func (u *UseCase) Overview(ctx context.Context) (View, error) {
 		// in Totals but not in any MachineRollup (a transient data-integrity case, surfaced via the warning).
 		if me, ok := machineMap[s.MachineID()]; ok {
 			me.rollup.Total++
-			if s.Status() == session.StatusRunning {
+			switch s.Status() {
+			case session.StatusRunning:
 				me.rollup.Running++
+			case session.StatusDisconnected:
+				me.disconnected++
 			}
 		} else {
 			u.log.Warn("dashboard: session references unknown machine", "sessionID", s.ID(), "machineID", s.MachineID())
@@ -240,14 +250,18 @@ func (u *UseCase) Overview(ctx context.Context) (View, error) {
 			pr.Exited++
 		case session.StatusLost:
 			pr.Lost++
+		case session.StatusDisconnected:
+			pr.Disconnected++
 		}
 	}
 
-	// --- offline machines with running-marked sessions ---
+	// --- offline machines with disconnected sessions ---
+	// An offline machine's running sessions are marked disconnected on the drop,
+	// so surface one machine-level item (not per-session) when any remain.
 	for _, me := range machineMap {
-		if !me.rollup.Online && me.rollup.Running > 0 {
+		if !me.rollup.Online && me.disconnected > 0 {
 			attention = append(attention, AttentionItem{
-				Kind:      "offline_with_running",
+				Kind:      "disconnected_sessions",
 				MachineID: me.rollup.ID,
 				SessionID: "",
 				Label:     me.rollup.Name,

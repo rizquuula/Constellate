@@ -67,14 +67,16 @@ func (s *SessionStore) ListByMachine(_ context.Context, machineID string) ([]ses
 	return out, nil
 }
 
-// AutoRelaunchSessions returns running sessions for the given machine that have auto_relaunch=true.
+// AutoRelaunchSessions returns running or disconnected sessions for the given
+// machine that have auto_relaunch=true. Disconnected sessions match too: by the
+// time a restart is detected they were already marked disconnected on the drop.
 func (s *SessionStore) AutoRelaunchSessions(_ context.Context, machineID string) ([]session.Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var out []session.Session
 	for _, ss := range s.data {
-		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning && ss.AutoRelaunch() {
+		if ss.MachineID() == machineID && (ss.Status() == session.StatusRunning || ss.Status() == session.StatusDisconnected) && ss.AutoRelaunch() {
 			out = append(out, ss)
 		}
 	}
@@ -111,16 +113,51 @@ func (s *SessionStore) SetExited(_ context.Context, id string, exitCode int, ts 
 	return nil
 }
 
-// MarkRunningLost bulk-marks all running sessions (with auto_relaunch=false) for a machine as lost.
-// Sessions with auto_relaunch=true are handled by the relaunch path.
+// MarkRunningLost bulk-marks all running or disconnected sessions (with
+// auto_relaunch=false) for a machine as lost. Sessions with auto_relaunch=true
+// are handled by the relaunch path. Disconnected sessions match too: by the
+// time a restart is detected they were already marked disconnected on the drop.
 func (s *SessionStore) MarkRunningLost(_ context.Context, machineID string, ts int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for id, ss := range s.data {
-		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning && !ss.AutoRelaunch() {
+		if ss.MachineID() == machineID && (ss.Status() == session.StatusRunning || ss.Status() == session.StatusDisconnected) && !ss.AutoRelaunch() {
 			ss.SetStatus(session.StatusLost)
 			ss.Touch(ts)
+			s.data[id] = ss
+		}
+	}
+	return nil
+}
+
+// MarkRunningDisconnected bulk-marks all running sessions for a machine as
+// disconnected (all auto_relaunch values). Called on the connection-teardown
+// path: the machine is unreachable but the PTYs are presumed alive.
+func (s *SessionStore) MarkRunningDisconnected(_ context.Context, machineID string, ts int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, ss := range s.data {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusRunning {
+			ss.SetStatus(session.StatusDisconnected)
+			ss.Touch(ts)
+			s.data[id] = ss
+		}
+	}
+	return nil
+}
+
+// MarkDisconnectedRunning bulk-restores all disconnected sessions for a machine
+// to running. Called on a same-instance reconnect: the blip is over and the
+// PTYs survived it.
+func (s *SessionStore) MarkDisconnectedRunning(_ context.Context, machineID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, ss := range s.data {
+		if ss.MachineID() == machineID && ss.Status() == session.StatusDisconnected {
+			ss.SetStatus(session.StatusRunning)
 			s.data[id] = ss
 		}
 	}

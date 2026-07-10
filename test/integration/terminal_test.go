@@ -369,6 +369,102 @@ func TestSessionLostOnAgentRestart(t *testing.T) {
 	t.Logf("inst-B: session %s is correctly marked lost after process restart", sid)
 }
 
+// TestSessionDisconnectedThenRestored verifies that a plain connection drop marks
+// the machine's running sessions "disconnected" (PTYs presumed alive), and a
+// same-instanceID reconnect (same process, PTYs survived the blip) restores them
+// to "running".
+func TestSessionDisconnectedThenRestored(t *testing.T) {
+	logger := log.New("error", "text")
+
+	ts, _, enrollUC, wsURL := newInProcessHub(t)
+	defer ts.Close()
+
+	machineID, agentKey := enrollAgent(t, enrollUC, "disc-test")
+
+	// The session Manager (and its PTYs) models the agent process; it outlives a
+	// single connection so a reconnect with the same InstanceID = "same process".
+	mgr := session.NewManager(agentpty.Factory{}, 256*1024, logger, nil)
+
+	// --- First connection ---
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	client1 := hubclient.New(hubclient.Config{
+		HubURL:            wsURL("/ws/agent"),
+		AgentKey:          agentKey,
+		MachineID:         machineID,
+		InstanceID:        "inst-A",
+		Name:              "disc-test",
+		HeartbeatInterval: 100 * time.Millisecond,
+		Sessions:          mgr,
+		Log:               logger,
+	})
+	mgr.SetNotifier(client1)
+	go func() { _ = client1.Run(ctx1) }()
+
+	waitFor(t, 5*time.Second, "machine should come online", func() bool {
+		found, online := machineStatus(t, ts.URL, machineID)
+		return found && online
+	})
+
+	body := fmt.Sprintf(`{"machineID":%q,"cols":80,"rows":24}`, machineID)
+	resp, err := http.Post(ts.URL+"/api/sessions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/sessions: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /api/sessions: expected 201, got %d", resp.StatusCode)
+	}
+	var sessDTO struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sessDTO); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	sid := sessDTO.ID
+	if sid == "" {
+		t.Fatal("session id is empty")
+	}
+	waitFor(t, 5*time.Second, "session should be running", func() bool {
+		return sessionHasStatus(t, ts.URL, sid, "running")
+	})
+
+	// --- Drop the connection (keep the process/PTYs alive) ---
+	cancel1()
+	waitFor(t, 5*time.Second, "machine should go offline after drop", func() bool {
+		found, online := machineStatus(t, ts.URL, machineID)
+		return found && !online
+	})
+	waitFor(t, 5*time.Second, "session should become disconnected after drop", func() bool {
+		return sessionHasStatus(t, ts.URL, sid, "disconnected")
+	})
+	t.Logf("session %s is disconnected after connection drop", sid)
+
+	// --- Reconnect with the SAME InstanceID (same process, PTYs survived) ---
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	client2 := hubclient.New(hubclient.Config{
+		HubURL:            wsURL("/ws/agent"),
+		AgentKey:          agentKey,
+		MachineID:         machineID,
+		InstanceID:        "inst-A", // same instanceID → same-process reconnect
+		Name:              "disc-test",
+		HeartbeatInterval: 100 * time.Millisecond,
+		Sessions:          mgr,
+		Log:               logger,
+	})
+	mgr.SetNotifier(client2)
+	go func() { _ = client2.Run(ctx2) }()
+
+	waitFor(t, 5*time.Second, "machine should come back online", func() bool {
+		found, online := machineStatus(t, ts.URL, machineID)
+		return found && online
+	})
+	waitFor(t, 5*time.Second, "session should be restored to running after same-instance reconnect", func() bool {
+		return sessionHasStatus(t, ts.URL, sid, "running")
+	})
+	t.Logf("session %s restored to running after same-instance reconnect", sid)
+}
+
 // sessionHasStatus GETs /api/sessions and returns true when the session with
 // the given id has the expected status.
 // TestSessionPwdFollowsCd verifies the live-pwd path end to end: the agent

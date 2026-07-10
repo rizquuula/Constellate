@@ -139,7 +139,7 @@ function AttentionSection({ items, machines }: AttentionSectionProps) {
             msg = `Session "${item.label || item.sessionID}" on ${machineName} needs input.`
             isAwaitingInput = true
           } else {
-            msg = `Machine ${machineName} is offline but has running sessions.`
+            msg = `Machine ${machineName} is offline; its sessions are disconnected.`
           }
           return (
             <li
@@ -260,6 +260,9 @@ function ProjectsSection({ projects, machines }: ProjectsSectionProps) {
                 )}
                 {p.lost > 0 && (
                   <span className="dashboard-chip dashboard-chip-lost" title="lost">{p.lost} lost</span>
+                )}
+                {p.disconnected > 0 && (
+                  <span className="dashboard-chip dashboard-chip-disconnected" title="disconnected">{p.disconnected} disconnected</span>
                 )}
                 <span className="dashboard-chip dashboard-chip-total" title="total">{p.total} total</span>
               </span>
