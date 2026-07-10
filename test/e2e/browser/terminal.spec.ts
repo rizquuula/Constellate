@@ -42,6 +42,83 @@ test('terminal: two markers + resize', async ({ page }) => {
   await expect(xtermRows).toContainText('playwright_marker_two', { timeout: 8_000 });
 });
 
+// Shared locator for the e2e-box "New shell (ungrouped)" button.
+function newShell(page: import('@playwright/test').Page) {
+  return page.locator('.machine-item').filter({
+    has: page.locator('.machine-name', { hasText: 'e2e-box' }),
+  }).locator('button.btn-shell[title="New shell (ungrouped)"]');
+}
+
+test('sidebar: per-row kill & remove', async ({ page }) => {
+  await page.goto('/');
+
+  const newShellBtn = newShell(page);
+  await expect(newShellBtn).toBeVisible({ timeout: 15_000 });
+
+  const sessionItems = page.locator('.session-item');
+  const initialCount = await sessionItems.count();
+
+  // Open one session, then remove it from its sidebar row.
+  await newShellBtn.click();
+  await expect(sessionItems).toHaveCount(initialCount + 1, { timeout: 15_000 });
+
+  const row = sessionItems.last();
+  await row.hover();
+  // Single destructive action per row (replaces the old close/delete split).
+  await row.locator('button.session-action-remove').click();
+  // Inline confirm: "Remove?"
+  await row.locator('button.session-confirm-yes').click();
+
+  // The row disappears (running session is force-purged in one step).
+  await expect(sessionItems).toHaveCount(initialCount, { timeout: 15_000 });
+});
+
+test('sidebar: Ctrl/Shift-click multi-select + bulk remove', async ({ page }) => {
+  await page.goto('/');
+
+  const newShellBtn = newShell(page);
+  await expect(newShellBtn).toBeVisible({ timeout: 15_000 });
+
+  const sessionItems = page.locator('.session-item');
+  const initialCount = await sessionItems.count();
+
+  // Open three sessions.
+  await newShellBtn.click();
+  await expect(sessionItems).toHaveCount(initialCount + 1, { timeout: 15_000 });
+  await newShellBtn.click();
+  await expect(sessionItems).toHaveCount(initialCount + 2, { timeout: 15_000 });
+  await newShellBtn.click();
+  await expect(sessionItems).toHaveCount(initialCount + 3, { timeout: 15_000 });
+
+  const total = initialCount + 3;
+  const rowA = sessionItems.nth(total - 3);
+  const rowB = sessionItems.nth(total - 2);
+  const rowC = sessionItems.nth(total - 1);
+
+  // A modifier-click must SELECT the row, not attach it to a pane or start a
+  // drag — the row picks up the .session-selected ring and the workspace is
+  // untouched (no xterm mounts from a Ctrl-click).
+  await rowA.click({ modifiers: ['Control'] });
+  await expect(rowA).toHaveClass(/session-selected/);
+  await rowB.click({ modifiers: ['Control'] });
+  await expect(rowB).toHaveClass(/session-selected/);
+
+  // The floating bar reflects the count.
+  const bar = page.locator('.sidebar-selection-bar');
+  await expect(bar).toContainText('2 selected');
+
+  // Shift-click extends the range from the last anchor (B) through C.
+  await rowC.click({ modifiers: ['Shift'] });
+  await expect(rowC).toHaveClass(/session-selected/);
+  await expect(bar).toContainText('3 selected');
+
+  // Bulk remove: confirm, then all three rows disappear.
+  await bar.locator('button.sidebar-selection-remove').click();
+  await bar.locator('button.session-confirm-yes').click();
+  await expect(sessionItems).toHaveCount(initialCount, { timeout: 15_000 });
+  await expect(bar).toHaveCount(0);
+});
+
 test('terminal: scrollback replay on session switch', async ({ page }) => {
   await page.goto('/');
 

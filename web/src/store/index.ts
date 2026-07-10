@@ -11,6 +11,7 @@ import {
   setAutoRelaunch as apiSetAutoRelaunch,
   closeSession as apiCloseSession,
   deleteSession as apiDeleteSession,
+  forceDeleteSession as apiForceDeleteSession,
   getDashboard,
 } from '../api/rest'
 import {
@@ -43,6 +44,7 @@ import {
   normalizeFocus,
 } from '../features/terminal/windowList'
 import { COLLAPSED_KEY, parseCollapsed, serializeCollapsed, toggleKey } from '../features/sidebar/collapse'
+import { visibleSessionIds } from '../features/sidebar/order'
 
 // Safe localStorage accessor — guards against SSR or restricted environments.
 function lsGet(key: string, fallback: string): string {
@@ -244,6 +246,16 @@ interface Store {
   setAutoRelaunch: (id: string, autoRelaunch: boolean) => Promise<void>
   closeSession: (id: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
+  // removeSession force-purges a running session (kill & remove) or plain-deletes
+  // an already-closed one — the single destructive sidebar action.
+  removeSession: (id: string) => Promise<void>
+
+  // ── sidebar multi-select ──────────────────────────────────────────────────
+  selectedSessionIds: Set<string>
+  selectionAnchorId: string | null
+  toggleSessionSelection: (id: string) => void
+  rangeSelectTo: (id: string) => void
+  clearSelection: () => void
 
   // ── workspace (windows of pane trees) ─────────────────────────────────────
   windows: WorkspaceWindow[]
@@ -407,6 +419,67 @@ export const useStore = create<Store>((set, get) => ({
       windows: clearSessionEverywhere(s.windows, id),
     }))
   },
+
+  // removeSession is the single destructive sidebar action: a running session is
+  // force-purged (kill & remove) and an already-closed one is plain-deleted.
+  // Either way the record is optimistically dropped from the list, detached from
+  // every pane, and cleared from the multi-select set.
+  removeSession: async (id) => {
+    const running = get().sessions.find((x) => x.id === id)?.status === 'running'
+    if (running) await apiForceDeleteSession(id)
+    else await apiDeleteSession(id)
+    set((s) => {
+      const selectedSessionIds = new Set(s.selectedSessionIds)
+      selectedSessionIds.delete(id)
+      return {
+        sessions: s.sessions.filter((x) => x.id !== id),
+        windows: clearSessionEverywhere(s.windows, id),
+        selectedSessionIds,
+      }
+    })
+  },
+
+  // ── sidebar multi-select ────────────────────────────────────────────────────
+  selectedSessionIds: new Set<string>(),
+  selectionAnchorId: null,
+
+  // toggleSessionSelection flips one row's membership and makes it the new anchor
+  // for a subsequent Shift-click range.
+  toggleSessionSelection: (id) => {
+    set((s) => {
+      const selectedSessionIds = new Set(s.selectedSessionIds)
+      if (selectedSessionIds.has(id)) selectedSessionIds.delete(id)
+      else selectedSessionIds.add(id)
+      return { selectedSessionIds, selectionAnchorId: id }
+    })
+  },
+
+  // rangeSelectTo selects the inclusive slice of the visible sidebar order
+  // between the current anchor and `id` (order-independent), leaving the anchor
+  // in place so the range can be re-dragged. With no anchor it selects just `id`.
+  rangeSelectTo: (id) => {
+    set((s) => {
+      const anchor = s.selectionAnchorId
+      const selectedSessionIds = new Set(s.selectedSessionIds)
+      if (!anchor) {
+        selectedSessionIds.add(id)
+        return { selectedSessionIds, selectionAnchorId: id }
+      }
+      const order = visibleSessionIds(s)
+      const from = order.indexOf(anchor)
+      const to = order.indexOf(id)
+      if (from === -1 || to === -1) {
+        // Anchor or target no longer visible — fall back to selecting just id.
+        selectedSessionIds.add(id)
+        return { selectedSessionIds }
+      }
+      const [lo, hi] = from <= to ? [from, to] : [to, from]
+      for (let i = lo; i <= hi; i++) selectedSessionIds.add(order[i])
+      return { selectedSessionIds }
+    })
+  },
+
+  clearSelection: () => set({ selectedSessionIds: new Set<string>(), selectionAnchorId: null }),
 
   // ── windows ────────────────────────────────────────────────────────────────
   windows: initial.windows,

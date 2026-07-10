@@ -16,6 +16,7 @@ vi.mock('../api/rest', () => ({
   setAutoRelaunch: vi.fn(),
   closeSession: vi.fn(),
   deleteSession: vi.fn(),
+  forceDeleteSession: vi.fn(),
   getDashboard: vi.fn(),
 }))
 
@@ -28,6 +29,7 @@ import {
   type LeafPane,
 } from '../features/terminal/paneTree'
 import { makeWindow, findWindow, type WorkspaceWindow } from '../features/terminal/windowList'
+import { deleteSession as apiDeleteSession, forceDeleteSession as apiForceDeleteSession } from '../api/rest'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -235,6 +237,109 @@ describe('store — global single occupancy across windows', () => {
 
     expect((rootOf(winA) as LeafPane).sessionId).toBeNull()
     expect(useStore.getState().sessions).toHaveLength(0)
+  })
+})
+
+// ── removeSession (single kill & remove action) ───────────────────────────────
+
+describe('store.removeSession', () => {
+  beforeEach(() => {
+    resetStore()
+    vi.mocked(apiDeleteSession).mockClear().mockResolvedValue(undefined)
+    vi.mocked(apiForceDeleteSession).mockClear().mockResolvedValue(undefined)
+    useStore.setState({ selectedSessionIds: new Set(), selectionAnchorId: null })
+  })
+
+  it('running session → force-purges, removes from list, and clears from panes', async () => {
+    setRoot(makeLeaf('ses-run'))
+    const winA = useStore.getState().activeWindowId
+    useStore.setState({ sessions: sessionsWith([['ses-run', 'running']]) })
+
+    await useStore.getState().removeSession('ses-run')
+
+    expect(apiForceDeleteSession).toHaveBeenCalledWith('ses-run')
+    expect(apiDeleteSession).not.toHaveBeenCalled()
+    expect(useStore.getState().sessions).toHaveLength(0)
+    expect((rootOf(winA) as LeafPane).sessionId).toBeNull()
+  })
+
+  it('closed session → plain delete (no force)', async () => {
+    setRoot(makeLeaf(null))
+    useStore.setState({ sessions: sessionsWith([['ses-dead', 'exited']]) })
+
+    await useStore.getState().removeSession('ses-dead')
+
+    expect(apiDeleteSession).toHaveBeenCalledWith('ses-dead')
+    expect(apiForceDeleteSession).not.toHaveBeenCalled()
+    expect(useStore.getState().sessions).toHaveLength(0)
+  })
+
+  it('drops the removed id from the multi-select set', async () => {
+    setRoot(makeLeaf(null))
+    useStore.setState({
+      sessions: sessionsWith([['ses-a', 'exited'], ['ses-b', 'exited']]),
+      selectedSessionIds: new Set(['ses-a', 'ses-b']),
+    })
+
+    await useStore.getState().removeSession('ses-a')
+
+    const sel = useStore.getState().selectedSessionIds
+    expect(sel.has('ses-a')).toBe(false)
+    expect(sel.has('ses-b')).toBe(true)
+  })
+})
+
+// ── multi-select slice ────────────────────────────────────────────────────────
+
+describe('store — multi-select slice', () => {
+  beforeEach(() => {
+    resetStore()
+    useStore.setState({ selectedSessionIds: new Set(), selectionAnchorId: null })
+  })
+
+  it('toggleSessionSelection toggles membership and sets the anchor', () => {
+    useStore.getState().toggleSessionSelection('ses-1')
+    expect(useStore.getState().selectedSessionIds.has('ses-1')).toBe(true)
+    expect(useStore.getState().selectionAnchorId).toBe('ses-1')
+
+    useStore.getState().toggleSessionSelection('ses-1')
+    expect(useStore.getState().selectedSessionIds.has('ses-1')).toBe(false)
+    expect(useStore.getState().selectionAnchorId).toBe('ses-1')
+  })
+
+  it('rangeSelectTo with no anchor selects just the clicked id', () => {
+    useStore.getState().rangeSelectTo('ses-x')
+    expect([...useStore.getState().selectedSessionIds]).toEqual(['ses-x'])
+    expect(useStore.getState().selectionAnchorId).toBe('ses-x')
+  })
+
+  it('rangeSelectTo selects the inclusive visible-order range from the anchor', () => {
+    // One machine, three ungrouped sessions in list order a, b, c.
+    useStore.setState({
+      machines: [{ id: 'm1', revoked: false }] as never,
+      projects: [],
+      sessions: [
+        { id: 'a', machineID: 'm1', projectID: '' },
+        { id: 'b', machineID: 'm1', projectID: '' },
+        { id: 'c', machineID: 'm1', projectID: '' },
+      ] as never,
+      collapsed: new Set(),
+      showRevokedMachines: false,
+      selectedSessionIds: new Set(),
+      selectionAnchorId: null,
+    })
+    useStore.getState().toggleSessionSelection('a') // anchor = a
+    useStore.getState().rangeSelectTo('c')          // a..c inclusive
+    expect(useStore.getState().selectedSessionIds).toEqual(new Set(['a', 'b', 'c']))
+    // Anchor is preserved so the range can be re-dragged.
+    expect(useStore.getState().selectionAnchorId).toBe('a')
+  })
+
+  it('clearSelection empties the set and the anchor', () => {
+    useStore.getState().toggleSessionSelection('ses-1')
+    useStore.getState().clearSelection()
+    expect(useStore.getState().selectedSessionIds.size).toBe(0)
+    expect(useStore.getState().selectionAnchorId).toBeNull()
   })
 })
 

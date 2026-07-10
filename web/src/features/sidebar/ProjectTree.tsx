@@ -7,6 +7,7 @@ import { findLeaf } from '../terminal/paneTree'
 import { ActivityBadge } from '../activity/ActivityBadge'
 import type { SessionDragData } from '../terminal/dnd'
 import { machineKey, projectKey, ungroupedKey } from './collapse'
+import { SelectionBar } from './SelectionBar'
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
@@ -86,9 +87,11 @@ interface SessionRowProps {
 
 function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
   const renameSession = useStore((s) => s.renameSession)
-  const closeSession = useStore((s) => s.closeSession)
-  const deleteSession = useStore((s) => s.deleteSession)
+  const removeSession = useStore((s) => s.removeSession)
   const setAutoRelaunch = useStore((s) => s.setAutoRelaunch)
+  const toggleSessionSelection = useStore((s) => s.toggleSessionSelection)
+  const rangeSelectTo = useStore((s) => s.rangeSelectTo)
+  const isSelected = useStore((s) => s.selectedSessionIds.has(session.id))
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
@@ -97,9 +100,6 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
   const [autoRelaunchError, setAutoRelaunchError] = useState<string | null>(null)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isRunning = session.status === 'running'
-  // A running session can be closed (signals the agent); an already-closed
-  // (exited/lost) one can only be deleted — closing it again is meaningless.
-  const actionVerb = isRunning ? 'close' : 'delete'
 
   // Auto-cancel confirm after 4 seconds
   useEffect(() => {
@@ -147,14 +147,14 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
       setConfirmAction(false)
       setActionError(null)
       try {
-        if (isRunning) await closeSession(session.id)
-        else await deleteSession(session.id)
+        // Running → force-purge (kill & remove); closed → plain delete. The
+        // store's removeSession picks the right call from the live status.
+        await removeSession(session.id)
       } catch (err) {
-        const fallback = isRunning ? 'Close failed' : 'Delete failed'
-        setActionError(err instanceof Error ? err.message : fallback)
+        setActionError(err instanceof Error ? err.message : 'Remove failed')
       }
     },
-    [isRunning, closeSession, deleteSession, session.id],
+    [removeSession, session.id],
   )
 
   const handleCancelAction = useCallback((e: React.MouseEvent) => {
@@ -204,8 +204,14 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
       {...(isRunning ? listeners : {})}
       role="button"
       tabIndex={0}
-      className={`session-item${isTargetPane ? ' session-active' : ''}${!isRunning ? ' session-dead' : ''}${isRunning ? ' session-draggable' : ''}`}
-      onClick={() => { if (isRunning) { onAssign(); setSidebarOpen(false) } }}
+      className={`session-item${isTargetPane ? ' session-active' : ''}${isSelected ? ' session-selected' : ''}${!isRunning ? ' session-dead' : ''}${isRunning ? ' session-draggable' : ''}`}
+      onClick={(e) => {
+        // Modifier-clicks drive multi-select on ANY status and must not attach or
+        // start a drag; plain click on a running row attaches and closes sidebar.
+        if (e.metaKey || e.ctrlKey) { e.preventDefault(); toggleSessionSelection(session.id); return }
+        if (e.shiftKey) { e.preventDefault(); rangeSelectTo(session.id); return }
+        if (isRunning) { onAssign(); setSidebarOpen(false) }
+      }}
       onKeyDown={handleRowKeyDown}
       title={isRunning ? 'Drag onto a pane' : `Session ${session.status}`}
       aria-label={`Session ${label}, status ${session.status}${isRunning && session.activity && session.activity !== 'unknown' ? `, ${session.activity === 'awaiting-input' ? 'needs input' : session.activity}` : ''}${isRunning ? ' — drag onto a pane to place' : ''}`}
@@ -240,11 +246,11 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
       )}
       {confirmAction ? (
         <div className="session-confirm-close" onClick={(e) => e.stopPropagation()}>
-          <span className="session-confirm-label">{isRunning ? 'Close?' : 'Delete?'}</span>
+          <span className="session-confirm-label">Remove?</span>
           <button
             className="session-confirm-yes"
-            title={`Confirm ${actionVerb}`}
-            aria-label={`Confirm ${actionVerb} session`}
+            title="Confirm remove"
+            aria-label="Confirm remove session"
             onClick={handleConfirmAction}
           >
             ✓
@@ -252,7 +258,7 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
           <button
             className="session-confirm-no"
             title="Cancel"
-            aria-label={`Cancel ${actionVerb}`}
+            aria-label="Cancel remove"
             onClick={handleCancelAction}
           >
             ✕
@@ -290,25 +296,14 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
               ✎
             </button>
           )}
-          {isRunning ? (
-            <button
-              className="session-action-btn session-action-close"
-              title="Close session"
-              aria-label="Close session"
-              onClick={handleActionClick}
-            >
-              ✕
-            </button>
-          ) : (
-            <button
-              className="session-action-btn session-action-delete"
-              title="Delete session"
-              aria-label="Delete session"
-              onClick={handleActionClick}
-            >
-              <TrashIcon />
-            </button>
-          )}
+          <button
+            className="session-action-btn session-action-remove"
+            title={isRunning ? 'Kill & remove session' : 'Remove session'}
+            aria-label="Remove session"
+            onClick={handleActionClick}
+          >
+            <TrashIcon />
+          </button>
         </div>
       )}
     </div>
@@ -783,6 +778,7 @@ export function ProjectTree() {
           </div>
         )}
       </div>
+      <SelectionBar />
     </div>
   )
 }

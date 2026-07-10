@@ -104,6 +104,13 @@ export function deleteSession(id: string): Promise<void> {
   return request<void>('DELETE', `/api/sessions/${id}?purge=1`)
 }
 
+// forceDeleteSession kills a still-running session and purges its record in one
+// step (force-purge), so the sidebar can offer a single "kill & remove" action
+// without a separate close-then-delete round trip.
+export function forceDeleteSession(id: string): Promise<void> {
+  return request<void>('DELETE', `/api/sessions/${id}?purge=1&force=1`)
+}
+
 export function getDashboard(): Promise<Dashboard> {
   return request<Dashboard>('GET', '/api/dashboard')
 }
