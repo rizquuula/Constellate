@@ -4,6 +4,7 @@ import { useStore, activeWindowOf } from '../../store'
 import type { Machine, Project, Session } from '../../types'
 import { ApiError } from '../../api/rest'
 import { findLeaf } from '../terminal/paneTree'
+import { findWindowBySession } from '../terminal/windowList'
 import { ActivityBadge } from '../activity/ActivityBadge'
 import type { SessionDragData } from '../terminal/dnd'
 import { machineKey, projectKey, ungroupedKey } from './collapse'
@@ -100,6 +101,13 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
   const [autoRelaunchError, setAutoRelaunchError] = useState<string | null>(null)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isRunning = session.status === 'running'
+
+  const windowOrdinal = useStore((s) => {
+    const hit = findWindowBySession(s.windows, session.id)
+    if (!hit) return null
+    const idx = s.windows.findIndex((w) => w.id === hit.windowId)
+    return idx === -1 ? null : idx + 1
+  })
 
   // Auto-cancel confirm after 4 seconds
   useEffect(() => {
@@ -214,7 +222,7 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
       }}
       onKeyDown={handleRowKeyDown}
       title={isRunning ? 'Drag onto a pane' : `Session ${session.status}`}
-      aria-label={`Session ${label}, status ${session.status}${isRunning && session.activity && session.activity !== 'unknown' ? `, ${session.activity === 'awaiting-input' ? 'needs input' : session.activity}` : ''}${isRunning ? ' — drag onto a pane to place' : ''}`}
+      aria-label={`Session ${label}, status ${session.status}${isRunning && session.activity && session.activity !== 'unknown' ? `, ${session.activity === 'awaiting-input' ? 'needs input' : session.activity}` : ''}${isRunning && windowOrdinal !== null ? `, window ${windowOrdinal}` : ''}${isRunning && session.pwd ? `, directory ${session.pwd}` : ''}${isRunning ? ' — drag onto a pane to place' : ''}`}
     >
       <span className={`session-badge session-badge-${session.status}`}>{session.status}</span>
       {editing ? (
@@ -239,6 +247,16 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
         </>
       ) : (
         <span className="session-label" title={label}>{label}</span>
+      )}
+      {!editing && isRunning && (windowOrdinal !== null || session.pwd) && (
+        <span className="session-meta">
+          {windowOrdinal !== null && (
+            <span className="session-window" title={`Window ${windowOrdinal}`}>[{windowOrdinal}]</span>
+          )}
+          {session.pwd && (
+            <span className="session-pwd" dir="ltr" title={session.pwd}>{session.pwd}</span>
+          )}
+        </span>
       )}
       {isRunning && <ActivityBadge activity={session.activity} compact />}
       {actionError && !confirmAction && (
