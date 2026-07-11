@@ -5,6 +5,7 @@ import type { Machine, Project, Session } from '../../types'
 import { ApiError } from '../../api/rest'
 import { findLeaf } from '../terminal/paneTree'
 import { findWindowBySession } from '../terminal/windowList'
+import { windowColor } from '../terminal/windowColor'
 import { ActivityBadge } from '../activity/ActivityBadge'
 import type { SessionDragData } from '../terminal/dnd'
 import { machineKey, projectKey, ungroupedKey } from './collapse'
@@ -224,6 +225,7 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
       title={isRunning ? 'Drag onto a pane' : `Session ${session.status}`}
       aria-label={`Session ${label}, status ${session.status}${isRunning && session.activity && session.activity !== 'unknown' ? `, ${session.activity === 'awaiting-input' ? 'needs input' : session.activity}` : ''}${isRunning && windowOrdinal !== null ? `, window ${windowOrdinal}` : ''}${isRunning && session.pwd ? `, directory ${session.pwd}` : ''}${isRunning ? ' — drag onto a pane to place' : ''}`}
     >
+      <div className="session-item-main">
       <span className={`session-badge session-badge-${session.status}`}>{session.status}</span>
       {editing ? (
         <>
@@ -247,16 +249,6 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
         </>
       ) : (
         <span className="session-label" title={label}>{label}</span>
-      )}
-      {!editing && isRunning && (windowOrdinal !== null || session.pwd) && (
-        <span className="session-meta">
-          {windowOrdinal !== null && (
-            <span className="session-window" title={`Window ${windowOrdinal}`}>[{windowOrdinal}]</span>
-          )}
-          {session.pwd && (
-            <span className="session-pwd" dir="ltr" title={session.pwd}>{session.pwd}</span>
-          )}
-        </span>
       )}
       {isRunning && <ActivityBadge activity={session.activity} compact />}
       {actionError && !confirmAction && (
@@ -322,6 +314,18 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
           >
             <TrashIcon />
           </button>
+        </div>
+      )}
+      </div>
+      {!editing && isRunning && (windowOrdinal !== null || session.pwd) && (
+        <div className="session-item-meta">
+          {windowOrdinal !== null && (() => {
+            const c = windowColor(windowOrdinal)
+            return (
+              <span className="window-badge" style={{ background: c.bg, color: c.fg }} title={`Window ${windowOrdinal}`}>{windowOrdinal}</span>
+            )
+          })()}
+          {session.pwd && <span className="session-pwd" dir="ltr" title={session.pwd}>{session.pwd}</span>}
         </div>
       )}
     </div>

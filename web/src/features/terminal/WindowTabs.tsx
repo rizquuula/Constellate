@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { ActivityBadge } from '../activity/ActivityBadge'
 import { collectSessionIds } from './paneTree'
+import { windowColor } from './windowColor'
 import type { WorkspaceWindow } from './windowList'
 
 // windowNeedsInput reports whether any session bound in this window is waiting
@@ -15,6 +16,7 @@ function windowNeedsInput(win: WorkspaceWindow, sessions: { id: string; activity
 
 interface WindowTabProps {
   win: WorkspaceWindow
+  ordinal: number
   active: boolean
   needsInput: boolean
   closable: boolean
@@ -26,6 +28,7 @@ interface WindowTabProps {
 
 function WindowTab({
   win,
+  ordinal,
   active,
   needsInput,
   closable,
@@ -85,6 +88,7 @@ function WindowTab({
           if (e.key === 'F2') { e.preventDefault(); startRename() }
         }}
       >
+        <span className="window-dot" style={{ background: windowColor(ordinal).bg }} aria-hidden="true" />
         <span className="window-tab-name">{win.name}</span>
         {needsInput && <ActivityBadge activity="awaiting-input" compact />}
       </button>
@@ -134,10 +138,11 @@ export function WindowTabs() {
   return (
     <div className="window-tabs" ref={stripRef}>
       <div className="window-tabs-strip" role="tablist" aria-label="Terminal windows">
-        {windows.map((w) => (
+        {windows.map((w, i) => (
           <WindowTab
             key={w.id}
             win={w}
+            ordinal={i + 1}
             active={w.id === activeWindowId}
             needsInput={windowNeedsInput(w, sessions)}
             closable={windows.length > 1}
