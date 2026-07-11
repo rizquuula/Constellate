@@ -496,6 +496,9 @@ body {
   gap: 6px;
   min-width: 0;
   padding-left: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
 }
 
 .window-badge {
