@@ -21,6 +21,7 @@ const WorkspaceNode = memo(function WorkspaceNode({ node, windowId }: WorkspaceN
   const doClosePane = useStore((s) => s.closePane)
   const doDetachPane = useStore((s) => s.detachPane)
   const doReloadPane = useStore((s) => s.reloadPane)
+  const setSplitLayout = useStore((s) => s.setSplitLayout)
 
   if (node.kind === 'leaf') {
     return (
@@ -55,7 +56,12 @@ const WorkspaceNode = memo(function WorkspaceNode({ node, windowId }: WorkspaceN
   })
 
   return (
-    <Group orientation={orientation} style={{ height: '100%', width: '100%' }}>
+    <Group
+      orientation={orientation}
+      style={{ height: '100%', width: '100%' }}
+      defaultLayout={node.layout}
+      onLayoutChanged={(layout) => setSplitLayout(node.id, layout)}
+    >
       {panels}
     </Group>
   )

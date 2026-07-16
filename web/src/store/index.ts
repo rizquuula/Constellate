@@ -26,6 +26,8 @@ import {
   firstEmptyLeafId,
   firstLeafId,
   splitPaneWithSession as treeSplitPaneWithSession,
+  setSplitLayout as treeSetSplitLayout,
+  pruneLayout,
 } from '../features/terminal/paneTree'
 import {
   type WorkspaceWindow,
@@ -94,6 +96,10 @@ const WORKSPACE_KEY = 'constellate.workspace'
 const LEGACY_PANE_ROOT_KEY = 'constellate.paneRoot'
 const LEGACY_FOCUSED_PANE_KEY = 'constellate.focusedPaneId'
 
+// Not bumped for the additive optional `layout` field: old blobs (no layout)
+// still validate and new blobs stay readable by prior builds. Bumping would make
+// isWorkspaceState reject every existing user's saved windows and reset them to
+// one empty window.
 const WORKSPACE_VERSION = 2
 
 interface WorkspaceState {
@@ -112,9 +118,15 @@ function isPaneNode(v: unknown): v is PaneNode {
     return typeof n.id === 'string' && (n.sessionId === null || typeof n.sessionId === 'string')
   }
   if (n.kind === 'split') {
+    // Optional `layout`, when present, must be a plain object (child id → size);
+    // a light guard, not a deep validation of the numbers.
+    const layoutOk =
+      n.layout === undefined ||
+      (typeof n.layout === 'object' && n.layout !== null && !Array.isArray(n.layout))
     return (
       typeof n.id === 'string' &&
       (n.direction === 'horizontal' || n.direction === 'vertical') &&
+      layoutOk &&
       Array.isArray(n.children) &&
       n.children.length >= 2 &&
       (n.children as unknown[]).every((c) => isPaneNode(c))
@@ -162,7 +174,10 @@ export function parseWorkspace(raw: string): WorkspaceState | null {
   }
   if (!isWorkspaceState(parsed)) return null
   return {
-    windows: parsed.windows.map(normalizeFocus),
+    // normalizeFocus repairs stale focus; pruneLayout drops any split size map
+    // whose keys no longer match its children, so a restored tree never carries
+    // a stale layout.
+    windows: parsed.windows.map(normalizeFocus).map((w) => ({ ...w, root: pruneLayout(w.root) })),
     activeWindowId: parsed.activeWindowId,
   }
 }
@@ -275,6 +290,7 @@ interface Store {
   closePane: (paneId: string) => void
   detachPane: (paneId: string) => void
   reloadPane: (paneId: string) => void
+  setSplitLayout: (splitId: string, layout: Record<string, number>) => void
   assignSessionToPane: (paneId: string, sessionId: string) => void
   assignSessionFromSidebar: (paneId: string, sessionId: string) => void
   diveToSession: (sessionId: string) => void
@@ -580,6 +596,17 @@ export const useStore = create<Store>((set, get) => ({
     const reloads = get().paneReloads
     set({ paneReloads: { ...reloads, [paneId]: (reloads[paneId] ?? 0) + 1 } })
   },
+
+  // setSplitLayout records a split's resize proportions on its node. Persisted
+  // automatically by the useStore.subscribe diff-writer at the bottom of the
+  // file — no new wiring. Windows whose root is untouched keep their reference.
+  setSplitLayout: (splitId, layout) =>
+    set((s) => ({
+      windows: s.windows.map((w) => {
+        const root = treeSetSplitLayout(w.root, splitId, layout)
+        return root === w.root ? w : { ...w, root }
+      }),
+    })),
 
   // assignSessionToPane enforces global single occupancy: the session is cleared
   // from every other window first, so dropping it into window B moves it out of

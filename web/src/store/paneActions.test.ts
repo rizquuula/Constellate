@@ -24,6 +24,8 @@ import { useStore, activeWindowOf, parseWorkspace, migrateLegacy } from './index
 import {
   makeLeaf,
   firstLeafId,
+  setSplitLayout,
+  pruneLayout,
   type PaneNode,
   type SplitPane,
   type LeafPane,
@@ -570,6 +572,130 @@ describe('parseWorkspace', () => {
     const win = { ...makeWindow('Window 1'), focusedPaneId: 'stale' }
     const state = parseWorkspace(JSON.stringify({ version: 2, activeWindowId: win.id, windows: [win] }))!
     expect(state.windows[0].focusedPaneId).toBe(state.windows[0].root.id)
+  })
+
+  // A window whose root is a 2-leaf split carrying `layout`, ready for a blob.
+  const windowWithSplit = (layout?: Record<string, number>) => {
+    const a = makeLeaf(null)
+    const b = makeLeaf(null)
+    const root: SplitPane = { kind: 'split', id: 'split-1', direction: 'horizontal', children: [a, b], layout }
+    return { win: { id: 'win-1', name: 'Window 1', root, focusedPaneId: a.id }, a, b }
+  }
+
+  it('round-trips a split carrying a valid layout', () => {
+    const { win, a, b } = windowWithSplit()
+    const layout = { [a.id]: 65, [b.id]: 35 }
+    ;(win.root as SplitPane).layout = layout
+    const state = parseWorkspace(JSON.stringify({ version: 2, activeWindowId: win.id, windows: [win] }))!
+    expect((state.windows[0].root as SplitPane).layout).toEqual(layout)
+  })
+
+  it('prunes a stale layout whose keys no longer match the children', () => {
+    const { win } = windowWithSplit({ ghost: 50, other: 50 })
+    const state = parseWorkspace(JSON.stringify({ version: 2, activeWindowId: win.id, windows: [win] }))!
+    expect((state.windows[0].root as SplitPane).layout).toBeUndefined()
+  })
+
+  it('rejects a blob whose split layout is not an object', () => {
+    const { win } = windowWithSplit()
+    ;(win.root as unknown as Record<string, unknown>).layout = 'not-an-object'
+    expect(parseWorkspace(JSON.stringify({ version: 2, activeWindowId: win.id, windows: [win] }))).toBeNull()
+  })
+})
+
+// ── setSplitLayout (pure paneTree op) ─────────────────────────────────────────
+
+describe('setSplitLayout', () => {
+  // A horizontal split of two leaves; the split carries the given id.
+  const splitOf = (a: LeafPane, b: LeafPane, id = 'split-1'): SplitPane => ({
+    kind: 'split',
+    id,
+    direction: 'horizontal',
+    children: [a, b],
+  })
+
+  it('sets the layout on the target split', () => {
+    const a = makeLeaf(null)
+    const b = makeLeaf(null)
+    const tree = splitOf(a, b)
+    const next = setSplitLayout(tree, tree.id, { [a.id]: 70, [b.id]: 30 }) as SplitPane
+    expect(next.layout).toEqual({ [a.id]: 70, [b.id]: 30 })
+  })
+
+  it('leaves sibling nodes untouched', () => {
+    const a = makeLeaf(null)
+    const b = makeLeaf(null)
+    const tree = splitOf(a, b)
+    const next = setSplitLayout(tree, tree.id, { [a.id]: 60, [b.id]: 40 }) as SplitPane
+    // Children keep their identity — only the split's own layout changed.
+    expect(next.children[0]).toBe(a)
+    expect(next.children[1]).toBe(b)
+  })
+
+  it('replaces an existing layout', () => {
+    const a = makeLeaf(null)
+    const b = makeLeaf(null)
+    const tree: SplitPane = { ...splitOf(a, b), layout: { [a.id]: 50, [b.id]: 50 } }
+    const next = setSplitLayout(tree, tree.id, { [a.id]: 80, [b.id]: 20 }) as SplitPane
+    expect(next.layout).toEqual({ [a.id]: 80, [b.id]: 20 })
+  })
+
+  it('returns the same root reference when splitId is absent', () => {
+    const tree = splitOf(makeLeaf(null), makeLeaf(null))
+    expect(setSplitLayout(tree, 'nope', { x: 50 })).toBe(tree)
+  })
+
+  it('returns the same root reference when splitId names a leaf, not a split', () => {
+    const a = makeLeaf(null)
+    const tree = splitOf(a, makeLeaf(null))
+    expect(setSplitLayout(tree, a.id, { x: 50 })).toBe(tree)
+  })
+})
+
+// ── pruneLayout (pure paneTree op) ────────────────────────────────────────────
+
+describe('pruneLayout', () => {
+  it('drops a layout whose keys do not match the current child ids', () => {
+    const a = makeLeaf(null)
+    const b = makeLeaf(null)
+    const tree: SplitPane = {
+      kind: 'split',
+      id: 'split-1',
+      direction: 'horizontal',
+      children: [a, b],
+      layout: { stale: 50, keys: 50 },
+    }
+    const next = pruneLayout(tree) as SplitPane
+    expect(next.layout).toBeUndefined()
+  })
+
+  it('keeps a layout whose keys exactly match the current child ids', () => {
+    const a = makeLeaf(null)
+    const b = makeLeaf(null)
+    const layout = { [a.id]: 40, [b.id]: 60 }
+    const tree: SplitPane = {
+      kind: 'split',
+      id: 'split-1',
+      direction: 'horizontal',
+      children: [a, b],
+      layout,
+    }
+    const next = pruneLayout(tree) as SplitPane
+    expect(next.layout).toEqual(layout)
+    // Nothing changed — reference identity is preserved.
+    expect(next).toBe(tree)
+  })
+
+  it('leaves layout-free trees unchanged (same reference)', () => {
+    const tree: SplitPane = {
+      kind: 'split',
+      id: 'split-1',
+      direction: 'horizontal',
+      children: [makeLeaf(null), makeLeaf(null)],
+    }
+    expect(pruneLayout(tree)).toBe(tree)
+    const leaf = makeLeaf('ses')
+    expect(pruneLayout(leaf)).toBe(leaf)
   })
 })
 

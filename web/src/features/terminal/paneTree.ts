@@ -16,6 +16,10 @@ export interface SplitPane {
   // n-ary: always ≥2 children; same-direction splits flatten into this array
   // so 3 horizontal splits produce one group of 3 (33/33/33), not nested 50/25/25.
   children: PaneNode[]
+  // Persisted resize proportions: child pane id → size (the v4 `Layout` shape).
+  // Keyed by child id (not index) so it survives child reordering; absent until
+  // the user drags a divider, and pruned on load when the keys no longer match.
+  layout?: Record<string, number>
 }
 
 export type PaneNode = LeafPane | SplitPane
@@ -238,6 +242,44 @@ export function splitPaneWithSession(
     return split
   })
   return [newRoot, newLeaf.id]
+}
+
+// setSplitLayout records a resize `layout` (child id → size) on the split with
+// splitId. Guards with findNode first: if splitId names no split, the root is
+// returned unchanged (same reference) so callers can map over every window and
+// keep untouched trees identical — mirrors clearSessionEverywhere.
+export function setSplitLayout(
+  root: PaneNode,
+  splitId: string,
+  layout: Record<string, number>,
+): PaneNode {
+  const target = findNode(root, splitId)
+  if (!target || target.kind !== 'split') return root
+  return mapNode(root, splitId, (n) => (n.kind === 'split' ? { ...n, layout } : n))
+}
+
+// pruneLayout drops any split `layout` whose key set no longer matches its
+// current direct child ids, recursing depth-first. This makes stored sizes
+// self-correcting after structural edits (add/close/detach a sibling), so the
+// tree-mutation functions need no layout bookkeeping of their own. Reference
+// identity is preserved wherever nothing changed, to avoid needless churn.
+export function pruneLayout(node: PaneNode): PaneNode {
+  if (node.kind === 'leaf') return node
+
+  const children = node.children.map(pruneLayout)
+  const childrenChanged = children.some((child, i) => child !== node.children[i])
+
+  const childIds = new Set(children.map((c) => c.id))
+  const layoutValid =
+    node.layout === undefined ||
+    (Object.keys(node.layout).length === childIds.size &&
+      Object.keys(node.layout).every((id) => childIds.has(id)))
+
+  if (!childrenChanged && layoutValid) return node
+
+  if (layoutValid) return { ...node, children }
+  const { layout: _dropped, ...rest } = node
+  return { ...rest, children }
 }
 
 export function findLeaf(root: PaneNode, id: string): LeafPane | null {
