@@ -75,6 +75,9 @@ func (m Machine) MarkRevoked(ts int64) Machine {
 	return m
 }
 
+// ClearRevoked returns a copy of m with revokedAt reset to 0 (not revoked).
+func (m Machine) ClearRevoked() Machine { m.revokedAt = 0; return m }
+
 // Touch updates the last-seen timestamp.
 func (m *Machine) Touch(ts int64) {
 	m.lastSeenAt = ts

@@ -10,3 +10,7 @@ var ErrRevoked = errors.New("enroll: machine revoked")
 
 // ErrUnknownMachine is returned when no credential exists for the given machine ID.
 var ErrUnknownMachine = errors.New("enroll: unknown machine")
+
+// ErrNotRevoked is returned when a machine delete is refused because the
+// machine has not been revoked first.
+var ErrNotRevoked = errors.New("enroll: machine not revoked")

@@ -120,6 +120,68 @@ func (s *MachineStore) MarkRevoked(ctx context.Context, id string, ts int64) err
 	return nil
 }
 
+// ClearRevoked resets revoked_at to NULL for the given machine id.
+// Returns machine.ErrNotFound (wrapped) if no row matches.
+func (s *MachineStore) ClearRevoked(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE machines SET revoked_at = NULL WHERE id = ?`, id,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: clear revoked %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: clear revoked %q: %w", id, machine.ErrNotFound)
+	}
+	return nil
+}
+
+// Delete removes the machine and every row that references it. Because FK
+// enforcement is ON (see db.go), children must go before their parent, so this
+// method intentionally spans sibling tables (sessions, projects,
+// machine_credentials) in a single transaction to guarantee an atomic cascade —
+// either the machine and all of its dependents disappear together or nothing
+// does. Returns machine.ErrNotFound (wrapped) if no machine row matches.
+func (s *MachineStore) Delete(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete machine %q: begin tx: %w", id, err)
+	}
+	// No-op once the tx is committed; rolls back on any early return otherwise.
+	defer func() { _ = tx.Rollback() }()
+
+	children := []string{
+		`DELETE FROM sessions            WHERE machine_id = ?`,
+		`DELETE FROM projects            WHERE machine_id = ?`,
+		`DELETE FROM machine_credentials WHERE machine_id = ?`,
+	}
+	for _, q := range children {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			return fmt.Errorf("sqlite: delete machine %q children: %w", id, err)
+		}
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM machines WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete machine %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: rows affected %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sqlite: delete machine %q: %w", id, machine.ErrNotFound)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite: delete machine %q: commit: %w", id, err)
+	}
+	return nil
+}
+
 // scanner is satisfied by both *sql.Row and *sql.Rows.
 type scanner interface {
 	Scan(dest ...any) error

@@ -81,6 +81,49 @@ function FolderPlusIcon() {
   )
 }
 
+// BanIcon (circle + diagonal slash) marks the Revoke action; RestoreIcon
+// (counter-clockwise arrow) marks Un-revoke. Same Feather stroke style as the
+// icons above; both inherit `currentColor`.
+function BanIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+    </svg>
+  )
+}
+
+function RestoreIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  )
+}
+
 interface SessionRowProps {
   session: Session
   isTargetPane: boolean
@@ -586,6 +629,9 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
   })
   const assignSessionFromSidebar = useStore((s) => s.assignSessionFromSidebar)
   const openSessionInPane = useStore((s) => s.openSessionInPane)
+  const revokeMachine = useStore((s) => s.revokeMachine)
+  const unrevokeMachine = useStore((s) => s.unrevokeMachine)
+  const deleteMachine = useStore((s) => s.deleteMachine)
   const collapsed = useStore((s) => s.collapsed.has(machineKey(machine.id)))
   const ungroupedCollapsed = useStore((s) => s.collapsed.has(ungroupedKey(machine.id)))
   const toggleCollapsed = useStore((s) => s.toggleCollapsed)
@@ -593,6 +639,10 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
 
   const [addingProject, setAddingProject] = useState(false)
   const [shellBusy, setShellBusy] = useState(false)
+  const [confirmRevoke, setConfirmRevoke] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [machineError, setMachineError] = useState<string | null>(null)
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const ungroupedSessions = sessions.filter((s) => !s.projectID)
 
@@ -639,6 +689,53 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
     setAddingProject((v) => !v)
   }, [collapsed, toggleCollapsed, machine.id])
 
+  // Auto-cancel either pending machine confirmation after 4 seconds, matching
+  // the session-row / project-header pattern.
+  useEffect(() => {
+    if (confirmRevoke || confirmDelete) {
+      confirmTimerRef.current = setTimeout(() => {
+        setConfirmRevoke(false)
+        setConfirmDelete(false)
+      }, 4000)
+    }
+    return () => {
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+    }
+  }, [confirmRevoke, confirmDelete])
+
+  const handleConfirmRevoke = useCallback(async () => {
+    setConfirmRevoke(false)
+    setMachineError(null)
+    try {
+      await revokeMachine(machine.id)
+    } catch (err) {
+      setMachineError(err instanceof Error ? err.message : 'Failed to revoke machine')
+    }
+  }, [revokeMachine, machine.id])
+
+  const handleUnrevoke = useCallback(async () => {
+    setMachineError(null)
+    try {
+      await unrevokeMachine(machine.id)
+    } catch (err) {
+      setMachineError(err instanceof Error ? err.message : 'Failed to un-revoke machine')
+    }
+  }, [unrevokeMachine, machine.id])
+
+  const handleConfirmDelete = useCallback(async () => {
+    setConfirmDelete(false)
+    setMachineError(null)
+    try {
+      await deleteMachine(machine.id)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setMachineError('Revoke the machine first.')
+      } else {
+        setMachineError(err instanceof Error ? err.message : 'Failed to delete machine')
+      }
+    }
+  }, [deleteMachine, machine.id])
+
   return (
     <div className={`machine-group${revoked ? ' machine-group-revoked' : ''}`}>
       <div className="machine-item">
@@ -664,26 +761,99 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
             </span>
           )}
           {revoked && <span className="machine-revoked-badge" aria-label="revoked">revoked</span>}
-          {machine.online && (
+          {confirmRevoke ? (
+            <div className="session-confirm-close" onClick={(e) => e.stopPropagation()}>
+              <span className="session-confirm-label">Revoke?</span>
+              <button
+                className="session-confirm-yes"
+                title="Confirm revoke machine"
+                aria-label={`Confirm revoke machine ${machine.name}`}
+                onClick={handleConfirmRevoke}
+              >
+                ✓
+              </button>
+              <button
+                className="session-confirm-no"
+                title="Cancel"
+                aria-label="Cancel revoke machine"
+                onClick={() => setConfirmRevoke(false)}
+              >
+                ✕
+              </button>
+            </div>
+          ) : confirmDelete ? (
+            <div className="session-confirm-close" onClick={(e) => e.stopPropagation()}>
+              <span className="session-confirm-label">Delete?</span>
+              <button
+                className="session-confirm-yes"
+                title="Confirm delete machine"
+                aria-label={`Confirm delete machine ${machine.name}`}
+                onClick={handleConfirmDelete}
+              >
+                ✓
+              </button>
+              <button
+                className="session-confirm-no"
+                title="Cancel"
+                aria-label="Cancel delete machine"
+                onClick={() => setConfirmDelete(false)}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
             <div className="machine-actions">
-              <button
-                className="machine-action-btn"
-                title="New shell (ungrouped)"
-                aria-label="New shell"
-                onClick={handleOpenUngroupedShell}
-                disabled={shellBusy}
-              >
-                {shellBusy ? '…' : <TerminalIcon />}
-              </button>
-              <button
-                className="machine-action-btn"
-                title="New project"
-                aria-label="New project"
-                aria-expanded={addingProject}
-                onClick={handleToggleAddingProject}
-              >
-                <FolderPlusIcon />
-              </button>
+              {machine.online && (
+                <button
+                  className="machine-action-btn"
+                  title="New shell (ungrouped)"
+                  aria-label="New shell"
+                  onClick={handleOpenUngroupedShell}
+                  disabled={shellBusy}
+                >
+                  {shellBusy ? '…' : <TerminalIcon />}
+                </button>
+              )}
+              {machine.online && (
+                <button
+                  className="machine-action-btn"
+                  title="New project"
+                  aria-label="New project"
+                  aria-expanded={addingProject}
+                  onClick={handleToggleAddingProject}
+                >
+                  <FolderPlusIcon />
+                </button>
+              )}
+              {!machine.revoked ? (
+                <button
+                  className="machine-action-btn"
+                  title="Revoke machine"
+                  aria-label={`Revoke machine ${machine.name}`}
+                  onClick={() => { setConfirmRevoke(true); setMachineError(null) }}
+                >
+                  <BanIcon />
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="machine-action-btn"
+                    title="Un-revoke machine"
+                    aria-label={`Un-revoke machine ${machine.name}`}
+                    onClick={handleUnrevoke}
+                  >
+                    <RestoreIcon />
+                  </button>
+                  <button
+                    className="machine-action-btn session-action-delete"
+                    title="Delete machine"
+                    aria-label={`Delete machine ${machine.name}`}
+                    onClick={() => { setConfirmDelete(true); setMachineError(null) }}
+                  >
+                    <TrashIcon />
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -703,6 +873,10 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
           )}
         </div>
       </div>
+
+      {machineError && (
+        <p className="inline-error" role="alert">{machineError}</p>
+      )}
 
       {!collapsed && (
         <div id={bodyId}>

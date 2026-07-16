@@ -69,6 +69,37 @@ func (s *MachineStore) MarkRevoked(_ context.Context, id string, ts int64) error
 	return nil
 }
 
+// ClearRevoked resets revoked_at for the given id.
+// Returns machine.ErrNotFound (wrapped) if not present.
+func (s *MachineStore) ClearRevoked(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.machines[id]
+	if !ok {
+		return fmt.Errorf("memory: clear revoked %q: %w", id, machine.ErrNotFound)
+	}
+	s.machines[id] = m.ClearRevoked()
+	return nil
+}
+
+// Delete removes the machine row for the given id.
+// Returns machine.ErrNotFound (wrapped) if not present.
+//
+// Unlike the sqlite store, memory has no foreign keys and no handle to the
+// sibling stores, so it deletes only the machine row — acceptable for the
+// test/E2E harness; cascade atomicity is asserted against the sqlite store.
+func (s *MachineStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.machines[id]; !ok {
+		return fmt.Errorf("memory: delete machine %q: %w", id, machine.ErrNotFound)
+	}
+	delete(s.machines, id)
+	return nil
+}
+
 // List returns a snapshot of all stored machines.
 func (s *MachineStore) List(_ context.Context) ([]machine.Machine, error) {
 	s.mu.RLock()

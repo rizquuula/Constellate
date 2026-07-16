@@ -79,6 +79,7 @@ func (s *fakeCredStore) PublicKey(_ context.Context, machineID string) ([]byte, 
 type fakeMachineStore struct {
 	mu       sync.Mutex
 	machines map[string]machine.Machine
+	deleted  []string
 }
 
 func newFakeMachineStore() *fakeMachineStore {
@@ -125,6 +126,28 @@ func (s *fakeMachineStore) MarkRevoked(_ context.Context, id string, ts int64) e
 		return machine.ErrNotFound
 	}
 	s.machines[id] = m.MarkRevoked(ts)
+	return nil
+}
+
+func (s *fakeMachineStore) ClearRevoked(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.machines[id]
+	if !ok {
+		return machine.ErrNotFound
+	}
+	s.machines[id] = m.ClearRevoked()
+	return nil
+}
+
+func (s *fakeMachineStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.machines[id]; !ok {
+		return machine.ErrNotFound
+	}
+	delete(s.machines, id)
+	s.deleted = append(s.deleted, id)
 	return nil
 }
 
@@ -369,5 +392,121 @@ func TestRevoke_ThenAuthenticate(t *testing.T) {
 	}
 	if !hasRevoke {
 		t.Error("expected ActionRevoke to be recorded")
+	}
+}
+
+func TestUnrevoke_ClearsRevokedFlag(t *testing.T) {
+	now := int64(1700000000)
+	uc, _, _, ms, aud := newUC(fixedClock{now})
+	ctx := context.Background()
+
+	// Enroll then revoke.
+	plaintext, _ := uc.MintToken(ctx)
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	machineID, _ := uc.Enroll(ctx, enroll.EnrollInput{
+		Token: []byte(plaintext), PublicKey: pub, Name: "box", OS: "linux", Arch: "amd64",
+	})
+	if err := uc.Revoke(ctx, machineID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	// Unrevoke should clear the revoked flag.
+	if err := uc.Unrevoke(ctx, machineID); err != nil {
+		t.Fatalf("Unrevoke: %v", err)
+	}
+	m, err := ms.ByID(ctx, machineID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if m.Revoked() {
+		t.Error("expected machine to be un-revoked after Unrevoke")
+	}
+
+	// Audit should have recorded an unrevoke action.
+	aud.mu.Lock()
+	defer aud.mu.Unlock()
+	hasUnrevoke := false
+	for _, a := range aud.actions {
+		if a == audit.ActionUnrevoke {
+			hasUnrevoke = true
+		}
+	}
+	if !hasUnrevoke {
+		t.Error("expected ActionUnrevoke to be recorded")
+	}
+}
+
+func TestDelete_RefusesUnlessRevoked(t *testing.T) {
+	now := int64(1700000000)
+	uc, _, _, ms, _ := newUC(fixedClock{now})
+	ctx := context.Background()
+
+	// Enroll but do NOT revoke.
+	plaintext, _ := uc.MintToken(ctx)
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	machineID, _ := uc.Enroll(ctx, enroll.EnrollInput{
+		Token: []byte(plaintext), PublicKey: pub, Name: "box", OS: "linux", Arch: "amd64",
+	})
+
+	if err := uc.Delete(ctx, machineID); !errors.Is(err, enroll.ErrNotRevoked) {
+		t.Errorf("expected ErrNotRevoked deleting a non-revoked machine, got %v", err)
+	}
+	// The machine must still exist.
+	if _, err := ms.ByID(ctx, machineID); err != nil {
+		t.Errorf("machine should survive a refused delete: %v", err)
+	}
+}
+
+func TestDelete_SucceedsWhenRevoked(t *testing.T) {
+	now := int64(1700000000)
+	uc, _, _, ms, aud := newUC(fixedClock{now})
+	ctx := context.Background()
+
+	// Enroll then revoke.
+	plaintext, _ := uc.MintToken(ctx)
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	machineID, _ := uc.Enroll(ctx, enroll.EnrollInput{
+		Token: []byte(plaintext), PublicKey: pub, Name: "box", OS: "linux", Arch: "amd64",
+	})
+	if err := uc.Revoke(ctx, machineID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	if err := uc.Delete(ctx, machineID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	// The store's Delete must have been invoked for this machine.
+	ms.mu.Lock()
+	deleted := ms.deleted
+	ms.mu.Unlock()
+	if len(deleted) != 1 || deleted[0] != machineID {
+		t.Errorf("expected store Delete to be called with %q, got %v", machineID, deleted)
+	}
+
+	// The machine must be gone.
+	if _, err := ms.ByID(ctx, machineID); !errors.Is(err, machine.ErrNotFound) {
+		t.Errorf("expected machine to be deleted, got %v", err)
+	}
+
+	// Audit should have recorded a machine-delete action.
+	aud.mu.Lock()
+	defer aud.mu.Unlock()
+	hasDelete := false
+	for _, a := range aud.actions {
+		if a == audit.ActionMachineDelete {
+			hasDelete = true
+		}
+	}
+	if !hasDelete {
+		t.Error("expected ActionMachineDelete to be recorded")
+	}
+}
+
+func TestDelete_UnknownMachine(t *testing.T) {
+	now := int64(1700000000)
+	uc, _, _, _, _ := newUC(fixedClock{now})
+	if err := uc.Delete(context.Background(), "no-such-id"); !errors.Is(err, machine.ErrNotFound) {
+		t.Errorf("expected machine.ErrNotFound for unknown machine, got %v", err)
 	}
 }

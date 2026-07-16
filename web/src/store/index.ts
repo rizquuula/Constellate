@@ -7,6 +7,9 @@ import {
   createSession,
   createProject as apiCreateProject,
   deleteProject as apiDeleteProject,
+  revokeMachine as apiRevokeMachine,
+  unrevokeMachine as apiUnrevokeMachine,
+  deleteMachine as apiDeleteMachine,
   renameSession as apiRenameSession,
   setAutoRelaunch as apiSetAutoRelaunch,
   closeSession as apiCloseSession,
@@ -255,6 +258,12 @@ interface Store {
   refreshProjects: () => Promise<void>
   refreshSessions: () => Promise<void>
 
+  revokeMachine: (id: string) => Promise<void>
+  unrevokeMachine: (id: string) => Promise<void>
+  // deleteMachine removes the machine and, mirroring the server cascade, its
+  // sessions and projects — pruning any panes bound to those sessions.
+  deleteMachine: (id: string) => Promise<void>
+
   createProject: (input: { machineID: string; name: string; path: string; color?: string }) => Promise<Project>
   deleteProject: (id: string) => Promise<void>
   renameSession: (id: string, title: string) => Promise<void>
@@ -379,6 +388,58 @@ export const useStore = create<Store>((set, get) => ({
         }
       }
       return { sessions, windows }
+    })
+  },
+
+  revokeMachine: async (id) => {
+    // Optimistic update: flip the flag immediately so the UI responds at once.
+    set((s) => ({
+      machines: s.machines.map((m) => (m.id === id ? { ...m, revoked: true } : m)),
+    }))
+    try {
+      await apiRevokeMachine(id)
+    } catch (err) {
+      // Revert on failure.
+      set((s) => ({
+        machines: s.machines.map((m) => (m.id === id ? { ...m, revoked: false } : m)),
+      }))
+      throw err
+    }
+  },
+
+  unrevokeMachine: async (id) => {
+    // Optimistic update: flip the flag immediately so the UI responds at once.
+    set((s) => ({
+      machines: s.machines.map((m) => (m.id === id ? { ...m, revoked: false } : m)),
+    }))
+    try {
+      await apiUnrevokeMachine(id)
+    } catch (err) {
+      // Revert on failure.
+      set((s) => ({
+        machines: s.machines.map((m) => (m.id === id ? { ...m, revoked: true } : m)),
+      }))
+      throw err
+    }
+  },
+
+  // deleteMachine deletes on the server first, then prunes local state to match
+  // the cascade (machine + its sessions + its projects) and detaches those
+  // sessions from every pane. Done after the await succeeds — not optimistic —
+  // so a failure leaves state intact and the error propagates to the UI.
+  deleteMachine: async (id) => {
+    await apiDeleteMachine(id)
+    set((s) => {
+      let windows = s.windows
+      for (const sess of s.sessions) {
+        if (sess.machineID === id) windows = clearSessionEverywhere(windows, sess.id)
+      }
+      return {
+        machines: s.machines.filter((m) => m.id !== id),
+        sessions: s.sessions.filter((x) => x.machineID !== id),
+        projects: s.projects.filter((p) => p.machineID !== id),
+        windows,
+      }
     })
   },
 

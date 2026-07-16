@@ -152,6 +152,34 @@ func (u *UseCase) Revoke(ctx context.Context, machineID string) error {
 	return nil
 }
 
+// Unrevoke clears a machine's revocation, re-enabling dial-home.
+func (u *UseCase) Unrevoke(ctx context.Context, machineID string) error {
+	if err := u.machines.ClearRevoked(ctx, machineID); err != nil {
+		return fmt.Errorf("enroll: unrevoke machine %q: %w", machineID, err)
+	}
+	_ = u.audit.Record(ctx, audit.ActionUnrevoke, machineID, "", "")
+	u.log.Info("machine unrevoked", "machineID", machineID)
+	return nil
+}
+
+// Delete permanently removes a machine and everything referencing it. It refuses
+// (ErrNotRevoked) unless the machine has been revoked first.
+func (u *UseCase) Delete(ctx context.Context, machineID string) error {
+	m, err := u.machines.ByID(ctx, machineID)
+	if err != nil {
+		return err // machine.ErrNotFound
+	}
+	if !m.Revoked() {
+		return ErrNotRevoked
+	}
+	if err := u.machines.Delete(ctx, machineID); err != nil {
+		return fmt.Errorf("enroll: delete machine %q: %w", machineID, err)
+	}
+	_ = u.audit.Record(ctx, audit.ActionMachineDelete, machineID, "", "")
+	u.log.Info("machine deleted", "machineID", machineID)
+	return nil
+}
+
 // List returns all known machines.
 func (u *UseCase) List(ctx context.Context) ([]machine.Machine, error) {
 	return u.machines.List(ctx)

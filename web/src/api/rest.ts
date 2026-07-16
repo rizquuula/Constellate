@@ -69,6 +69,14 @@ export function deleteProject(id: string): Promise<void> {
   return request<void>('DELETE', `/api/projects/${id}`)
 }
 
+export function revokeMachine(id: string): Promise<void>   { return request<void>('POST',   `/api/machines/${id}/revoke`) }
+export function unrevokeMachine(id: string): Promise<void> { return request<void>('POST',   `/api/machines/${id}/unrevoke`) }
+
+// deleteMachine hard-removes a machine and CASCADES: its sessions and projects
+// go with it. The hub refuses (409) unless the machine is revoked first, so
+// revoke before calling this.
+export function deleteMachine(id: string): Promise<void>   { return request<void>('DELETE', `/api/machines/${id}`) }
+
 export function createSession(input: {
   machineID: string
   projectID?: string

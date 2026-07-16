@@ -13,6 +13,9 @@ import (
 // *enroll.UseCase satisfies this interface.
 type EnrollService interface {
 	Enroll(ctx context.Context, in enroll.EnrollInput) (string, error)
+	Revoke(ctx context.Context, machineID string) error
+	Unrevoke(ctx context.Context, machineID string) error
+	Delete(ctx context.Context, machineID string) error
 }
 
 type enrollRequest struct {

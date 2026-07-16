@@ -14,6 +14,9 @@ const (
 	ActionDelete   Action = "delete"
 	ActionRevoke   Action = "revoke"
 	ActionRelaunch Action = "relaunch"
+
+	ActionUnrevoke      Action = "unrevoke"
+	ActionMachineDelete Action = "machine_delete"
 )
 
 // Event is an immutable record of a single security-relevant action.

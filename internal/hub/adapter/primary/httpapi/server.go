@@ -56,6 +56,9 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/machines", s.handleListMachines)
+	mux.HandleFunc("POST /api/machines/{id}/revoke", s.handleRevokeMachine)
+	mux.HandleFunc("POST /api/machines/{id}/unrevoke", s.handleUnrevokeMachine)
+	mux.HandleFunc("DELETE /api/machines/{id}", s.handleDeleteMachine)
 	mux.HandleFunc("POST /api/sessions", s.handleOpenSession)
 	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	mux.HandleFunc("GET /api/machines/{id}/sessions", s.handleListSessionsByMachine)

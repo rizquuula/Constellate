@@ -73,6 +73,9 @@ func statusFor(err error) int {
 	if errors.Is(err, enroll.ErrRevoked) {
 		return http.StatusForbidden
 	}
+	if errors.Is(err, enroll.ErrNotRevoked) {
+		return http.StatusConflict
+	}
 	if errors.Is(err, appauth.ErrInvalidCredential) {
 		return http.StatusUnauthorized
 	}

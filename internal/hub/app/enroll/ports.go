@@ -31,6 +31,10 @@ type MachineStore interface {
 	ByID(ctx context.Context, id string) (machine.Machine, error)
 	List(ctx context.Context) ([]machine.Machine, error)
 	MarkRevoked(ctx context.Context, id string, ts int64) error
+	ClearRevoked(ctx context.Context, id string) error
+	// Delete removes the machine and every row referencing it (credential,
+	// projects, sessions) atomically. FK-safe deletion order; single transaction.
+	Delete(ctx context.Context, id string) error
 }
 
 // AuditSink records security-relevant actions.
