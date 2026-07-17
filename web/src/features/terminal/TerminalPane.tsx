@@ -18,6 +18,9 @@ interface TerminalPaneProps {
   onDetach: () => void
   onReload: () => void
   onClose: () => void
+  // compact hides the split controls. On phones a split creates panes that
+  // can't be shown side-by-side, so the single-pane view suppresses them.
+  compact?: boolean
 }
 
 function TerminalPaneImpl({
@@ -30,6 +33,7 @@ function TerminalPaneImpl({
   onDetach,
   onReload,
   onClose,
+  compact = false,
 }: TerminalPaneProps) {
   const session = useStore((s) => sessionId ? s.sessions.find((x) => x.id === sessionId) : undefined)
   const machine = useStore((s) => session ? s.machines.find((m) => m.id === session.machineID) : undefined)
@@ -172,22 +176,26 @@ function TerminalPaneImpl({
               ✎
             </button>
           )}
-          <button
-            className="pane-btn"
-            title="Split horizontal (side by side) — Shift+Alt+−"
-            aria-label="Split pane horizontally"
-            onClick={onSplitH}
-          >
-            ▥
-          </button>
-          <button
-            className="pane-btn"
-            title="Split vertical (stacked) — Shift+Alt+="
-            aria-label="Split pane vertically"
-            onClick={onSplitV}
-          >
-            ▤
-          </button>
+          {!compact && (
+            <button
+              className="pane-btn"
+              title="Split horizontal (side by side) — Shift+Alt+−"
+              aria-label="Split pane horizontally"
+              onClick={onSplitH}
+            >
+              ▥
+            </button>
+          )}
+          {!compact && (
+            <button
+              className="pane-btn"
+              title="Split vertical (stacked) — Shift+Alt+="
+              aria-label="Split pane vertically"
+              onClick={onSplitV}
+            >
+              ▤
+            </button>
+          )}
           {sessionId && (
             <button
               className="pane-btn"

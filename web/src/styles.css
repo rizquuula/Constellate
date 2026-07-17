@@ -1150,6 +1150,58 @@ body {
   cursor: row-resize;
 }
 
+/* ── Mobile leaf switcher ─────────────────────────────────────────────────── */
+
+/* .workspace-mobile already carries .workspace (flex column); this makes the
+   column intent explicit so the switcher bar and the pane stack vertically. */
+.workspace-mobile {
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-leaf-switcher {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 8px;
+  background: var(--surface-chrome);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.mobile-leaf-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  padding: 4px 6px;
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-leaf-btn:hover {
+  color: var(--text-primary);
+  background: var(--border-subtle);
+}
+
+.mobile-leaf-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.mobile-leaf-pos {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 /* ── Terminal pane ────────────────────────────────────────────────────────── */
 
 .terminal-pane {
@@ -2914,6 +2966,7 @@ body {
   .session-action-btn,
   .collapse-btn,
   .pane-btn,
+  .mobile-leaf-btn,
   .keybar-key,
   .session-confirm-yes,
   .session-confirm-no,

@@ -3,6 +3,7 @@ import { Group, Panel, Separator } from 'react-resizable-panels'
 import { useStore } from '../../store'
 import { useMediaQuery, phoneQuery } from '../../breakpoints'
 import type { PaneNode, LeafPane } from './paneTree'
+import { orderedLeafIds } from './paneTree'
 import { TerminalPane } from './TerminalPane'
 
 interface WorkspaceNodeProps {
@@ -98,12 +99,40 @@ function MobilePane({ windowId }: { windowId: string }) {
   if (!win) return null
 
   const leaf = findLeaf(win.root, win.focusedPaneId) ?? firstLeaf(win.root)
+  const leafIds = orderedLeafIds(win.root)
+  // Index the *rendered* leaf (which may be a fallback when focus is stale), so
+  // the position indicator matches what the user actually sees.
+  const index = leafIds.indexOf(leaf.id)
+  const count = leafIds.length
+
   return (
     <div className="workspace workspace-mobile">
+      {count > 1 && (
+        <div className="mobile-leaf-switcher">
+          <button
+            type="button"
+            className="mobile-leaf-btn"
+            aria-label="Previous pane"
+            onClick={() => focusPane(leafIds[(index - 1 + count) % count])}
+          >
+            ◀
+          </button>
+          <span className="mobile-leaf-pos">{index + 1}/{count}</span>
+          <button
+            type="button"
+            className="mobile-leaf-btn"
+            aria-label="Next pane"
+            onClick={() => focusPane(leafIds[(index + 1) % count])}
+          >
+            ▶
+          </button>
+        </div>
+      )}
       <TerminalPane
         paneId={leaf.id}
         sessionId={leaf.sessionId}
         focused
+        compact
         onFocus={() => focusPane(leaf.id)}
         onSplitH={() => doSplitPane(leaf.id, 'horizontal')}
         onSplitV={() => doSplitPane(leaf.id, 'vertical')}

@@ -315,3 +315,10 @@ export function firstEmptyLeafId(root: PaneNode): string | null {
   }
   return null
 }
+
+// orderedLeafIds returns every leaf id in depth-first, left-to-right order —
+// the visual pane order. Used to sequence phone pane navigation (prev/next).
+export function orderedLeafIds(root: PaneNode): string[] {
+  if (root.kind === 'leaf') return [root.id]
+  return root.children.flatMap((child) => orderedLeafIds(child))
+}

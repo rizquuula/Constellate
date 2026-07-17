@@ -7,6 +7,7 @@ import {
   assignSession,
   splitPaneWithSession,
   findLeaf,
+  orderedLeafIds,
   type LeafPane,
   type SplitPane,
   type PaneNode,
@@ -493,5 +494,31 @@ describe('findLeaf', () => {
     const [root2, cId] = splitPane(root1, bId, 'horizontal')
     expect(findLeaf(root2, cId)!.id).toBe(cId)
     expect(findLeaf(root2, la.id)!.id).toBe(la.id)
+  })
+})
+
+// ── orderedLeafIds ─────────────────────────────────────────────────────────────
+
+describe('orderedLeafIds', () => {
+  it('returns the single id for a lone leaf', () => {
+    const leaf = makeLeaf()
+    expect(orderedLeafIds(leaf)).toEqual([leaf.id])
+  })
+
+  it('lists a flat n-ary group left-to-right', () => {
+    const a = makeLeaf()
+    const [root1, bId] = splitPane(a, a.id, 'horizontal')
+    const [root2, cId] = splitPane(root1, bId, 'horizontal') // [A, B, C]
+    expect(orderedLeafIds(root2)).toEqual([a.id, bId, cId])
+  })
+
+  it('flattens nested splits depth-first, preserving visual order', () => {
+    // Build [A, B, C] horizontal, then nest C into a vertical split [C, D].
+    const a = makeLeaf()
+    const [r1, bId] = splitPane(a, a.id, 'horizontal')
+    const [r2, cId] = splitPane(r1, bId, 'horizontal') // [A, B, C]
+    const [r3, dId] = splitPane(r2, cId, 'vertical') // C → vertical [C, D]
+    // Depth-first order: A, B, then C, D from the nested split.
+    expect(orderedLeafIds(r3)).toEqual([a.id, bId, cId, dId])
   })
 })
