@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="Constellate">
+  <!-- Maskable variant: full-bleed background (the platform applies its own mask),
+       glyph scaled into the central 80% safe zone. -->
+  <rect x="0" y="0" width="192" height="192" fill="#0c0b08"/>
+  <g transform="translate(96 96) scale(0.74) translate(-96 -96)">
+    <path d="M64 62 L104 96 L64 130" fill="none" stroke="#e6a23c" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="126" y1="70" x2="140" y2="118" stroke="#e6a23c" stroke-opacity="0.35" stroke-width="3"/>
+    <circle cx="126" cy="70" r="8" fill="#6fe0a0"/>
+    <circle cx="140" cy="118" r="5.5" fill="#6fe0a0"/>
+    <circle cx="118" cy="132" r="3.5" fill="#6fe0a0" fill-opacity="0.85"/>
+  </g>
+</svg>

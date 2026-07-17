@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"time"
@@ -13,6 +14,16 @@ import (
 	"github.com/rizquuula/Constellate/internal/hub/app/registry"
 	"github.com/rizquuula/Constellate/web"
 )
+
+func init() {
+	// Go's built-in MIME table lacks these extensions, so static files served
+	// from the embedded FS would otherwise be content-sniffed. Browsers reject
+	// a manifest that is not served as application/manifest+json. Errors here
+	// only mean a malformed type string (a compile-time constant below), so
+	// they are intentionally ignored.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+	_ = mime.AddExtensionType(".ico", "image/x-icon")
+}
 
 // MachineService is the consumer-side port for machine listing.
 // *registry.UseCase satisfies this interface.

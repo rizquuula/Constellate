@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="Constellate">
+  <!-- Rounded-square app mark: dark base + amber shell caret + a small constellation. -->
+  <rect x="4" y="4" width="184" height="184" rx="40" fill="#0c0b08"/>
+  <rect x="4.5" y="4.5" width="183" height="183" rx="39.5" fill="none" stroke="#e6a23c" stroke-opacity="0.28" stroke-width="1"/>
+  <!-- Shell prompt caret. -->
+  <path d="M64 62 L104 96 L64 130" fill="none" stroke="#e6a23c" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Constellation: mint stars linked by a faint amber line. -->
+  <line x1="126" y1="70" x2="140" y2="118" stroke="#e6a23c" stroke-opacity="0.35" stroke-width="3"/>
+  <circle cx="126" cy="70" r="8" fill="#6fe0a0"/>
+  <circle cx="140" cy="118" r="5.5" fill="#6fe0a0"/>
+  <circle cx="118" cy="132" r="3.5" fill="#6fe0a0" fill-opacity="0.85"/>
+</svg>

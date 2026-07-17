@@ -19,3 +19,10 @@ createRoot(root).render(
     <App />
   </StrictMode>
 )
+
+// Register the PWA service worker for installability + offline shell fallback.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  })
+}
