@@ -9,6 +9,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
+import { useVisualViewport } from './features/terminal/useVisualViewport'
 import { ProjectTree } from './features/sidebar/ProjectTree'
 import { TerminalView } from './features/terminal/TerminalView'
 import { WindowTabs } from './features/terminal/WindowTabs'
@@ -52,6 +53,10 @@ export function App() {
 
   const [authState, setAuthState] = useState<AuthState>('loading')
   const [activeDragLabel, setActiveDragLabel] = useState<string | null>(null)
+
+  // Track the visible viewport so the app shell stays above the mobile soft
+  // keyboard (gating happens inside the hook; inert on desktop).
+  useVisualViewport()
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),

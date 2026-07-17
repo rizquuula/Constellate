@@ -56,6 +56,9 @@
   --radius-sm: 3px;    /* buttons, inputs, small controls */
   --radius-md: 4px;    /* cards, chips, tiles */
   --radius-lg: 6px;    /* dialogs, login card */
+
+  /* App shell height; updated by useVisualViewport when the soft keyboard opens. */
+  --app-height: 100dvh;
 }
 
 /* ── Screen-reader only utility ───────────────────────────────────────────── */
@@ -1449,7 +1452,8 @@ body {
 .app-root {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100vh; /* fallback */
+  height: var(--app-height, 100dvh);
   overflow: hidden;
 }
 
