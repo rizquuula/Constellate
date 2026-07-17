@@ -133,6 +133,7 @@ function TerminalPaneImpl({
                 aria-label="Pane title"
                 value={titleDraft}
                 autoFocus
+                enterKeyHint="done"
                 onChange={(e) => { setTitleDraft(e.target.value); setRenameError(null) }}
                 onBlur={commitRename}
                 onKeyDown={(e) => {

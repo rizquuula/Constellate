@@ -109,6 +109,10 @@ export function Login({ onSuccess }: Props) {
               type="text"
               inputMode="text"
               autoComplete="off"
+              enterKeyHint="go"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="aaaaa-bbbbb"

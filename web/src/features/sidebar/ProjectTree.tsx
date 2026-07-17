@@ -6,6 +6,7 @@ import { ApiError } from '../../api/rest'
 import { findLeaf } from '../terminal/paneTree'
 import { findWindowBySession } from '../terminal/windowList'
 import { windowColor } from '../terminal/windowColor'
+import { confirmTimeoutMs } from '../../breakpoints'
 import { ActivityBadge } from '../activity/ActivityBadge'
 import type { SessionDragData } from '../terminal/dnd'
 import { machineKey, projectKey, ungroupedKey } from './collapse'
@@ -153,10 +154,10 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
     return idx === -1 ? null : idx + 1
   })
 
-  // Auto-cancel confirm after 4 seconds
+  // Auto-cancel confirm after the pointer-aware timeout (4s fine, 8s coarse)
   useEffect(() => {
     if (confirmAction) {
-      confirmTimerRef.current = setTimeout(() => setConfirmAction(false), 4000)
+      confirmTimerRef.current = setTimeout(() => setConfirmAction(false), confirmTimeoutMs())
     }
     return () => {
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
@@ -277,6 +278,7 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
             aria-label="Session name"
             value={draft}
             autoFocus
+            enterKeyHint="done"
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => { setDraft(e.target.value); setRenameError(null) }}
             onBlur={commitEdit}
@@ -395,10 +397,10 @@ function ProjectSection({ project, sessions, focusedSessionId, onOpenShell, onAs
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const projectSessions = sessions.filter((s) => s.projectID === project.id)
 
-  // Auto-cancel the delete confirmation after 4 seconds, matching SessionRow.
+  // Auto-cancel the delete confirmation after the pointer-aware timeout, matching SessionRow.
   useEffect(() => {
     if (confirmDelete) {
-      confirmTimerRef.current = setTimeout(() => setConfirmDelete(false), 4000)
+      confirmTimerRef.current = setTimeout(() => setConfirmDelete(false), confirmTimeoutMs())
     }
     return () => {
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
@@ -578,6 +580,7 @@ function NewProjectForm({ machineID, onDone }: NewProjectFormProps) {
         aria-label="Project name"
         value={name}
         autoFocus
+        enterKeyHint="next"
         onChange={(e) => setName(e.target.value)}
       />
       <input
@@ -585,6 +588,10 @@ function NewProjectForm({ machineID, onDone }: NewProjectFormProps) {
         placeholder="Path on machine"
         aria-label="Path on machine"
         value={path}
+        enterKeyHint="done"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
         onChange={(e) => setPath(e.target.value)}
       />
       <input
@@ -592,6 +599,7 @@ function NewProjectForm({ machineID, onDone }: NewProjectFormProps) {
         placeholder="Color (optional, e.g. #4a9eff)"
         aria-label="Accent color"
         value={color}
+        enterKeyHint="done"
         onChange={(e) => setColor(e.target.value)}
       />
       {error && (
@@ -696,7 +704,7 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
       confirmTimerRef.current = setTimeout(() => {
         setConfirmRevoke(false)
         setConfirmDelete(false)
-      }, 4000)
+      }, confirmTimeoutMs())
     }
     return () => {
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)

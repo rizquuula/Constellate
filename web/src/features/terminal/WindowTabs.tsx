@@ -58,6 +58,7 @@ function WindowTab({
           aria-label="Window name"
           value={draft}
           autoFocus
+          enterKeyHint="done"
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {

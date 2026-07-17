@@ -2998,9 +2998,34 @@ body {
   .keybar-key,
   .session-confirm-yes,
   .session-confirm-no,
-  .snackbar-close {
+  .snackbar-close,
+  .machine-action-btn,
+  .login-passkey-btn,
+  .login-tab,
+  .login-submit,
+  .window-tab-close,
+  .window-tab-btn,
+  .menu-btn,
+  .view-toggle-btn,
+  .logout-btn,
+  .btn-shell,
+  .btn-cancel {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  /* Machine drawer can hold up to five action buttons; wrap so 44px targets
+     don't overflow the ~280px drawer width. */
+  .machine-actions {
+    flex-wrap: wrap;
+  }
+
+  /* OTP is a 6-cell row inside a 320px login card (256px content width): six
+     44px boxes + gaps would overflow, so the horizontal floor is capped at 36px
+     while the 44px height still gives a comfortable tap target. */
+  .otp-box {
+    min-height: 44px;
+    min-width: 36px;
   }
 
   .pane-rename-btn {
@@ -3010,7 +3035,9 @@ body {
   .session-rename-input,
   .new-project-input,
   .pane-title-input,
-  .login-input {
+  .login-input,
+  .otp-box,
+  .window-tab-input {
     font-size: 16px; /* prevent iOS zoom-on-focus */
   }
 }

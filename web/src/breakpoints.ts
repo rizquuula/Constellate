@@ -36,3 +36,10 @@ export function useMediaQuery(query: string): boolean {
 export function useCoarsePointer(): boolean {
   return useMediaQuery(coarseQuery)
 }
+
+// Auto-cancel delay for destructive inline-confirm buttons. Touch users need
+// longer to reach the confirm button than mouse users, so coarse pointers get 8s.
+export function confirmTimeoutMs(): number {
+  if (typeof window === 'undefined') return 4000
+  return window.matchMedia(coarseQuery).matches ? 8000 : 4000
+}
