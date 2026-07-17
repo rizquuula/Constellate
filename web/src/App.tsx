@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, type MouseEvent } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -23,6 +23,12 @@ import { parsePaneDropId } from './features/terminal/dnd'
 import type { SessionDragData } from './features/terminal/dnd'
 
 const hasPasskeySupport = typeof window !== 'undefined' && !!window.PublicKeyCredential
+
+/** Collapse the phone header overflow menu after a menu item is chosen. */
+function closeHeaderMenu(e: MouseEvent<HTMLButtonElement>) {
+  const details = e.currentTarget.closest('details')
+  if (details instanceof HTMLDetailsElement) details.open = false
+}
 
 type AuthState = 'loading' | 'setup' | 'login' | 'authed'
 
@@ -286,13 +292,33 @@ export function App() {
           </button>
         </div>
         {hasPasskeySupport && (
-          <button className="logout-btn" onClick={handleAddPasskey} title="Register a passkey for this device">
+          <button
+            className="logout-btn header-inline-action"
+            onClick={handleAddPasskey}
+            title="Register a passkey for this device"
+          >
             Add passkey
           </button>
         )}
-        <button className="logout-btn" onClick={handleLogout} title="Sign out">
+        <button className="logout-btn header-inline-action" onClick={handleLogout} title="Sign out">
           Sign out
         </button>
+        {/* Phone-only overflow: collapses the inline actions above into a menu so
+            the header doesn't crowd the view toggle at ≤600px. CSS decides which
+            variant is visible — no JS width checks. */}
+        <details className="header-menu">
+          <summary className="header-menu-btn" aria-label="More actions">⋯</summary>
+          <div className="header-menu-list">
+            {hasPasskeySupport && (
+              <button onClick={(e) => { closeHeaderMenu(e); handleAddPasskey() }}>
+                Add passkey
+              </button>
+            )}
+            <button onClick={(e) => { closeHeaderMenu(e); handleLogout() }}>
+              Sign out
+            </button>
+          </div>
+        </details>
       </header>
 
       <Snackbar

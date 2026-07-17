@@ -1619,6 +1619,78 @@ body {
   color: var(--accent);
 }
 
+/* ── Header overflow menu (phone-only; hidden >600px) ─────────────────────── */
+
+/* Hidden on desktop — the inline "Add passkey" / "Sign out" buttons show there.
+   The phone media block flips this to `flex` and hides the inline buttons. */
+.header-menu {
+  display: none;
+  position: relative;
+}
+
+.header-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  line-height: 1;
+  padding: 4px 10px;
+  min-height: 28px;
+  list-style: none;
+}
+
+/* Suppress the native disclosure triangle across engines. */
+.header-menu-btn::-webkit-details-marker {
+  display: none;
+}
+
+.header-menu-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.header-menu-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--surface-chrome);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.header-menu-list button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  padding: 8px 10px;
+  min-height: 40px;
+}
+
+.header-menu-list button:hover {
+  background: var(--surface-hover);
+}
+
+.header-menu-list button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 /* ── Overview shell (full content area when overview is active) ───────────── */
 
 .overview-shell {
@@ -1701,6 +1773,20 @@ body {
 .session-tile-dead:hover {
   border-color: var(--border-muted);
   box-shadow: none;
+}
+
+/* Touch devices have no hover — give taps a pressed state (mirrors :hover) so a
+   dive gets immediate visual feedback. */
+@media (hover: none) {
+  .session-tile:active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .session-tile-dead:active {
+    border-color: var(--border-muted);
+    box-shadow: none;
+  }
 }
 
 .tile-header {
@@ -2313,7 +2399,8 @@ body {
 .dashboard-attention-item {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   background: var(--danger-bg);
   border: 1px solid var(--danger-border);
   border-radius: var(--radius-sm);
@@ -2965,6 +3052,16 @@ body {
     padding: 4px 8px;
   }
 
+  /* Collapse the two inline header actions into the overflow menu on phones. */
+  .header-inline-action {
+    display: none;
+  }
+
+  .header-menu {
+    display: flex;
+    margin-left: auto;
+  }
+
   /* Dashboard / overview spacing tightened for narrow screens */
   .dashboard-scroll {
     padding: 16px 12px;
@@ -2989,6 +3086,14 @@ body {
   }
 }
 
+/* ── Very narrow phones: compress the always-inline view toggle one notch ── */
+@media (max-width: 400px) {
+  .view-toggle-btn {
+    padding: 4px 6px;
+    font-size: var(--text-xs);
+  }
+}
+
 /* ── Touch devices: larger hit targets + zoom-safe inputs ───────────────── */
 @media (pointer: coarse) {
   .session-action-btn,
@@ -3008,6 +3113,7 @@ body {
   .menu-btn,
   .view-toggle-btn,
   .logout-btn,
+  .header-menu-btn,
   .btn-shell,
   .btn-cancel {
     min-width: 44px;
