@@ -2,8 +2,10 @@ import { useRef, useState, useCallback, memo } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { useStore } from '../../store'
 import { useTerminal } from './useTerminal'
+import { KeyBar } from './KeyBar'
 import { PaneDropZones } from './dnd'
 import { cropPwd } from './pwd'
+import { useCoarsePointer } from '../../breakpoints'
 import type { SessionDragData } from './dnd'
 
 interface TerminalPaneProps {
@@ -39,8 +41,10 @@ function TerminalPaneImpl({
   const [titleDraft, setTitleDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
 
-  useTerminal(containerRef, sessionId, reloadKey)
+  const term = useTerminal(containerRef, sessionId, reloadKey)
+  const coarsePointer = useCoarsePointer()
   const sessionEnded = session !== undefined && session.status !== 'running'
+  const showKeyBar = coarsePointer && focused && sessionId != null && !sessionEnded
 
   // Shell name shown in full (no cropping); fall back to a short id only for
   // legacy sessions that predate server-generated names. Prefix with the machine
@@ -158,6 +162,16 @@ function TerminalPaneImpl({
           )}
         </div>
         <div className="pane-controls">
+          {session && (
+            <button
+              className="pane-btn pane-rename-btn"
+              title="Rename session"
+              aria-label="Rename session"
+              onClick={startRename}
+            >
+              ✎
+            </button>
+          )}
           <button
             className="pane-btn"
             title="Split horizontal (side by side) — Shift+Alt+−"
@@ -229,6 +243,8 @@ function TerminalPaneImpl({
           data-pane-id={paneId}
         />
       </div>
+
+      {showKeyBar && <KeyBar handle={term} />}
     </div>
   )
 }

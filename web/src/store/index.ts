@@ -76,6 +76,23 @@ function lsRemove(key: string): void {
   }
 }
 
+function clampInt(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.floor(value)))
+}
+
+// Initial PTY grid for a new session. On coarse-pointer (touch) devices the
+// default 80×24 overflows a phone screen, so estimate from the viewport instead;
+// fit() corrects the exact size after the terminal attaches, so this is only a
+// cosmetic first-paint hint.
+function initialGrid(): { cols: number; rows: number } {
+  const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+  if (!isTouch) return { cols: 80, rows: 24 }
+  return {
+    cols: clampInt(window.innerWidth / 9, 20, 80),
+    rows: clampInt(window.innerHeight / 20, 10, 24),
+  }
+}
+
 export type ViewMode = 'workspace' | 'overview' | 'dashboard'
 
 // hashToView maps the URL fragment (`#overview`, `#dashboard`, `#workspace`) to
@@ -754,7 +771,8 @@ export const useStore = create<Store>((set, get) => ({
   // layout is untouched, so no live terminal is ever replaced. The search never
   // crosses into another window: a new shell must not silently appear elsewhere.
   openSessionInPane: async (paneId, { machineID, projectID, cwd, createDir }) => {
-    const session = await createSession({ machineID, projectID, cwd, createDir, cols: 80, rows: 24 })
+    const { cols, rows } = initialGrid()
+    const session = await createSession({ machineID, projectID, cwd, createDir, cols, rows })
     const sessions = await listSessions()
     const owner = findWindowByPane(get().windows, paneId)
     if (!owner) {

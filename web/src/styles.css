@@ -1349,6 +1349,67 @@ body {
   overflow-y: auto;
 }
 
+/* Rename affordance for touch: double-click is unavailable on a phone, so a
+   pencil button stands in. Hidden on fine-pointer devices (see coarse block). */
+.pane-rename-btn {
+  display: none;
+}
+
+/* ── Mobile terminal controls (KeyBar) ────────────────────────────────────── */
+/* On-screen key row shown only on coarse-pointer devices; renders below the
+   terminal body so the physical soft keyboard can reach Esc, Ctrl, arrows, and
+   shell symbols it otherwise cannot send. */
+.keybar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px;
+  background: var(--surface-chrome);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.keybar-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.keybar-key {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: var(--surface-hover);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.keybar-key:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.keybar-key[aria-pressed='true'],
+.keybar-key-armed {
+  color: var(--accent-text);
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.keybar-key:disabled {
+  color: var(--text-faint);
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ── Legacy terminal area (kept for CSS reset compatibility) ───────────────── */
 
 .terminal-area {
@@ -2849,11 +2910,16 @@ body {
   .session-action-btn,
   .collapse-btn,
   .pane-btn,
+  .keybar-key,
   .session-confirm-yes,
   .session-confirm-no,
   .snackbar-close {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  .pane-rename-btn {
+    display: inline-flex;
   }
 
   .session-rename-input,
