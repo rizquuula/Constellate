@@ -2753,38 +2753,11 @@ body {
   display: none;
 }
 
-/* ── Responsive: phones ─────────────────────────────────────────────────── */
-@media (max-width: 600px) {
-  .app-header {
-    padding: 0 8px;
-    gap: 8px;
-  }
-
-  /* Pane header is cramped on narrow screens; the pwd (flex-shrink: 0) would
-     steal space from the machine|shell title, so drop it. Full path is still
-     available on wider layouts. */
-  .pane-title-dir {
-    display: none;
-  }
-
-  .app-wordmark {
-    display: none;
-  }
-
+/* ── Responsive: tablets & below (sidebar drawer) ───────────────────────── */
+/* Keep the max-width in sync with TABLET_MAX in web/src/breakpoints.ts. */
+@media (max-width: 900px) {
   .menu-btn {
     display: inline-flex;
-  }
-
-  .view-toggle-btn {
-    padding: 4px 8px;
-  }
-
-  .view-toggle-kbd {
-    display: none;
-  }
-
-  .logout-btn {
-    padding: 4px 8px;
   }
 
   /* Sidebar becomes an off-canvas drawer overlaying the terminal */
@@ -2813,6 +2786,38 @@ body {
     bottom: 0;
     z-index: 150;
     background: rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* ── Responsive: phones ─────────────────────────────────────────────────── */
+/* Keep the max-width in sync with PHONE_MAX in web/src/breakpoints.ts. */
+@media (max-width: 600px) {
+  .app-header {
+    padding: 0 8px;
+    gap: 8px;
+  }
+
+  /* Pane header is cramped on narrow screens; the pwd (flex-shrink: 0) would
+     steal space from the machine|shell title, so drop it. Full path is still
+     available on wider layouts. */
+  .pane-title-dir {
+    display: none;
+  }
+
+  .app-wordmark {
+    display: none;
+  }
+
+  .view-toggle-btn {
+    padding: 4px 8px;
+  }
+
+  .view-toggle-kbd {
+    display: none;
+  }
+
+  .logout-btn {
+    padding: 4px 8px;
   }
 
   /* Dashboard / overview spacing tightened for narrow screens */

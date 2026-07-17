@@ -1,6 +1,7 @@
-import { useState, useEffect, memo } from 'react'
+import { memo } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { useStore } from '../../store'
+import { useMediaQuery, phoneQuery } from '../../breakpoints'
 import type { PaneNode, LeafPane } from './paneTree'
 import { TerminalPane } from './TerminalPane'
 
@@ -70,16 +71,7 @@ const WorkspaceNode = memo(function WorkspaceNode({ node, windowId }: WorkspaceN
 // On phones, side-by-side split panes are unusable; render only the focused
 // leaf full-screen. Session switching happens via the sidebar drawer.
 function useIsNarrow(): boolean {
-  const [narrow, setNarrow] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 600px)').matches,
-  )
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 600px)')
-    const onChange = () => setNarrow(mq.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-  return narrow
+  return useMediaQuery(phoneQuery)
 }
 
 function findLeaf(node: PaneNode, id: string): LeafPane | null {
