@@ -59,6 +59,11 @@
 
   /* App shell height; updated by useVisualViewport when the soft keyboard opens. */
   --app-height: 100dvh;
+
+  /* Header height: the 40px chrome bar plus the standalone-PWA notch/status-bar
+     inset (0 on desktop and non-standalone mobile). Used to offset the drawer
+     and scrim so they clear the header in all environments. */
+  --header-h: calc(40px + env(safe-area-inset-top, 0px));
 }
 
 /* ── Screen-reader only utility ───────────────────────────────────────────── */
@@ -989,7 +994,13 @@ body {
   align-items: stretch;
   gap: 4px;
   flex-shrink: 0;
+  /* Bottom strip: add the home-indicator inset below existing spacing, and
+     grow side padding to clear landscape notches. All insets are 0 off
+     standalone, so desktop keeps the plain `0 6px`. */
   padding: 0 6px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: max(6px, env(safe-area-inset-left, 0px));
+  padding-right: max(6px, env(safe-area-inset-right, 0px));
   background: var(--surface-chrome);
   border-top: 1px solid var(--border-subtle);
 }
@@ -1515,8 +1526,14 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* Horizontal padding respects side insets on landscape notched phones;
+     top padding pushes content below the status-bar notch. Both are 0 off
+     standalone, so height/centering match the plain 40px bar on desktop. */
   padding: 0 12px;
-  height: 40px;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  height: var(--header-h);
   flex-shrink: 0;
   background: var(--surface-chrome);
   border-bottom: 1px solid var(--border-subtle);
@@ -1776,6 +1793,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Keep the centered card clear of notch/home-indicator in standalone PWA;
+     the 16px floor is the effective gutter on desktop (all insets 0). */
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
   z-index: 1000;
 }
 
@@ -2880,11 +2900,14 @@ body {
   /* Sidebar becomes an off-canvas drawer overlaying the terminal */
   .sidebar {
     position: fixed;
-    top: 40px;
+    top: var(--header-h);
     bottom: 0;
     left: 0;
     width: min(280px, 82vw);
     z-index: 200;
+    /* Clear the home indicator and any left-edge notch in standalone PWA. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
     transform: translateX(-100%);
     transition: transform 0.2s ease;
     box-shadow: 2px 0 16px rgba(0, 0, 0, 0.5);
@@ -2897,7 +2920,7 @@ body {
   .sidebar-scrim {
     display: block;
     position: fixed;
-    top: 40px;
+    top: var(--header-h);
     left: 0;
     right: 0;
     bottom: 0;
@@ -2910,7 +2933,12 @@ body {
 /* Keep the max-width in sync with PHONE_MAX in web/src/breakpoints.ts. */
 @media (max-width: 600px) {
   .app-header {
-    padding: 0 8px;
+    /* Tighter base padding on phones, but keep the notch/status-bar insets
+       (longhand, so it doesn't clobber the padding-top/left/right above). */
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: 0;
+    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-right: max(8px, env(safe-area-inset-right, 0px));
     gap: 8px;
   }
 
