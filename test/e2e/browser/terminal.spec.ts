@@ -6,7 +6,7 @@ test('terminal: two markers + resize', async ({ page }) => {
   // Wait for the machine named e2e-box to appear and be online
   const newShellBtn = page.locator('.machine-item').filter({
     has: page.locator('.machine-name', { hasText: 'e2e-box' }),
-  }).locator('button.btn-shell[title="New shell (ungrouped)"]');
+  }).locator('button[title="New shell (ungrouped)"]');
 
   await expect(newShellBtn).toBeVisible({ timeout: 15_000 });
 
@@ -47,7 +47,7 @@ test('terminal: scrollback replay on session switch', async ({ page }) => {
 
   const newShellBtn = page.locator('.machine-item').filter({
     has: page.locator('.machine-name', { hasText: 'e2e-box' }),
-  }).locator('button.btn-shell[title="New shell (ungrouped)"]');
+  }).locator('button[title="New shell (ungrouped)"]');
 
   await expect(newShellBtn).toBeVisible({ timeout: 15_000 });
 

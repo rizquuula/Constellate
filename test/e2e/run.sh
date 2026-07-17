@@ -13,12 +13,29 @@ TMP_ID=$(mktemp /tmp/constellate-e2e-id-XXXXXX)
 TMP_CRED=$(mktemp /tmp/constellate-e2e-cred-XXXXXX)
 HUB_LOG=$(mktemp /tmp/constellate-hub-XXXXXX.log)
 AGENT_LOG=$(mktemp /tmp/constellate-agent-XXXXXX.log)
+# Isolate the e2e agent's session-host socket and durable data from any
+# constellate-agent already running on this machine under the default
+# ~/.constellate paths — otherwise the e2e agent dials the foreign session-host
+# socket and fails to come online. RuntimeDir is honoured via CONSTELLATE_RUNTIME_DIR
+# and the data dir (scrollback) via XDG_DATA_HOME; the spawned session-host
+# inherits both from the connect process's environment.
+TMP_RUNTIME=$(mktemp -d /tmp/constellate-e2e-run-XXXXXX)
+TMP_XDG_DATA=$(mktemp -d /tmp/constellate-e2e-data-XXXXXX)
 HUB_PID=""
 AGENT_PID=""
 
 # Pick a port that is not already in use (avoid conflicts with Docker services).
-HUB_PORT=18080
+# Prefer 18080 (overridable via HUB_PORT), but fall back to a free ephemeral port
+# when it is taken — e.g. an unrelated container already bound to it — so the run
+# is not wedged by a preexisting listener.
 HUB_HOST=127.0.0.1
+HUB_PORT="${HUB_PORT:-18080}"
+port_in_use() { python3 -c "import socket,sys; s=socket.socket(); r=s.connect_ex(('$HUB_HOST',int('$1'))); s.close(); sys.exit(0 if r==0 else 1)"; }
+if port_in_use "$HUB_PORT"; then
+  echo "==> Port ${HUB_PORT} is busy; picking a free port instead..."
+  HUB_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('$HUB_HOST',0)); print(s.getsockname()[1]); s.close()")
+  echo "  using port ${HUB_PORT}"
+fi
 HUB_BASE="http://${HUB_HOST}:${HUB_PORT}"
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
@@ -31,7 +48,14 @@ cleanup() {
   if [ -n "$HUB_PID" ] && kill -0 "$HUB_PID" 2>/dev/null; then
     kill "$HUB_PID" 2>/dev/null || true
   fi
+  # The agent spawns a detached (setsid) session-host that outlives the connect
+  # process; kill it via its isolated socket so it doesn't linger. fuser -k only
+  # touches the process holding *our* temp socket, never another agent's.
+  if [ -n "${TMP_RUNTIME:-}" ] && [ -S "${TMP_RUNTIME}/host.sock" ]; then
+    fuser -k "${TMP_RUNTIME}/host.sock" 2>/dev/null || true
+  fi
   rm -f "$TMP_DB" "${TMP_DB}-shm" "${TMP_DB}-wal" "$TMP_ID" "$TMP_CRED" "$HUB_LOG" "$AGENT_LOG"
+  rm -rf "${TMP_RUNTIME:-}" "${TMP_XDG_DATA:-}"
 }
 trap cleanup EXIT
 
@@ -92,6 +116,8 @@ CONSTELLATE_HUB_URL="ws://${HUB_HOST}:${HUB_PORT}/ws/agent" \
   CONSTELLATE_ID_FILE="$TMP_ID" \
   CONSTELLATE_CRED_FILE="$TMP_CRED" \
   CONSTELLATE_NAME=e2e-box \
+  CONSTELLATE_RUNTIME_DIR="$TMP_RUNTIME" \
+  XDG_DATA_HOME="$TMP_XDG_DATA" \
   ./bin/constellate-agent connect >"$AGENT_LOG" 2>&1 &
 AGENT_PID=$!
 

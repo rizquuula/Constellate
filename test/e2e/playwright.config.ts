@@ -22,6 +22,22 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/operator.json',
       },
+      // The responsive spec asserts phone-only behaviour and only makes sense
+      // under mobile emulation, so keep it out of the desktop project.
+      testIgnore: /responsive\.spec\.ts/,
+      dependencies: ['setup'],
+    },
+    {
+      // Mobile-emulation project: Pixel 7 reports isMobile + hasTouch, so
+      // Chromium exposes `pointer: coarse` and the phone/drawer/KeyBar behaviours
+      // activate. Scoped to responsive.spec.ts so the desktop specs don't rerun
+      // under emulation.
+      name: 'mobile',
+      use: {
+        ...devices['Pixel 7'],
+        storageState: 'playwright/.auth/operator.json',
+      },
+      testMatch: /responsive\.spec\.ts/,
       dependencies: ['setup'],
     },
   ],
