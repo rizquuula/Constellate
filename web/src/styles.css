@@ -2133,6 +2133,135 @@ body {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+/* ── Modal ───────────────────────────────────────────────────────────────── */
+
+/* Portalled dialog. Mirrors the login card's visual language but over a
+   translucent scrim rather than an opaque takeover. z-index sits above the
+   mobile drawer (200) and its scrim (150). */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+  /* Keep the card clear of the notch/home-indicator in standalone PWA. */
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  animation: modal-fade 0.12s ease-out;
+}
+
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: min(360px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-card:focus {
+  outline: none;
+}
+
+.modal-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.modal-divider {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 0;
+}
+
+.modal-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.modal-input {
+  background: var(--surface-input);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  padding: 6px 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.modal-checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.modal-error {
+  font-size: var(--text-xs);
+  color: var(--danger);
+  margin: 0;
+  padding: 2px 0;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal-danger-btn {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.modal-danger-btn:hover {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.modal-danger-btn-confirm {
+  color: var(--danger-strong);
+  border-color: var(--danger-strong);
+  background: var(--danger-bg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay {
+    animation: none;
+  }
+}
+
 /* ── Snackbar ────────────────────────────────────────────────────────────── */
 
 .snackbar-region {
@@ -3115,7 +3244,8 @@ body {
   .logout-btn,
   .header-menu-btn,
   .btn-shell,
-  .btn-cancel {
+  .btn-cancel,
+  .modal-danger-btn {
     min-width: 44px;
     min-height: 44px;
   }
