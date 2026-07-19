@@ -113,7 +113,7 @@ export function Modal({ title, onClose, children }: ModalProps) {
   }, [])
 
   return createPortal(
-    <div className="modal-overlay" onMouseDown={handleOverlayMouseDown}>
+    <div className="fullscreen-overlay modal-overlay" onMouseDown={handleOverlayMouseDown}>
       <div
         ref={cardRef}
         className="modal-card"

@@ -13,7 +13,10 @@ import { computeSaveOps, type SessionSettingsBaseline } from './sessionSettings'
  */
 export function SessionSettingsModal() {
   const settingsSessionId = useStore((s) => s.settingsSessionId)
-  const session = useStore((s) => s.sessions.find((x) => x.id === s.settingsSessionId) ?? null)
+  // Short-circuit while closed so the find() doesn't run on every store set.
+  const session = useStore((s) =>
+    s.settingsSessionId == null ? null : (s.sessions.find((x) => x.id === s.settingsSessionId) ?? null),
+  )
   const closeSessionSettings = useStore((s) => s.closeSessionSettings)
 
   // If the session vanished while the modal was open, close it.
@@ -147,7 +150,7 @@ function SessionSettingsBody({ session, onClose }: BodyProps) {
           <label className="modal-label">
             Name
             <input
-              className="modal-input"
+              className="text-input modal-input"
               value={name}
               data-autofocus
               enterKeyHint="done"

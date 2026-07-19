@@ -225,7 +225,7 @@ export function App() {
 
   if (authState === 'loading') {
     return (
-      <div className="login-overlay">
+      <div className="fullscreen-overlay login-overlay">
         <div className="login-card">
           <h2 className="login-title">Connecting…</h2>
         </div>
@@ -235,7 +235,7 @@ export function App() {
 
   if (authState === 'setup') {
     return (
-      <div className="login-overlay">
+      <div className="fullscreen-overlay login-overlay">
         <div className="login-card">
           <h2 className="login-title">Setup Required</h2>
           <p className="login-label">

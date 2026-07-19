@@ -129,7 +129,7 @@ function TerminalPaneImpl({
           {editingTitle ? (
             <>
               <input
-                className="pane-title-input"
+                className="text-input pane-title-input"
                 aria-label="Pane title"
                 value={titleDraft}
                 autoFocus

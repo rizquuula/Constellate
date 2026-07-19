@@ -1,47 +1,10 @@
-import { test, expect, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { createRunningSession, onlineMachineId } from './helpers';
 
 // These specs run under the `mobile` Playwright project (devices['Pixel 7'] →
 // isMobile + hasTouch), so Chromium reports `pointer: coarse` and the phone
 // drawer, MobilePane leaf switcher and KeyBar all activate. The desktop
 // `chromium` project ignores this file (see playwright.config.ts testIgnore).
-
-const MACHINE_NAME = 'e2e-box';
-
-// onlineMachineId polls the operator-gated machine list until the e2e-box agent
-// (booted by run.sh) is enrolled and reporting online, then returns its id.
-async function onlineMachineId(request: APIRequestContext): Promise<string> {
-  let id: string | null = null;
-  await expect
-    .poll(
-      async () => {
-        const resp = await request.get('/api/machines');
-        if (!resp.ok()) return false;
-        const machines = (await resp.json()) as Array<{ id: string; name: string; online: boolean }>;
-        id = machines.find((m) => m.name === MACHINE_NAME && m.online)?.id ?? null;
-        return id !== null;
-      },
-      { timeout: 20_000, message: 'e2e-box machine never came online' },
-    )
-    .toBe(true);
-  if (!id) throw new Error('unreachable: machine id resolved null after poll');
-  return id;
-}
-
-// createRunningSession spawns a live PTY on the agent via REST and returns its
-// id. A unique title lets a test locate that exact sidebar row, since sessions
-// created by earlier tests persist server-side for the whole hub run.
-async function createRunningSession(
-  request: APIRequestContext,
-  machineID: string,
-  title: string,
-): Promise<string> {
-  const resp = await request.post('/api/sessions', {
-    data: { machineID, cwd: '~', cols: 80, rows: 24, title },
-  });
-  expect(resp.ok(), `create session failed: ${resp.status()} ${await resp.text()}`).toBeTruthy();
-  const session = (await resp.json()) as { id: string };
-  return session.id;
-}
 
 // seedTwoLeafWindow writes a valid v2 workspace blob binding two leaves (in one
 // horizontal split) to the two sessions, so MobilePane renders the leaf switcher

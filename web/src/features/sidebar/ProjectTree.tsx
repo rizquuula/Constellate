@@ -440,7 +440,7 @@ function NewProjectForm({ machineID, onDone }: NewProjectFormProps) {
   return (
     <form className="new-project-form" onSubmit={submit}>
       <input
-        className="new-project-input"
+        className="text-input new-project-input"
         placeholder="Project name"
         aria-label="Project name"
         value={name}
@@ -449,7 +449,7 @@ function NewProjectForm({ machineID, onDone }: NewProjectFormProps) {
         onChange={(e) => setName(e.target.value)}
       />
       <input
-        className="new-project-input"
+        className="text-input new-project-input"
         placeholder="Path on machine"
         aria-label="Path on machine"
         value={path}
@@ -460,7 +460,7 @@ function NewProjectForm({ machineID, onDone }: NewProjectFormProps) {
         onChange={(e) => setPath(e.target.value)}
       />
       <input
-        className="new-project-input"
+        className="text-input new-project-input"
         placeholder="Color (optional, e.g. #4a9eff)"
         aria-label="Accent color"
         value={color}

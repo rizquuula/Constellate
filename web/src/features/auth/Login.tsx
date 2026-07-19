@@ -57,7 +57,7 @@ export function Login({ onSuccess }: Props) {
   }
 
   return (
-    <div className="login-overlay">
+    <div className="fullscreen-overlay login-overlay">
       <div className="login-card">
         <h2 className="login-title">Constellate</h2>
         {hasPasskeySupport && (
