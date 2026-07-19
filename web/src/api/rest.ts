@@ -102,6 +102,15 @@ export function setAutoRelaunch(id: string, autoRelaunch: boolean): Promise<void
   return request<void>('PATCH', `/api/sessions/${id}`, { autoRelaunch })
 }
 
+// patchSession updates title and/or autoRelaunch in a single PATCH so the two
+// settings commit atomically — the hub handler accepts both fields in one body.
+export function patchSession(
+  id: string,
+  patch: { title?: string; autoRelaunch?: boolean },
+): Promise<void> {
+  return request<void>('PATCH', `/api/sessions/${id}`, patch)
+}
+
 export function closeSession(id: string): Promise<void> {
   return request<void>('DELETE', `/api/sessions/${id}`)
 }

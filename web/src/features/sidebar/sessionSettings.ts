@@ -1,16 +1,21 @@
-import type { Session } from '../../types'
-
 // The local, editable state of the session-settings modal.
 export interface SessionSettingsDraft {
   name: string
   autoRelaunch: boolean
 }
 
-// The store mutations Save should run, derived from the diff between the live
-// session and the draft. Absent fields mean "no change".
+// A snapshot of the editable fields taken when the modal body mounts. Save diffs
+// the draft against this baseline (not the live session), so a value changed
+// from another client while the modal is open is not silently reverted on Save —
+// the ops reflect only what this user actually edited.
+export type SessionSettingsBaseline = SessionSettingsDraft
+
+// The fields Save should PATCH, derived from the diff between the mount-time
+// baseline and the draft. Absent fields mean "no change"; the shape matches the
+// hub's PATCH body so it can be sent as-is.
 export interface SaveOps {
-  rename?: string
-  setAutoRelaunch?: boolean
+  title?: string
+  autoRelaunch?: boolean
 }
 
 // Either the ops to apply, or a field-level validation error that blocks Save.
@@ -19,28 +24,25 @@ export type ComputeSaveResult =
   | { ok: false; error: string }
 
 /**
- * computeSaveOps diffs a session against the modal draft and returns the store
- * mutations Save should perform. A non-running session exposes no editable
- * fields, so it yields no ops. A name that was changed to empty (after trim)
- * is a blocking validation error; an unchanged name is left alone.
+ * computeSaveOps diffs the mount-time baseline against the modal draft and
+ * returns the PATCH fields Save should send. A name that was changed to empty
+ * (after trim) is a blocking validation error; an unchanged name is left alone.
+ * Editability is gated by the component — the helper only diffs values.
  */
-export function computeSaveOps(session: Session, draft: SessionSettingsDraft): ComputeSaveResult {
-  // Non-running rows show only "Close session" — nothing to commit.
-  if (session.status !== 'running') {
-    return { ok: true, ops: {} }
-  }
-
+export function computeSaveOps(
+  baseline: SessionSettingsBaseline,
+  draft: SessionSettingsDraft,
+): ComputeSaveResult {
   const ops: SaveOps = {}
 
   const trimmed = draft.name.trim()
-  const currentName = session.title ?? ''
-  if (trimmed !== currentName) {
+  if (trimmed !== baseline.name) {
     if (!trimmed) return { ok: false, error: 'Name cannot be empty' }
-    ops.rename = trimmed
+    ops.title = trimmed
   }
 
-  if (draft.autoRelaunch !== (session.autoRelaunch ?? false)) {
-    ops.setAutoRelaunch = draft.autoRelaunch
+  if (draft.autoRelaunch !== baseline.autoRelaunch) {
+    ops.autoRelaunch = draft.autoRelaunch
   }
 
   return { ok: true, ops }

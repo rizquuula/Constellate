@@ -12,6 +12,7 @@ import {
   deleteMachine as apiDeleteMachine,
   renameSession as apiRenameSession,
   setAutoRelaunch as apiSetAutoRelaunch,
+  patchSession as apiPatchSession,
   closeSession as apiCloseSession,
   deleteSession as apiDeleteSession,
   forceDeleteSession as apiForceDeleteSession,
@@ -285,6 +286,9 @@ interface Store {
   deleteProject: (id: string) => Promise<void>
   renameSession: (id: string, title: string) => Promise<void>
   setAutoRelaunch: (id: string, autoRelaunch: boolean) => Promise<void>
+  // patchSession commits title and/or autoRelaunch atomically in one request,
+  // then refetches the list so the sidebar reflects the change.
+  patchSession: (id: string, patch: { title?: string; autoRelaunch?: boolean }) => Promise<void>
   closeSession: (id: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
   // removeSession force-purges a running session (kill & remove) or plain-deletes
@@ -480,6 +484,12 @@ export const useStore = create<Store>((set, get) => ({
 
   renameSession: async (id, title) => {
     await apiRenameSession(id, title)
+    const sessions = await listSessions()
+    set({ sessions })
+  },
+
+  patchSession: async (id, patch) => {
+    await apiPatchSession(id, patch)
     const sessions = await listSessions()
     set({ sessions })
   },
