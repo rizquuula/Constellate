@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { openTerminalSocket, sendResize } from '../../api/ws'
 import { applyModifiers, specialKeySeq } from './keys'
 import type { KeyMods, SpecialKey } from './keys'
+import { attachTouchScroll } from './touchScroll'
 
 // Imperative handle returned by useTerminal, so out-of-tree controls (the touch
 // KeyBar) can drive the live terminal without prop-drilling the xterm instance.
@@ -216,6 +217,11 @@ export function useTerminal(
     termRef.current = term
     fitRef.current = fitAddon
 
+    // Bridge mobile vertical swipes to wheel events so full-screen TUIs (alt
+    // screen / mouse-tracking apps), where xterm's native touch scroll is dead,
+    // still scroll on touch devices.
+    const detachTouch = attachTouchScroll(term, container)
+
     const ws = openTerminalSocket(sessionId)
     wsRef.current = ws
 
@@ -257,6 +263,7 @@ export function useTerminal(
       observer.disconnect()
       dataSub.dispose()
       selectionSub.dispose()
+      detachTouch()
       ws.close()
       term.dispose()
       termRef.current = null
