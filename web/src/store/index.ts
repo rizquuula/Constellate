@@ -291,6 +291,12 @@ interface Store {
   // an already-closed one — the single destructive sidebar action.
   removeSession: (id: string) => Promise<void>
 
+  // ── session-settings modal ────────────────────────────────────────────────
+  // The id of the session whose settings modal is open, or null when closed.
+  settingsSessionId: string | null
+  openSessionSettings: (id: string) => void
+  closeSessionSettings: () => void
+
   // ── sidebar multi-select ──────────────────────────────────────────────────
   selectedSessionIds: Set<string>
   selectionAnchorId: string | null
@@ -532,6 +538,11 @@ export const useStore = create<Store>((set, get) => ({
       }
     })
   },
+
+  // ── session-settings modal ──────────────────────────────────────────────────
+  settingsSessionId: null,
+  openSessionSettings: (id) => set({ settingsSessionId: id }),
+  closeSessionSettings: () => set({ settingsSessionId: null }),
 
   // ── sidebar multi-select ────────────────────────────────────────────────────
   selectedSessionIds: new Set<string>(),
