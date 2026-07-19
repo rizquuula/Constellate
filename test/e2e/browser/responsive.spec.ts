@@ -166,6 +166,73 @@ test('header: kebab menu replaces inline actions at phone width', async ({ page 
   await expect(page.locator('.header-inline-action').first()).toBeHidden();
 });
 
+test('touch scroll: a vertical swipe advances a full-screen TUI (less alt screen)', async ({
+  page,
+  request,
+}) => {
+  const machineID = await onlineMachineId(request);
+  const title = `swipe-${Date.now()}`;
+  await createRunningSession(request, machineID, title);
+
+  await page.goto('/');
+  await attachSessionViaDrawer(page, title);
+
+  const xtermRows = page.locator('.xterm-rows');
+  await expect(xtermRows).toBeVisible({ timeout: 15_000 });
+
+  // Pipe 500 numbered lines into `less` so it enters the alternate screen — the
+  // buffer where xterm's native touch scroll is dead and our wheel bridge runs.
+  await page.locator('.xterm-screen').click();
+  await page.keyboard.type("printf '%s\\n' $(seq 1 500) | less");
+  await page.keyboard.press('Enter');
+
+  // less has painted its first page once early lines are on screen.
+  await expect(xtermRows).toContainText('1', { timeout: 10_000 });
+  await expect(xtermRows).toContainText('20', { timeout: 10_000 });
+
+  const before = (await xtermRows.innerText()).trim();
+
+  // Synthesize a single-finger upward swipe over the terminal. Finger up ⇒
+  // content scrolls down ⇒ less advances. Steps clear the 8px vertical slop.
+  const advanced = await page.evaluate(async () => {
+    const screen = document.querySelector('.xterm-screen') as HTMLElement | null;
+    if (!screen) return false;
+    const rect = screen.getBoundingClientRect();
+    const cx = Math.round(rect.left + rect.width / 2);
+    const startY = Math.round(rect.top + rect.height * 0.75);
+
+    const at = (id: number, x: number, y: number): Touch =>
+      new Touch({ identifier: id, target: screen, clientX: x, clientY: y });
+
+    const fire = (type: string, y: number): void => {
+      const t = at(1, cx, y);
+      screen.dispatchEvent(
+        new TouchEvent(type, {
+          touches: type === 'touchend' ? [] : [t],
+          targetTouches: type === 'touchend' ? [] : [t],
+          changedTouches: [t],
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    };
+
+    fire('touchstart', startY);
+    for (let step = 1; step <= 12; step++) {
+      fire('touchmove', startY - step * 20);
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    fire('touchend', startY - 12 * 20);
+    return true;
+  });
+  expect(advanced).toBeTruthy();
+
+  // The visible page changed ⇒ the swipe scrolled the alt-screen TUI.
+  await expect
+    .poll(async () => (await xtermRows.innerText()).trim(), { timeout: 5_000 })
+    .not.toBe(before);
+});
+
 test('session settings: tapping the gear opens the modal in the drawer', async ({ page, request }) => {
   const machineID = await onlineMachineId(request);
   const title = `msettings-${Date.now()}`;
