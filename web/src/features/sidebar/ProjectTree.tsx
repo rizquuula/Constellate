@@ -11,6 +11,7 @@ import { ActivityBadge } from '../activity/ActivityBadge'
 import type { SessionDragData } from '../terminal/dnd'
 import { machineKey, projectKey, ungroupedKey } from './collapse'
 import { SelectionBar } from './SelectionBar'
+import { SessionSettingsModal } from './SessionSettingsModal'
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
@@ -983,6 +984,7 @@ export function ProjectTree() {
         )}
       </div>
       <SelectionBar />
+      <SessionSettingsModal />
     </div>
   )
 }

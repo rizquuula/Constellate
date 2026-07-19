@@ -2234,6 +2234,11 @@ body {
   gap: 8px;
 }
 
+.modal-close-row {
+  display: flex;
+  gap: 8px;
+}
+
 .modal-danger-btn {
   align-self: flex-start;
   background: transparent;
