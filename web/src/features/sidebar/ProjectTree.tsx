@@ -126,6 +126,28 @@ function RestoreIcon() {
   )
 }
 
+// GearIcon (Feather "settings") marks the per-session settings button. Same
+// stroke style as the icons above; inherits `currentColor`.
+function GearIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  )
+}
+
 interface SessionRowProps {
   session: Session
   isTargetPane: boolean
@@ -133,19 +155,10 @@ interface SessionRowProps {
 }
 
 function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
-  const renameSession = useStore((s) => s.renameSession)
-  const removeSession = useStore((s) => s.removeSession)
-  const setAutoRelaunch = useStore((s) => s.setAutoRelaunch)
+  const openSessionSettings = useStore((s) => s.openSessionSettings)
   const toggleSessionSelection = useStore((s) => s.toggleSessionSelection)
   const rangeSelectTo = useStore((s) => s.rangeSelectTo)
   const isSelected = useStore((s) => s.selectedSessionIds.has(session.id))
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-  const [renameError, setRenameError] = useState<string | null>(null)
-  const [confirmAction, setConfirmAction] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
-  const [autoRelaunchError, setAutoRelaunchError] = useState<string | null>(null)
-  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isRunning = session.status === 'running'
 
   const windowOrdinal = useStore((s) => {
@@ -154,81 +167,6 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
     const idx = s.windows.findIndex((w) => w.id === hit.windowId)
     return idx === -1 ? null : idx + 1
   })
-
-  // Auto-cancel confirm after the pointer-aware timeout (4s fine, 8s coarse)
-  useEffect(() => {
-    if (confirmAction) {
-      confirmTimerRef.current = setTimeout(() => setConfirmAction(false), confirmTimeoutMs())
-    }
-    return () => {
-      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
-    }
-  }, [confirmAction])
-
-  const startEdit = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      setDraft(session.title ?? '')
-      setRenameError(null)
-      setEditing(true)
-    },
-    [session.title],
-  )
-
-  const commitEdit = useCallback(async () => {
-    if (!draft.trim()) {
-      setEditing(false)
-      return
-    }
-    try {
-      await renameSession(session.id, draft.trim())
-      setEditing(false)
-      setRenameError(null)
-    } catch (err) {
-      setRenameError(err instanceof Error ? err.message : 'Rename failed')
-      // keep editing open so user can retry
-    }
-  }, [draft, renameSession, session.id])
-
-  const handleActionClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    setConfirmAction(true)
-  }, [])
-
-  const handleConfirmAction = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation()
-      setConfirmAction(false)
-      setActionError(null)
-      try {
-        // Running → force-purge (kill & remove); closed → plain delete. The
-        // store's removeSession picks the right call from the live status.
-        await removeSession(session.id)
-      } catch (err) {
-        setActionError(err instanceof Error ? err.message : 'Remove failed')
-      }
-    },
-    [removeSession, session.id],
-  )
-
-  const handleCancelAction = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    setConfirmAction(false)
-    setActionError(null)
-  }, [])
-
-  const handleAutoRelaunchToggle = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      e.stopPropagation()
-      setAutoRelaunchError(null)
-      try {
-        await setAutoRelaunch(session.id, e.target.checked)
-      } catch (err) {
-        setAutoRelaunchError(err instanceof Error ? err.message : 'Toggle failed')
-      }
-    },
-    [setAutoRelaunch, session.id],
-  )
 
   const setSidebarOpen = useStore((s) => s.setSidebarOpen)
 
@@ -272,98 +210,20 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
     >
       <div className="session-item-main">
       <span className={`session-badge session-badge-${session.status}`}>{session.status}</span>
-      {editing ? (
-        <>
-          <input
-            className="session-rename-input"
-            aria-label="Session name"
-            value={draft}
-            autoFocus
-            enterKeyHint="done"
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => { setDraft(e.target.value); setRenameError(null) }}
-            onBlur={commitEdit}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Enter') commitEdit()
-              if (e.key === 'Escape') { setEditing(false); setRenameError(null) }
-            }}
-          />
-          {renameError && (
-            <span className="rename-error" role="alert" aria-live="assertive">{renameError}</span>
-          )}
-        </>
-      ) : (
-        <span className="session-label" title={label}>{label}</span>
-      )}
+      <span className="session-label" title={label}>{label}</span>
       {isRunning && <ActivityBadge activity={session.activity} compact />}
-      {actionError && !confirmAction && (
-        <span className="rename-error" role="alert" aria-live="assertive">{actionError}</span>
-      )}
-      {confirmAction ? (
-        <div className="session-confirm-close" onClick={(e) => e.stopPropagation()}>
-          <span className="session-confirm-label">Remove?</span>
-          <button
-            className="session-confirm-yes"
-            title="Confirm remove"
-            aria-label="Confirm remove session"
-            onClick={handleConfirmAction}
-          >
-            ✓
-          </button>
-          <button
-            className="session-confirm-no"
-            title="Cancel"
-            aria-label="Cancel remove"
-            onClick={handleCancelAction}
-          >
-            ✕
-          </button>
-        </div>
-      ) : (
-        <div className="session-actions" onClick={(e) => e.stopPropagation()}>
-          {isRunning && (
-            <label
-              className="session-relaunch-toggle"
-              title="Auto-relaunch after restart — Reopen this session automatically (same folder, fresh shell) after the agent or machine restarts. Running processes are not restored."
-              aria-label="Auto-relaunch after restart"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                type="checkbox"
-                className="session-relaunch-checkbox"
-                checked={session.autoRelaunch ?? false}
-                onChange={handleAutoRelaunchToggle}
-                aria-label="Auto-relaunch after restart"
-              />
-              <span className="session-relaunch-icon" aria-hidden="true">↺</span>
-            </label>
-          )}
-          {autoRelaunchError && (
-            <span className="rename-error" role="alert" aria-live="assertive">{autoRelaunchError}</span>
-          )}
-          {isRunning && (
-            <button
-              className="session-action-btn"
-              title="Rename"
-              aria-label="Rename session"
-              onClick={startEdit}
-            >
-              ✎
-            </button>
-          )}
-          <button
-            className="session-action-btn session-action-remove"
-            title={isRunning ? 'Kill & remove session' : 'Remove session'}
-            aria-label="Remove session"
-            onClick={handleActionClick}
-          >
-            <TrashIcon />
-          </button>
-        </div>
-      )}
+      <div className="session-actions" onClick={(e) => e.stopPropagation()}>
+        <button
+          className="session-action-btn"
+          title="Session settings"
+          aria-label={`Session settings for ${label}`}
+          onClick={(e) => { e.stopPropagation(); openSessionSettings(session.id) }}
+        >
+          <GearIcon />
+        </button>
       </div>
-      {!editing && isRunning && (windowOrdinal !== null || session.pwd) && (
+      </div>
+      {isRunning && (windowOrdinal !== null || session.pwd) && (
         <div className="session-item-meta">
           {windowOrdinal !== null && (() => {
             const c = windowColor(windowOrdinal)

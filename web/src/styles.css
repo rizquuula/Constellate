@@ -589,22 +589,6 @@ body {
   opacity: 0.6;
 }
 
-.session-rename-input {
-  flex: 1;
-  background: var(--surface-input);
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  padding: 1px 4px;
-}
-
-.session-rename-input:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent);
-}
-
 .session-actions {
   display: flex;
   gap: 2px;
@@ -660,58 +644,6 @@ body {
 .session-action-close:hover,
 .session-action-delete:hover {
   color: var(--danger-strong);
-}
-
-/* ── Auto-relaunch toggle ─────────────────────────────────────────────────── */
-
-/* Visually hidden checkbox; the ↺ icon serves as the visible affordance.
-   The label carries the tooltip/aria-label. */
-.session-relaunch-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  min-width: 24px;
-  min-height: 24px;
-  border-radius: var(--radius-sm);
-  padding: 0 4px;
-  position: relative;
-}
-
-.session-relaunch-toggle:hover {
-  background: var(--border-subtle);
-}
-
-.session-relaunch-toggle:focus-within {
-  box-shadow: 0 0 0 2px var(--accent);
-}
-
-.session-relaunch-checkbox {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-}
-
-.session-relaunch-icon {
-  font-size: var(--text-xs);
-  line-height: 1;
-  color: var(--text-faint);
-  user-select: none;
-}
-
-/* Checked state: icon turns amber to signal "on" */
-.session-relaunch-checkbox:checked + .session-relaunch-icon {
-  color: var(--accent);
-}
-
-.session-relaunch-toggle:hover .session-relaunch-icon {
-  color: var(--text-primary);
-}
-
-.session-relaunch-checkbox:checked + .session-relaunch-icon:hover {
-  color: var(--accent-text);
 }
 
 .session-badge {
@@ -3273,7 +3205,7 @@ body {
     display: inline-flex;
   }
 
-  .session-rename-input,
+  .modal-input,
   .new-project-input,
   .pane-title-input,
   .login-input,
