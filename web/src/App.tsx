@@ -150,6 +150,10 @@ export function App() {
     if (authState !== 'authed') return
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.shiftKey || !e.altKey || e.ctrlKey || e.metaKey) return
+      // A modal owns the keyboard while open. These shortcuts listen in the
+      // capture phase, so the dialog's stopPropagation can't block them — bail
+      // out here instead so panes stay untouched behind an open modal.
+      if (document.querySelector('[aria-modal="true"]')) return
       const state = useStore.getState()
       if (state.viewMode !== 'workspace') return
       const { splitPane, closePane, detachPane, reloadPane, addWindow, setActiveWindow } = state
@@ -268,6 +272,7 @@ export function App() {
             onClick={() => setViewMode('workspace')}
             aria-pressed={viewMode === 'workspace'}
             title="Workspace (Alt/⌘+1)"
+            data-modal-fallback-focus
           >
             Workspace
             <kbd className="view-toggle-kbd" aria-hidden="true">1</kbd>

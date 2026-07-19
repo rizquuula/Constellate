@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import type { Session } from '../../types'
 import { Modal } from '../../components/Modal'
@@ -49,6 +49,23 @@ function SessionSettingsBody({ session, onClose }: BodyProps) {
   const [confirmClose, setConfirmClose] = useState(false)
   const [closing, setClosing] = useState(false)
 
+  // Keep focus inside the dialog across the two-step confirm: arming/disarming
+  // unmounts the button that held focus, which would otherwise drop it to
+  // <body> and defeat the Tab trap. On arm, land on the (safe) Cancel button;
+  // on disarm, return to the "Close session…" button. armedOnce skips the
+  // initial mount so we never steal focus from the Name field.
+  const confirmCancelRef = useRef<HTMLButtonElement>(null)
+  const closeSessionBtnRef = useRef<HTMLButtonElement>(null)
+  const armedOnce = useRef(false)
+  useEffect(() => {
+    if (confirmClose) {
+      armedOnce.current = true
+      confirmCancelRef.current?.focus()
+    } else if (armedOnce.current) {
+      closeSessionBtnRef.current?.focus()
+    }
+  }, [confirmClose])
+
   const handleSave = async () => {
     const result = computeSaveOps(session, { name, autoRelaunch })
     if (!result.ok) {
@@ -92,7 +109,7 @@ function SessionSettingsBody({ session, onClose }: BodyProps) {
             <input
               className="modal-input"
               value={name}
-              autoFocus
+              data-autofocus
               enterKeyHint="done"
               onChange={(e) => { setName(e.target.value); setNameError(null) }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSave() }}
@@ -125,6 +142,7 @@ function SessionSettingsBody({ session, onClose }: BodyProps) {
               {closing ? '…' : 'Confirm close'}
             </button>
             <button
+              ref={confirmCancelRef}
               type="button"
               className="btn-cancel"
               onClick={() => setConfirmClose(false)}
@@ -135,6 +153,7 @@ function SessionSettingsBody({ session, onClose }: BodyProps) {
           </>
         ) : (
           <button
+            ref={closeSessionBtnRef}
             type="button"
             className="modal-danger-btn"
             onClick={() => { setError(null); setConfirmClose(true) }}
@@ -144,16 +163,18 @@ function SessionSettingsBody({ session, onClose }: BodyProps) {
         )}
       </div>
 
-      {isRunning && (
-        <div className="modal-footer">
-          <button type="button" className="btn-cancel" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
+      {/* Cancel is always available so a non-running session's modal has a
+          visible non-destructive exit; Save is only meaningful while running. */}
+      <div className="modal-footer">
+        <button type="button" className="btn-cancel" onClick={onClose} disabled={saving}>
+          Cancel
+        </button>
+        {isRunning && (
           <button type="button" className="btn-shell" onClick={handleSave} disabled={saving}>
             Save
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </>
   )
 }

@@ -172,6 +172,10 @@ function SessionRow({ session, isTargetPane, onAssign }: SessionRowProps) {
 
   const handleRowKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Only the row div itself activates assign. Buttons inside the row (the
+      // gear) keep their native Enter/Space activation — swallowing it here
+      // would trigger assign instead of opening settings.
+      if (e.target !== e.currentTarget) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         if (isRunning) onAssign()

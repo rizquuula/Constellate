@@ -16,8 +16,15 @@ const FOCUSABLE =
  * Modal is a reusable dialog primitive. It portals to <body> so it escapes the
  * sidebar's overflow/transform stacking context (the sidebar is a fixed,
  * transform-translated drawer at ≤900px). It traps focus, restores it on close,
- * locks body scroll, closes on Escape and backdrop click, and keeps its own
- * keyboard handling from leaking to the app's global shortcuts.
+ * and locks body scroll, and closes on Escape and backdrop click.
+ *
+ * Background isolation is enforced structurally: while open, the app root is
+ * marked `inert` so Tab and assistive tech cannot reach content behind the
+ * dialog. The portal lives in <body>, outside the inert root, so the modal
+ * itself stays interactive. stopPropagation on the card's own key handler is a
+ * best-effort layer only — App's Shift+Alt pane shortcuts listen in the capture
+ * phase on window, so they cannot be stopped that way and instead self-suppress
+ * while a dialog is open (see App.tsx).
  */
 export function Modal({ title, onClose, children }: ModalProps) {
   const titleId = useId()
@@ -68,14 +75,31 @@ export function Modal({ title, onClose, children }: ModalProps) {
     [onClose],
   )
 
-  // Move focus into the modal on mount; restore it to the prior element on close.
+  // Make the background inert and move focus into the modal on mount; on close,
+  // lift inert first (an inert ancestor rejects focus) and restore focus. The
+  // prior element may have been unmounted while the modal was open (e.g. its
+  // sidebar row closed), so guard with isConnected and otherwise fall back to a
+  // stable landmark rather than dropping focus to <body>.
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null
+    const appRoot = document.getElementById('root')
+    const hadInert = appRoot?.hasAttribute('inert') ?? false
+    appRoot?.setAttribute('inert', '')
+
+    // Prefer the field flagged for initial focus; otherwise focus the card
+    // itself (tabIndex=-1) rather than auto-focusing the first control, which
+    // could be a destructive button.
     const card = cardRef.current
-    const firstFocusable = card?.querySelector<HTMLElement>(FOCUSABLE)
-    ;(firstFocusable ?? card)?.focus()
+    const autofocusTarget = card?.querySelector<HTMLElement>('[data-autofocus]')
+    ;(autofocusTarget ?? card)?.focus()
+
     return () => {
-      previouslyFocused?.focus?.()
+      if (!hadInert) appRoot?.removeAttribute('inert')
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus?.()
+        return
+      }
+      document.querySelector<HTMLElement>('[data-modal-fallback-focus]')?.focus()
     }
   }, [])
 
