@@ -202,3 +202,23 @@ test('header: kebab menu replaces inline actions at phone width', async ({ page 
   await expect(page.locator('.header-menu-btn')).toBeVisible();
   await expect(page.locator('.header-inline-action').first()).toBeHidden();
 });
+
+test('session settings: tapping the gear opens the modal in the drawer', async ({ page, request }) => {
+  const machineID = await onlineMachineId(request);
+  const title = `msettings-${Date.now()}`;
+  await createRunningSession(request, machineID, title);
+
+  await page.goto('/');
+
+  await expect(page.locator('.menu-btn')).toBeVisible();
+  await page.locator('.menu-btn').click();
+  await expect(page.locator('.layout.drawer-open')).toBeVisible();
+
+  const row = page.locator('.session-item.session-draggable').filter({
+    has: page.locator('.session-label', { hasText: title }),
+  });
+  await expect(row).toBeVisible({ timeout: 10_000 });
+
+  await row.getByRole('button', { name: /Session settings/ }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
