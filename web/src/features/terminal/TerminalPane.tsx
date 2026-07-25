@@ -45,10 +45,22 @@ function TerminalPaneImpl({
   const [titleDraft, setTitleDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
 
-  const term = useTerminal(containerRef, sessionId, reloadKey)
-  const coarsePointer = useCoarsePointer()
   const sessionEnded = session !== undefined && session.status !== 'running'
+  // Gate the socket on a live session: an exited/lost PTY can never be attached
+  // again, and letting the reconnect loop keep trying would hammer the hub.
+  const { handle: term, conn, retryNow } = useTerminal(
+    containerRef,
+    sessionId,
+    reloadKey,
+    sessionId != null && !sessionEnded,
+  )
+  const coarsePointer = useCoarsePointer()
   const showKeyBar = coarsePointer && focused && sessionId != null && !sessionEnded
+
+  // The ended overlay takes precedence — never stack two badges on one pane.
+  const showConnBadge = !sessionEnded
+    && sessionId != null
+    && (conn.status === 'reconnecting' || conn.status === 'stopped')
 
   // Shell name shown in full (no cropping); fall back to a short id only for
   // legacy sessions that predate server-generated names. Prefix with the machine
@@ -243,6 +255,24 @@ function TerminalPaneImpl({
         {sessionEnded && session && (
           <div className="pane-ended">
             Session {session.status}
+          </div>
+        )}
+        {showConnBadge && (
+          <div className="pane-reconnecting" role="status" aria-live="polite">
+            {conn.status === 'reconnecting' ? (
+              <span>Reconnecting… · attempt {conn.attempt}</span>
+            ) : (
+              <>
+                <span>Disconnected</span>
+                <button
+                  type="button"
+                  className="pane-reconnect-retry"
+                  onClick={retryNow}
+                >
+                  Retry
+                </button>
+              </>
+            )}
           </div>
         )}
         <div

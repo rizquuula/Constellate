@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { openTerminalSocket, sendResize } from '../../api/ws'
+import { openTerminalSocket, parseTermControl, sendResize } from '../../api/ws'
+import {
+  backoffDelay,
+  isStable,
+  isStale,
+  shouldRetry,
+  subscribeWake,
+  MAX_UNSTABLE_STREAK,
+  WAKE_STAGGER_MS,
+  WATCHDOG_TICK_MS,
+} from '../../api/reconnect'
 import { applyModifiers, specialKeySeq } from './keys'
 import type { KeyMods, SpecialKey } from './keys'
 import { attachTouchScroll } from './touchScroll'
@@ -25,6 +35,29 @@ export interface TerminalHandle {
   getFontSize(): number
   refit(): void
 }
+
+// Connection state of the pane's terminal socket, surfaced so the pane can show
+// a reconnecting/disconnected badge. 'connecting' covers the very first attach
+// (no badge — a brief blank pane is the expected first paint); 'reconnecting'
+// and 'stopped' are the states a user needs told about.
+export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'stopped'
+
+export interface ConnState {
+  status: ConnStatus
+  /** Consecutive failed attempts; 0 while connecting or healthy. */
+  attempt: number
+}
+
+export interface TerminalSession {
+  handle: TerminalHandle
+  conn: ConnState
+  /** Reconnect immediately, cancelling any pending backoff. Works from 'stopped'. */
+  retryNow(): void
+}
+
+// Stable identity so re-running the connection effect in its disabled branch
+// doesn't churn React state.
+const CONN_IDLE: ConnState = { status: 'connecting', attempt: 0 }
 
 const FONT_SIZE_KEY = 'constellate.fontSize'
 const FONT_SIZE_MIN = 8
@@ -54,19 +87,31 @@ function writeFontSize(px: number): void {
 }
 
 // Attaches an xterm.js terminal to `containerRef` for the given `sessionId` and
-// returns a stable TerminalHandle for imperative control.
+// returns a stable TerminalHandle for imperative control, plus live connection
+// state and a manual retry.
 // Each call is fully independent — multiple panes can call this hook concurrently.
 // Tears down its xterm instance and WebSocket on unmount or when sessionId changes.
 // Bumping `reloadKey` forces a full teardown + reattach (fresh socket, scrollback
 // replayed on attach) — used by the pane's reload button to recover a wedged term.
+// `enabled` gates the socket only: pass false for a session that has exited or
+// been lost, otherwise the reconnect loop would hammer the hub forever for a PTY
+// that is never coming back.
 export function useTerminal(
   containerRef: React.RefObject<HTMLDivElement | null>,
   sessionId: string | null,
   reloadKey = 0,
-): TerminalHandle {
+  enabled = true,
+): TerminalSession {
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+
+  const [conn, setConn] = useState<ConnState>(CONN_IDLE)
+
+  // The connection effect owns the live retry closure; the returned callback is
+  // a stable indirection into whichever effect instance is current.
+  const requestRetryRef = useRef<() => void>(() => {})
+  const retryNow = useCallback(() => { requestRetryRef.current() }, [])
 
   // One-shot modifier state lives outside the effect so it survives a reloadKey
   // teardown. Subscribers (the KeyBar) are notified on every change.
@@ -171,6 +216,10 @@ export function useTerminal(
     }
   }
 
+  // ── Effect A: terminal lifecycle ──────────────────────────────────────────
+  // Owns the xterm instance and everything bound to the DOM node. Deliberately
+  // captures no socket — anything that needs to send reads wsRef.current — so a
+  // reconnect can swap the socket underneath a terminal that keeps its scrollback.
   useEffect(() => {
     if (!sessionId || !containerRef.current) return
 
@@ -222,19 +271,6 @@ export function useTerminal(
     // still scroll on touch devices.
     const detachTouch = attachTouchScroll(term, container)
 
-    const ws = openTerminalSocket(sessionId)
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      sendResize(ws, term.cols, term.rows)
-    }
-
-    ws.onmessage = (ev: MessageEvent) => {
-      if (ev.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(ev.data))
-      }
-    }
-
     // Fold any armed one-shot modifiers into the typed data, then consume them.
     // With no modifier armed applyModifiers is the identity and clearMods is a
     // no-op, so this path stays byte-identical to a plain passthrough.
@@ -251,9 +287,8 @@ export function useTerminal(
       rafId = requestAnimationFrame(() => {
         rafId = null
         fitAddon.fit()
-        if (ws.readyState === WebSocket.OPEN) {
-          sendResize(ws, term.cols, term.rows)
-        }
+        const ws = wsRef.current
+        if (ws) sendResize(ws, term.cols, term.rows)
       })
     })
     observer.observe(container)
@@ -264,14 +299,171 @@ export function useTerminal(
       dataSub.dispose()
       selectionSub.dispose()
       detachTouch()
-      ws.close()
       term.dispose()
       termRef.current = null
-      wsRef.current = null
       fitRef.current = null
       clearMods()
     }
   }, [sessionId, containerRef, reloadKey, sendBytes, clearMods, notifySelection])
 
-  return handleRef.current!
+  // ── Effect B: connection + reconnect state machine ────────────────────────
+  // Owns the WebSocket. Runs after Effect A in the same commit, so termRef holds
+  // the freshly created terminal by the time the first socket opens.
+  useEffect(() => {
+    if (!enabled || !sessionId) {
+      setConn(CONN_IDLE)
+      return
+    }
+
+    let disposed = false
+    let socketsOpened = 0
+    let unstableStreak = 0
+    let status: ConnStatus = 'connecting'
+    let retryTimer: number | null = null
+    let wakeTimer: number | null = null
+    let watchdog: number | null = null
+    let lastRxMs = Date.now()
+
+    const setStatus = (next: ConnStatus, attempt: number) => {
+      status = next
+      setConn({ status: next, attempt })
+    }
+
+    const clearWatchdog = () => {
+      if (watchdog === null) return
+      window.clearInterval(watchdog)
+      watchdog = null
+    }
+
+    const clearRetryTimer = () => {
+      if (retryTimer === null) return
+      window.clearTimeout(retryTimer)
+      retryTimer = null
+    }
+
+    // Drop the current socket without letting its onclose schedule a competing
+    // reconnect — used on teardown and before a manually forced reconnect.
+    const closeActive = () => {
+      clearWatchdog()
+      const ws = wsRef.current
+      wsRef.current = null
+      if (!ws) return
+      ws.onopen = null
+      ws.onmessage = null
+      ws.onclose = null
+      ws.onerror = null
+      ws.close()
+    }
+
+    const connect = () => {
+      clearRetryTimer()
+      closeActive()
+
+      // The agent replays its whole scrollback ring on every attach. On the first
+      // attach that lands in a fresh terminal, which is exactly right; on a
+      // reconnect the pre-blip screen is still there and the replay would double
+      // it. reset() (not clear(): modes and the alt screen must go too) right
+      // before the first replayed byte fixes that.
+      const isReconnect = socketsOpened > 0
+      socketsOpened++
+
+      const ws = openTerminalSocket(sessionId)
+      wsRef.current = ws
+      let openedAtMs: number | null = null
+      let pendingReset = false
+
+      // Older hubs never send 'hb', so the watchdog stays disarmed for them and
+      // behavior is exactly as before. Once a hub proves it heartbeats, silence
+      // past the staleness threshold means a zombie socket — common on mobile
+      // sleep and NAT timeouts, where no close event ever arrives — so close it
+      // and let the normal onclose path reconnect.
+      const armWatchdog = () => {
+        if (watchdog !== null) return
+        watchdog = window.setInterval(() => {
+          if (isStale(lastRxMs, Date.now())) ws.close()
+        }, WATCHDOG_TICK_MS)
+      }
+
+      ws.onopen = () => {
+        openedAtMs = Date.now()
+        lastRxMs = openedAtMs
+        pendingReset = isReconnect
+        const term = termRef.current
+        if (term) sendResize(ws, term.cols, term.rows)
+        setStatus('open', 0)
+      }
+
+      ws.onmessage = (ev: MessageEvent) => {
+        lastRxMs = Date.now()
+        if (ev.data instanceof ArrayBuffer) {
+          if (pendingReset) {
+            termRef.current?.reset()
+            pendingReset = false
+          }
+          termRef.current?.write(new Uint8Array(ev.data))
+          return
+        }
+        // Heartbeats only prove liveness; arrival is timestamped locally rather
+        // than from ctrl.ts, since the hub clock may skew from the browser's.
+        if (parseTermControl(ev.data)?.type === 'hb') armWatchdog()
+      }
+
+      ws.onclose = (ev: CloseEvent) => {
+        clearWatchdog()
+        if (disposed) return
+        if (wsRef.current === ws) wsRef.current = null
+
+        // Only short-lived connections count toward giving up: a socket that ran
+        // for minutes before a blip earns a clean slate.
+        if (isStable(openedAtMs ?? Date.now(), Date.now())) unstableStreak = 0
+        else unstableStreak++
+
+        if (!shouldRetry(ev.code) || unstableStreak >= MAX_UNSTABLE_STREAK) {
+          setStatus('stopped', unstableStreak)
+          return
+        }
+        setStatus('reconnecting', unstableStreak)
+        retryTimer = window.setTimeout(connect, backoffDelay(unstableStreak, Math.random))
+      }
+
+      // onclose always follows onerror, so the retry decision lives there alone.
+      ws.onerror = () => {}
+    }
+
+    const requestRetry = () => {
+      if (disposed) return
+      clearRetryTimer()
+      unstableStreak = 0
+      setStatus('connecting', 0)
+      connect()
+    }
+    requestRetryRef.current = requestRetry
+
+    // Network return / tab refocus are strong hints the outage is over, and a
+    // backgrounded tab may have had its backoff timer frozen for the duration.
+    // Stagger the retries so a workspace full of panes doesn't hit the hub with
+    // simultaneous scrollback replays.
+    const unsubscribeWake = subscribeWake(() => {
+      if (status !== 'reconnecting' && status !== 'stopped') return
+      if (wakeTimer !== null) return
+      wakeTimer = window.setTimeout(() => {
+        wakeTimer = null
+        requestRetry()
+      }, Math.random() * WAKE_STAGGER_MS)
+    })
+
+    setStatus('connecting', 0)
+    connect()
+
+    return () => {
+      disposed = true
+      unsubscribeWake()
+      clearRetryTimer()
+      if (wakeTimer !== null) window.clearTimeout(wakeTimer)
+      closeActive()
+      requestRetryRef.current = () => {}
+    }
+  }, [sessionId, reloadKey, enabled])
+
+  return { handle: handleRef.current!, conn, retryNow }
 }
