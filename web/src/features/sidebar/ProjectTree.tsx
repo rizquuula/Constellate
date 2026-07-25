@@ -562,8 +562,10 @@ function MachineGroup({ machine, revoked }: MachineGroupProps) {
     setAddingProject((v) => !v)
   }, [collapsed, toggleCollapsed, machine.id])
 
-  // Auto-cancel either pending machine confirmation after 4 seconds, matching
-  // the session-row / project-header pattern.
+  // Auto-cancel either pending machine confirmation after confirmTimeoutMs()
+  // — 4 s with a mouse, 8 s on a coarse pointer, since a thumb needs longer to
+  // travel to the confirm button. Matches the session-row / project-header
+  // pattern.
   useEffect(() => {
     if (confirmRevoke || confirmDelete) {
       confirmTimerRef.current = setTimeout(() => {
