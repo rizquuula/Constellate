@@ -137,10 +137,11 @@ sequenceDiagram
     SH->>SH: instanceID = id.New() once at startup
     CX->>SH: HostHello (local UDS handshake)
     SH-->>CX: HostInfo{instanceID, sessions}
+    Note over HUB: on the earlier link drop:<br/>MarkMachineDisconnected → running becomes disconnected
     CX->>HUB: Hello{machineID, instanceID, ...}
     HUB->>HUB: registry.Register compares<br/>prior.InstanceID vs incoming
     alt same instanceID (connect bounced, host alive)
-        HUB->>HUB: restarted = false → sessions stay running
+        HUB->>HUB: restarted = false → RestoreMachineSessions<br/>disconnected returns to running
     else different instanceID (host died / rebooted)
         HUB->>HUB: restarted = true → ReconcileMachineRestart
     end
@@ -152,9 +153,17 @@ The comparison is exactly three conditions in `registry.UseCase.Register`
 still-running session-host, a connect-only restart reports the *same* id → `restarted=false` →
 nothing is marked lost. This is the entire payoff of the [session-host / connect split](03-agent-and-sessions.md).
 
+The *drop* is handled symmetrically, in the deferred teardown of the same control handler
+(`wsagent/inbound.go`): `agentlink.Registry.RemoveIf(machineID, conn)` — conditional, so a reconnect
+that has already installed a newer conn is not torn down by the loser of the race — followed by
+`MarkMachineDisconnected`, which parks that machine's `running` sessions in `disconnected`. So the
+pair is: link dies → `disconnected`; same `instanceID` returns → back to `running`; different
+`instanceID` returns → `lost` or relaunched ([05 · Data model](05-data-model.md#the-session-lifecycle)).
+
 `ReconcileMachineRestart` (`internal/hub/app/sessions/usecase.go:147-179`) then either revives
 `auto_relaunch=1` sessions (re-`OpenSession` with `revive=true`, same id, scrollback preserved) or
-sweeps the rest to `lost` via `MarkRunningLost`. It runs in a **new goroutine** from
+sweeps the rest to `lost` via `MarkRunningLost` — whose query matches `status IN
+('running','disconnected')`, so a session that was already parked is still reconciled. It runs in a **new goroutine** from
 `wsagent/inbound.go` deliberately — `OpenSession` blocks on the same control read-loop that would
 resolve `SessionOpened`, so a synchronous call would deadlock.
 

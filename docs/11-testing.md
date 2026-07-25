@@ -38,6 +38,25 @@ SQL adapter tested against a mocked `*sql.DB` has tested nothing. Mock only port
 
 ---
 
+## The test matrix
+
+| Tier | Command | Covers | Files |
+|---|---|---|---|
+| Go unit | `go test ./...` (part of `make test`) | domain + use-case logic, hand-written fakes | co-located `internal/**/*_test.go` |
+| Go integration / in-proc E2E | `make test` | real SQLite, real WS via `httptest.Server`, in-process hub+agent | `test/integration/*.go` — `enroll_test.go`, `terminal_test.go`, `terminal_keepalive_test.go`, `overview_test.go`, `projects_test.go`, `topology_test.go` |
+| Frontend unit | `make test-web` → `cd web && npm run test:run` (vitest) | the pure modules: pane/window trees, store actions, reconnect policy, keypad layout, key sequences, touch scroll, sidebar ordering | `web/src/**/*.test.ts` (13 files) |
+| E2E desktop | `make test-e2e` → `./test/e2e/run.sh` → `npx playwright test`, `chromium` project | real binaries, real loopback WSS, real Chromium | `terminal`, `session-settings`, `reconnect`, `agent-blip` specs + `helpers.ts` + `auth.setup.ts` |
+| E2E mobile | same run, `mobile` project (`devices['Pixel 7']`, reports `isMobile`+`hasTouch` so Chromium exposes `pointer: coarse`) | phone drawer, MobilePane, keypad, touch scroll, PTY geometry | `responsive.spec.ts` only |
+| Docker topology | `make test-docker` → `./test/docker/run.sh` | hub + 2 real agent containers, NAT-like bridge net, kill/restart, `instanceID` stability across connect-only restarts | `test/docker/*` |
+| Lint | `make lint` | golangci-lint v2 (pinned to `v2.12.2`, see `.github/workflows/ci.yaml`) | repo-wide |
+| CI cheap | `.github/workflows/ci.yaml` on push/PR | build/vet/lint/`go test -race`, `tsc --noEmit`, `vite build` | — |
+| CI heavy | `.github/workflows/e2e.yaml`, `workflow_dispatch` only | `browser-e2e` job → `make test-e2e`; `docker-topology` job → `make test-docker` | — |
+
+`test/e2e/run.sh` invokes `npx playwright test` unfiltered, so a plain `make test-e2e` runs **both**
+the `chromium` and `mobile` projects; scope to just one with `npx playwright test --project=mobile`.
+
+---
+
 ## In-process integration suite (`test/integration/`)
 
 The load-bearing acceptance tests — real SQLite, real WS servers, agent/host wired in-process:
@@ -45,7 +64,8 @@ The load-bearing acceptance tests — real SQLite, real WS servers, agent/host w
 | File | Key tests | Asserts |
 |------|-----------|---------|
 | `enroll_test.go` | `TestEnrollAndConnect`, `TestRevokeBlocksDial` | full mint→enroll→authenticate→dial→online; a revoked machine can't dial |
-| `terminal_test.go` | `TestTerminalLifecycle`, `TestSessionLostOnAgentRestart`, `TestSessionPwdFollowsCd` | create→attach→type→read→resize→detach→re-attach→close; same machineID + **different instanceID** ⇒ running sessions `lost`; live `pwd` tracks a real `cd` |
+| `terminal_test.go` | `TestTerminalLifecycle`, `TestSessionLostOnAgentRestart`, `TestSessionDisconnectedThenRestored`, `TestSessionPwdFollowsCd` | create→attach→type→read→resize→detach→re-attach→close; same machineID + **different instanceID** ⇒ running sessions `lost`; a hub-side link blip flips a session `running → disconnected → running`; live `pwd` tracks a real `cd` |
+| `terminal_keepalive_test.go` | `TestTerminalKeepaliveHeartbeat` | the `/ws/term` `{"type":"hb","ts":…}` keepalive frame ([04 · Wire protocol](04-wire-protocol.md)) keeps flowing alongside live PTY traffic |
 | `overview_test.go` | `TestOverviewSnapshotPipeline` | agent produces snapshots → hub ingests/fans out → subscriber receives the expected text/color |
 | `projects_test.go` | `TestProjectsLifecycle` | REST lifecycle: create → list → duplicate `(machineID,path)` ⇒ 409 → PATCH missing session ⇒ 404 |
 | `topology_test.go` | `TestDialHomeTopology` | dial-home / online→offline→online wiring |
@@ -71,12 +91,52 @@ The load-bearing acceptance tests — real SQLite, real WS servers, agent/host w
 
 `run.sh` builds real binaries, starts `constellate-hub serve` + one real `constellate-agent connect`
 (temp DB + id/cred), bootstraps an operator (`operator add`, captures the TOTP secret), mints a token,
-waits for `agent online`, then runs Playwright. `playwright.config.ts` has a `setup` project
-(`browser/auth.setup.ts` logs in via TOTP, saves `storageState`) and a `chromium` project that reuses
-it — nothing is mocked; real DB, real WS terminal (`browser/terminal.spec.ts`).
+waits for `agent online`, then runs `npx playwright test` — nothing is mocked; real DB, real WS
+terminal.
 
-Frontend units run separately: `make test-web` → `cd web && npm run test:run` (vitest), covering
-`paneTree`, `dnd`, `pwd`, `collapse`, and `paneActions`.
+`playwright.config.ts` now defines **three** projects:
+
+| Project | Emulation | Scope |
+|---|---|---|
+| `setup` | — | `testMatch: /auth\.setup\.ts/` — logs in via TOTP, saves `storageState` to `playwright/.auth/operator.json` |
+| `chromium` | `devices['Desktop Chrome']` | `testIgnore: /responsive\.spec\.ts/` — every desktop spec except the mobile-only one |
+| `mobile` | `devices['Pixel 7']` (reports `isMobile` + `hasTouch`, so Chromium exposes `pointer: coarse`) | `testMatch: /responsive\.spec\.ts/` — only that spec |
+
+Both `chromium` and `mobile` depend on `setup` and reuse its `storageState`. `make test-e2e` runs
+`npx playwright test` unfiltered, so it exercises both projects; scope to one with
+`npx playwright test --project=mobile`.
+
+`test/e2e/browser/` (specs plus shared fixtures):
+
+| File | Project | Covers |
+|---|---|---|
+| `helpers.ts` | — (shared) | `onlineMachineId` polls `/api/machines` for the `e2e-box` agent coming online; `createRunningSession` seeds a live PTY via `POST /api/sessions`. Both are imported by the specs below rather than duplicated. |
+| `auth.setup.ts` | `setup` | TOTP login → `storageState` |
+| `terminal.spec.ts` | `chromium` | baseline live-terminal round-trip |
+| `session-settings.spec.ts` | `chromium` | gear button on a sidebar row → settings modal → rename via the Name field + Save → sidebar reflects the new title → close the session via the two-step confirm |
+| `reconnect.spec.ts` | `chromium` | pane self-heals after a raw WebSocket kill. Chromium's `context.setOffline()` does not sever an already-established socket, so the spec shims the `WebSocket` constructor to grab a handle to the live `/ws/term` socket and `.close()` it directly, then keeps `setOffline(true)` on so retries fail until it flips back. Asserts the `.pane-reconnecting` badge shows, the `online` listener reattaches once network returns, and scrollback replays **exactly once** (not doubled) |
+| `agent-blip.spec.ts` | `chromium` | survives a hub↔agent link blip rather than a browser-side outage — intercepts the `/api/sessions` poll to flip this session's status `running → disconnected → running`, asserting the `.pane-ended` "Session disconnected" overlay shows then clears, and scrollback replays exactly once |
+| `responsive.spec.ts` | `mobile` | largest spec: phone drawer sidebar, `MobilePane` leaf switcher, the in-app on-screen `Keypad` (driven via a `tapKeys(keypad, ids)` helper that taps keys in order by `data-key-id`), touch-swipe scroll on alt-screen TUIs, and PTY geometry via a `ptyGeometry(page, marker)` helper (reads `stty size` in-shell) staying stable across keypad layer switches — the interesting assertion is that a layer switch must never ResizeObserver-resize the PTY |
+
+`reconnect.spec.ts` and `agent-blip.spec.ts` — together with `terminal_keepalive_test.go` above —
+are precisely what tests the `/ws/term` keepalive + close-code contract documented in
+[04 · Wire protocol](04-wire-protocol.md): the `{"type":"hb","ts":…}` frame, and close codes `4404`
+(not found) / `4410` (session ended) as terminal vs. `4503` (agent offline) and others as retryable.
+
+Frontend units run separately: `make test-web` → `cd web && npm run test:run` (vitest), 13 files
+under `web/src/**/*.test.ts`:
+
+| Area | Files |
+|---|---|
+| Workspace model | `terminal/paneTree`, `terminal/windowList`, `store/paneActions`, `terminal/dnd` |
+| Connection policy | `api/reconnect` |
+| Touch input | `terminal/keypadLayout`, `terminal/keys`, `terminal/inputMode`, `terminal/touchScroll` |
+| Sidebar | `sidebar/order`, `sidebar/collapse`, `sidebar/sessionSettings` |
+| Terminal chrome | `terminal/pwd` |
+
+That every one of these is a **pure module** is the point, not an accident: the reconnect state
+machine, the keypad layout, and the pane tree were each written as DOM-free functions specifically so
+they could be tested this way instead of through a browser.
 
 ---
 

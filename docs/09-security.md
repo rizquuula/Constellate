@@ -45,6 +45,34 @@ sequenceDiagram
   `enroll.Authenticate` rejects any machine with a non-NULL `revoked_at` (`ErrRevoked` → 403).
   `constellate-agent reset` wipes the local id/cred.
 
+### Retiring a machine: revoke → un-revoke → delete
+
+Revocation is no longer CLI-only — all three transitions are REST endpoints
+(`httpapi/machines.go`) and are wired into the sidebar UI.
+
+```mermaid
+stateDiagram-v2
+    enrolled --> revoked: POST /api/machines/ID/revoke
+    revoked --> enrolled: POST /api/machines/ID/unrevoke
+    revoked --> gone: DELETE /api/machines/ID
+    enrolled --> enrolled: DELETE refused · 409 ErrNotRevoked
+```
+
+| Transition | Effect | Reversible? | Audit action |
+|---|---|---|---|
+| **revoke** | Sets `revoked_at`. Dial-home fails; the row, its sessions and its history all survive | yes | `revoke` |
+| **unrevoke** | `ClearRevoked` nulls `revoked_at`; the machine's **existing keypair works again** — no re-enrollment | yes | `unrevoke` |
+| **delete** | One transaction drops `sessions` → `projects` → `machine_credentials` → `machines` | **no** | `machine_delete` |
+
+Two properties are worth being deliberate about:
+
+> ### ⚠️ Delete demands a prior revoke — and un-revoke re-arms the old key
+> `enroll.Delete` refuses with `ErrNotRevoked` (**409**) unless `revoked_at` is already set, so an
+> irreversible cascade always takes two operator actions. But the mirror image is that **un-revoke
+> restores trust to the key that was already on the machine** — nothing is rotated. If you revoked a
+> machine because you believed its private key leaked, un-revoking it re-admits the attacker. In that
+> case: delete it, run `constellate-agent reset` on the box, and enroll it fresh with a new token.
+
 ---
 
 ## Operator authentication — TOTP + recovery + passkeys
@@ -117,7 +145,9 @@ behind a TLS-terminating Caddy and is never directly internet-reachable.
 
 Security-relevant actions are written through the `AuditSink` consumer port from the `attach`,
 `sessions`, `enroll`, and `auth` use cases — never directly from a handler. Actions:
-`login`, `enroll`, `attach`, `open`, `close`, `delete`, `revoke`, `relaunch` (`domain/audit/event.go`).
+`login`, `enroll`, `attach`, `open`, `close`, `delete`, `revoke`, `relaunch`, `unrevoke`,
+`machine_delete` (`domain/audit/event.go`). A force-delete is recorded as `delete` with
+`detail = "force"`, so the destructive variant stays distinguishable in the feed.
 The dashboard surfaces the 20 most recent. Schema in [05 · Data model](05-data-model.md#the-audit-log).
 
 There is **no dev token** anywhere — it was removed fleet-wide; tests authenticate via real enrollment

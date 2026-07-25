@@ -125,7 +125,8 @@ Rationale for the two-unit split — session survival across restarts — is
 
 Two axes, deliberately separate:
 
-- **Per-binary semver** — `cmd/hub/VERSION` (`0.1.7`) and `cmd/agent/VERSION` (`0.1.5`) bump
+- **Per-binary semver** — `cmd/hub/VERSION` (`0.1.19` at the time of writing) and `cmd/agent/VERSION`
+  (`0.1.5`) bump
   independently; the Makefile bakes each into its binary via `-ldflags -X …/version.Version=…`.
 - **Wire protocol** — `transport.ProtocolVersion` (`6`) is the real compatibility gate, negotiated in
   `Hello` ([04 · Wire protocol](04-wire-protocol.md)). Interop depends only on the protocol window,
@@ -137,6 +138,45 @@ come from the two `VERSION` files at build time. Release builds: cross-compiled 
 (`linux/darwin × amd64/arm64`, `CGO_ENABLED=0`) + `SHA256SUMS` + `update.sh` as GitHub Release assets,
 plus multi-arch GHCR images (`ghcr.io/rizquuula/constellate-hub`, `…-agent`). **Run `make lint`
 (golangci-lint v2) before any push** (`CLAUDE.md`).
+
+---
+
+## The service worker & what a deploy does to installed clients
+
+The web app is an installable PWA (`web/public/manifest.webmanifest` + icons), which means some
+operators are running it from a home screen with a **service worker** in front of every request.
+That is normally where "why am I seeing the old build?" comes from — but not here, by design.
+
+```mermaid
+flowchart TD
+    REQ["fetch event"] --> C{"GET · same-origin ·<br/>not /api/ · not /ws/ ?"}
+    C -->|no| PASS["not intercepted at all<br/>REST + terminal I/O untouched"]
+    C -->|yes| NET["try the network FIRST"]
+    NET -->|"2xx"| OK["serve it · copy into cache"]
+    NET -->|"non-ok"| OK2["serve it · do NOT cache"]
+    NET -->|"throws · offline"| FB{"in cache?"}
+    FB -->|yes| STALE["serve stale copy"]
+    FB -->|no| ERR["propagate the error"]
+
+    style PASS fill:#2d7d46,color:#fff
+    style OK fill:#2d7d46,color:#fff
+    style STALE fill:#f59e0b,color:#000
+    style ERR fill:#dc2626,color:#fff
+```
+
+`web/public/sw.js` is **network-first with no precache**, and its header comment says why: *"a stale
+cached shell could silently hide real fleet state."* Practical consequences for operations:
+
+| Property | Consequence |
+|---|---|
+| Network-first for static assets | **An online client always gets the newly deployed build.** There is no stale-shell window after a hub upgrade |
+| `/api/*` and `/ws/*` are never intercepted (`isCacheable`) | REST responses and terminal I/O can never be served from cache — no risk of a cached fleet state |
+| Only `response.ok` is cached | A 404/500 during a rolling deploy is never frozen into the offline fallback |
+| `skipWaiting()` + `clients.claim()` | A new worker takes over on the next load instead of waiting for every tab to close |
+| `activate` deletes every cache but `CACHE_NAME` | Bumping `CACHE_NAME` (currently `constellate-v1`) force-evicts everything on the next load — the escape hatch if a client is ever genuinely wedged |
+
+The cache exists for exactly one case: the device is **offline**, in which case the shell still
+paints (and then fails to reach the hub, visibly).
 
 ---
 
@@ -156,6 +196,8 @@ plus multi-arch GHCR images (`ghcr.io/rizquuula/constellate-hub`, `…-agent`). 
 | Passkey registration fails on a bare IP | WebAuthn needs a registrable domain | use TOTP + recovery, or front the hub with a hostname |
 | Login says "code already used" | TOTP single-use anti-replay (matched step recorded) | wait for the next 30 s code; check the hub's clock (NTP) |
 | Docker build stalls fetching modules | `GOPROXY=goproxy.cn` unreachable from your region | override the `GOPROXY` build arg |
+| No "Install app" / "Add to home screen" prompt | manifest not served as `application/manifest+json`, or the hub isn't on HTTPS | both are prerequisites — check the MIME registration in `httpapi/server.go`'s `init()` and your TLS front end |
+| Installed PWA shows an old build | Should not happen — the worker is network-first. Suspect a stuck worker, not the cache policy | unregister the worker in devtools, or bump `CACHE_NAME` in `web/public/sw.js` and redeploy |
 
 ---
 

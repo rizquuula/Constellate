@@ -40,6 +40,22 @@ sees the keystroke, so it won't be swallowed or sent to the shell.
 | `Shift` + `Alt` + `=` | Split the focused pane **vertically** (stacked) |
 | `Shift` + `Alt` + `W` | **Close** the focused pane |
 | `Shift` + `Alt` + `E` | **Detach** the session from the focused pane (keeps it running in the sidebar; leaves an empty pane) |
+| `Shift` + `Alt` + `R` | **Reload** the focused pane — tears the terminal down and re-attaches, replaying scrollback |
+
+## Window controls (Workspace)
+
+The workspace holds several named **windows**, each with its own split-pane
+layout, shown as a tab strip along the bottom.
+
+| Shortcut | Action |
+|---|---|
+| `Shift` + `Alt` + `T` | **New window** |
+| `Shift` + `Alt` + `PageUp` | Previous window |
+| `Shift` + `Alt` + `PageDown` | Next window |
+
+The strip is a **ring**: `PageDown` on the last window wraps to the first, and
+`PageUp` on the first wraps to the last. Both are no-ops while only one window
+exists.
 
 Notes:
 
@@ -50,3 +66,8 @@ Notes:
   the space. Closing the last remaining pane leaves a single empty pane.
 - The same actions are available from the per-pane buttons in the pane title bar
   (split ▥/▤, detach ⏏, close ✕).
+- **While a modal is open, every `Shift`+`Alt` shortcut is disabled.** The
+  handler bails out when it sees an `[aria-modal="true"]` element, because it
+  listens in the capture phase and the dialog's own `stopPropagation` could not
+  otherwise stop it — so a keystroke meant for a dialog can never reshuffle the
+  panes behind it.

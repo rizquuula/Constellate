@@ -83,6 +83,18 @@ is a pure control plane and relay; the PTYs live on the agents.
 **Non-goals (deliberate):** multi-user / teams / RBAC · provisioning machines or environments · a full
 web IDE · file sync / large transfers (use `scp`/`rsync`).
 
+**Shipped since the core five** — the same UI, hardened for the two situations that actually break a
+control plane: a bad network, and a phone.
+
+| Capability | What it means in practice |
+|---|---|
+| **Installable PWA** | manifest + icons + a network-first service worker; add-to-home-screen on a phone, no stale-shell risk ([10 · Operations](10-operations.md)) |
+| **Responsive down to a phone** | one breakpoint contract (`PHONE_MAX`/`TABLET_MAX`), tablet drawer sidebar, single-leaf phone pane view ([07 · Frontend](07-frontend.md)) |
+| **In-app terminal keypad** | the native soft keyboard is deliberately suppressed on coarse-pointer devices — xterm.js IME composition replays already-sent characters when punctuation commits a word |
+| **Self-healing terminals** | panes reconnect indefinitely with capped, jittered backoff behind a `/ws/term` keepalive + meaningful close codes; scrollback replays exactly once ([04 · Wire protocol](04-wire-protocol.md)) |
+| **Machine lifecycle in the UI** | revoke · un-revoke · delete, with delete refused until revoked ([09 · Security](09-security.md)) |
+| **Multi-window workspace** | several named window tabs, each owning its own split-pane tree, persisted across refresh |
+
 ---
 
 ## Where the code lives

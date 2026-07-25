@@ -26,7 +26,10 @@ owns the PTYs, scrollback, the vt emulator, and a machine-lifetime `instanceID`;
 relay dials home and sources that `instanceID` over a local Unix socket. Kill and restart `connect`
 (or `agent update`) and the hub sees the *same* `instanceID` → sessions stay `running`. Only when the
 session-host itself dies (crash, reboot) does the `instanceID` change → sessions become `lost`. That
-single comparison (`registry.Register`) is the hinge of the persistence story.
+single comparison (`registry.Register`) is the hinge of the persistence story. A *third* state falls
+out of it: when the link merely drops, the hub knows nothing about those PTYs but has no reason to
+think they died, so they become **`disconnected`** — reachable again, unchanged, the moment the same
+`instanceID` dials back. `disconnected` is not `lost`, and the UI never conflates them.
 
 **3. The overview ships *screens*, not *output*.** Each agent parses PTY output into an in-repo vt
 emulator that maintains a current screen grid. A change-gated, rate-capped, run-length-encoded snapshot
@@ -91,13 +94,13 @@ graph LR
 | 02 | [Architecture](02-architecture.md) | the two hexagons, layering, the bidirectional agent link, restart detection, deployment topology |
 | 03 | [Agent & sessions](03-agent-and-sessions.md) | the session-host/connect split, the local UDS protocol, the session manager, scrollback, the vt emulator, activity |
 | 04 | [Wire protocol](04-wire-protocol.md) | protocol v6, every message, the three streams, the Ed25519 bearer assertion, the RLE snapshot format |
-| 05 | [Data model](05-data-model.md) | the SQLite schema, ERD, and the six migrations' evolution |
-| 06 | [API reference](06-api-reference.md) | REST + WebSocket routes, auth gating, the error model |
-| 07 | [Frontend](07-frontend.md) | the three views, split-pane workspace, terminal, overview, dashboard, auth UI |
+| 05 | [Data model](05-data-model.md) | the SQLite schema, ERD, the six migrations, the session lifecycle |
+| 06 | [API reference](06-api-reference.md) | REST + WebSocket routes, auth gating, the two delete guards, the error model |
+| 07 | [Frontend](07-frontend.md) | the three views, multi-window split-pane workspace, terminal + reconnect, PWA/mobile, overview, dashboard, auth UI |
 | 08 | [Overview pipeline](08-overview-pipeline.md) | the signature snapshot pipeline and *why* it stays cheap |
 | 09 | [Security](09-security.md) | enrollment, operator auth, TLS, rate limiting, the threat model |
 | 10 | [Operations](10-operations.md) | config reference, Docker/binary/systemd, install/update, releases, troubleshooting |
-| 11 | [Testing](11-testing.md) | the test pyramid, what's real vs faked, CI/CD |
+| 11 | [Testing](11-testing.md) | the test pyramid, the full test matrix, desktop + mobile E2E, what's real vs faked, CI/CD |
 
 ---
 

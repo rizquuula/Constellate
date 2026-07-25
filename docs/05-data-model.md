@@ -51,7 +51,7 @@ erDiagram
         TEXT    machine_id "FK machines.id"
         TEXT    title
         TEXT    shell
-        TEXT    status "running | exited | lost"
+        TEXT    status "running | disconnected | exited | lost"
         TEXT    activity "active | idle | awaiting-input | unknown"
         INTEGER exit_code
         INTEGER created_at
@@ -118,24 +118,53 @@ Quote the real constant values, not paraphrases — these strings are what land 
 
 | Field | Constants (`domain/session/status.go`) | Meaning |
 |-------|----------------------------------------|---------|
-| `sessions.status` | `running` · `exited` · `lost` | `running` live; `exited` closed cleanly (has `exit_code`); `lost` the session-host died under it (see below). |
+| `sessions.status` | `running` · `disconnected` · `exited` · `lost` | `running` live; `disconnected` the machine's control link dropped but the PTY is presumed alive; `exited` closed cleanly (has `exit_code`); `lost` the session-host died under it (see below). |
 | `sessions.activity` | `active` · `idle` · `awaiting-input` · `unknown` | Derived on the agent (output timing + OSC 133 + screen-tail heuristic); surfaced as the sidebar/overview/dashboard badge. |
 
 `machines` liveness (`online` / `offline`, `domain/machine/status.go`) is **not** stored — it is
 computed live from the in-memory `agentlink.Registry` at read time. `machines.revoked_at` is stored
 and permanent-ish: `enroll.Authenticate` rejects any machine with a non-NULL `revoked_at`.
 
+### The session lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> running: OpenSession
+    running --> exited: agent reports exit · sets exit_code
+    running --> disconnected: machine control link drops
+    disconnected --> running: same instance_id reconnects · blip over
+    running --> lost: session-host restarted · auto_relaunch=0
+    disconnected --> lost: session-host restarted · auto_relaunch=0
+    disconnected --> running: session-host restarted · auto_relaunch=1 · revived
+```
+
+**`disconnected` is not `lost`.** When a machine's control connection drops, the hub cannot know
+anything about that machine's PTYs — but it has no reason to believe they died, because the
+session-host is a *separate process* that outlives `connect`. So the drop flips every `running`
+session on that machine to `disconnected` (`MarkRunningDisconnected`), a state that means *"the PTY
+is presumed alive, we just can't reach it."* Teardown lives in
+`wsagent.Endpoint.handleControl`'s defer: `agentlink.Registry.RemoveIf(machineID, conn)` — the
+`If` makes it race-safe against a fast reconnect that already replaced the entry — then
+`SessionEvents.MarkMachineDisconnected`. When the same `instance_id` comes back,
+`RestoreMachineSessions` → `MarkDisconnectedRunning` walks them straight back to `running` with
+scrollback intact. Only a *different* `instance_id` promotes them to `lost`.
+
+This is why the store queries sweep both statuses: `MarkRunningLost` and `AutoRelaunchSessions`
+match `WHERE status IN ('running','disconnected')`
+(`internal/hub/adapter/secondary/sqlite/session_store.go:118-134`) — a session that was
+`disconnected` when the session-host died must still be reconciled.
+
 ### When does a session become `lost`?
 
 ```mermaid
 flowchart TD
     A[Agent Hello arrives] --> B{prior instance_id exists,<br/>non-empty, and differs?}
-    B -- no --> C[normal reconnect<br/>sessions stay running]
+    B -- no --> C[normal reconnect<br/>running stays running<br/>disconnected restored to running]
     B -- yes --> D[session-host restarted]
     D --> E[ReconcileMachineRestart]
     E --> F{session has<br/>auto_relaunch = 1?}
     F -- yes --> G[re-issue OpenSession revive=true<br/>same id keeps scrollback<br/>SetRunning + audit relaunch]
-    F -- no --> H[MarkRunningLost<br/>status = lost]
+    F -- no --> H[MarkRunningLost<br/>running OR disconnected → lost]
     style D fill:#dc2626,color:#fff
     style G fill:#2d7d46,color:#fff
     style H fill:#dc2626,color:#fff
@@ -165,7 +194,7 @@ audit_log (
 ```
 
 `action` is a closed set (`domain/audit/event.go`): `login`, `enroll`, `attach`, `open`, `close`,
-`delete`, `revoke`, `relaunch`. Events are written through the `AuditSink` consumer port from the
+`delete`, `revoke`, `relaunch`, `unrevoke`, `machine_delete`. Events are written through the `AuditSink` consumer port from the
 `attach`, `sessions`, `enroll`, and `auth` use cases — never directly from a handler. The dashboard
 surfaces the **20 most recent** rows as its activity feed.
 

@@ -266,6 +266,20 @@ Wipe an agent's local identity (forces a fresh enrollment next time):
 ./bin/constellate-agent reset --config configs/agent.yaml
 ```
 
+### Un-revoke and delete are web-UI only
+
+The sidebar's machine row can **revoke**, **un-revoke**, and **delete** a machine. Only `revoke` has
+a CLI equivalent — there is no `constellate-hub unrevoke` or `constellate-hub delete`.
+
+| Action | CLI | Web UI | Notes |
+|---|---|---|---|
+| Revoke | `hub revoke <id>` | ✅ | Soft. The row, its sessions and its history survive |
+| Un-revoke | — | ✅ | Re-enables dial-home using the **existing** keypair — nothing is rotated |
+| Delete | — | ✅ | Refused with **409** unless the machine is already revoked. Cascades: sessions → projects → credentials → machine. Irreversible |
+
+If you revoked a machine because you suspect its private key leaked, do **not** un-revoke it —
+delete it, run `constellate-agent reset` on the box, and enroll it again with a fresh token.
+
 ---
 
 ## CLI reference
