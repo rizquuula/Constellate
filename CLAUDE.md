@@ -46,14 +46,20 @@ milestone roadmap and decision history live in `DESIGN.md` §18.
 **Live terminals + persistence.** The agent spawns a PTY per session, keeps a per-session
 **scrollback ring buffer** and **replays it on attach** (session manager = broadcast-buffer +
 per-attach drain). An agent **process restart** marks its `running` sessions `lost`, detected via a
-per-process `instanceID` in `Hello`.
+per-process `instanceID` in `Hello`. A mere **link drop** is different: it parks that machine's
+`running` sessions in a fourth status, **`disconnected`** (PTY presumed alive, machine unreachable),
+and a same-`instanceID` reconnect restores them to `running`. `MarkRunningLost` and
+`AutoRelaunchSessions` therefore match `status IN ('running','disconnected')`.
 
 **Multi-session + projects.** A **project** bounded context (`domain/project`, `app/projects`,
 sqlite + memory `ProjectStore`); REST `GET/POST /api/projects` and session rename `PATCH
 /api/sessions/{id}` (metadata only, no wire change). Sessions may be **project-less** (nullable
-`project_id`, an "Ungrouped" bucket). Frontend is a **recursive split-pane terminal workspace**
-(react-resizable-panels) — each pane leaf binds one live session, split H/V — plus a project-grouped
-sidebar. **Project delete**: `DELETE /api/projects/{id}` (session-gated) **refuses with 409**
+`project_id`, an "Ungrouped" bucket). Frontend is a **multi-window** workspace: several named
+**windows** (bottom tab strip, `features/terminal/windowList.ts`), each owning its own **recursive
+split-pane tree** (react-resizable-panels) where each leaf binds one live session, split H/V — plus a
+project-grouped sidebar. The whole thing (windows + focus + split sizes) persists to `localStorage`
+under `constellate.workspace` at schema v2; the old `constellate.paneRoot`/`…focusedPaneId` keys are
+read once for a one-time migration, then deleted. **Project delete**: `DELETE /api/projects/{id}` (session-gated) **refuses with 409**
 (`projects.ErrHasSessions`) if the project still owns any session (never orphaned or
 cascade-deleted — reassign/close first); sidebar trash button with inline confirm + 409-aware error.
 Persistence ports include `ProjectStore.Delete` and a `SessionCounter` (sessions-by-project) SPI.
@@ -70,7 +76,10 @@ viewer presence gates `EnableSnaps` (zero snapshot bandwidth when nobody watches
 Ed25519 keypair; hub stores only the public key; dial-home presents an **agent-signed bearer
 assertion** (`v1.<machineID>.<ts>.<sig>`, on the `Authorization` header) — hub holds no signing
 secret. Revocation is soft (`machines.revoked_at`); `hub machines` / `hub revoke` / `agent reset`
-wired. **Operator auth** — TOTP (`pquerna/otp`) + single-use recovery codes + WebAuthn passkeys
+wired. Machine lifecycle is also REST + UI: `POST /api/machines/{id}/revoke|unrevoke` and `DELETE
+/api/machines/{id}`, the last **refusing with 409** (`enroll.ErrNotRevoked`) unless already revoked,
+then cascading sessions → projects → credentials → machine in one transaction (app-level, **not** an
+FK `ON DELETE CASCADE`). Un-revoke re-arms the *existing* keypair — nothing is rotated. **Operator auth** — TOTP (`pquerna/otp`) + single-use recovery codes + WebAuthn passkeys
 (`go-webauthn`); server-side sessions in `operator_sessions`; opaque cookie `constellate_session`
 (HttpOnly, SameSite=Lax, Secure, 24 h). Rate limiting (per-IP + global) + TOTP single-use
 anti-replay. **Auth middleware** gates all `/api/*` + `/ws/*`; explicit allowlist for unauthenticated
@@ -81,8 +90,9 @@ paths. **Audit log** wired via `AuditSink` port in `attach`, `sessions`, `enroll
 
 **Progress dashboard.** A server-side aggregation use case (`app/dashboard`) composes the
 machine/session/project/audit read ports + live-agent presence into one `View` — fleet totals,
-per-machine + per-project **status rollups** (running/exited/lost, with an "Ungrouped" bucket), an
-**attention list** (lost sessions; offline machines with running sessions), and the 20 most recent
+per-machine + per-project **status rollups** (running/exited/lost/disconnected, with an "Ungrouped"
+bucket), an **attention list** (`lost_session`, `disconnected_sessions` — an offline machine still
+owning disconnected sessions — and `awaiting_input`), and the 20 most recent
 audit events. Session-gated `GET /api/dashboard`; frontend has a third **Dashboard** view (summary
 cards, rollups, attention banner, activity feed) polling only while active.
 
@@ -106,6 +116,27 @@ xterm.js IME composition replays already-sent characters when punctuation commit
 instead from an in-app on-screen keypad (`Keypad.tsx` over the pure-data `keypadLayout.ts` — command
 row + `letters`/`symbols`/`fn` layers, all exactly `LAYER_ROWS` tall so a layer switch never
 ResizeObserver-resizes the PTY), with a ⌨ escape hatch back to the native keyboard.
+
+**Resilient terminal sockets.** `/ws/term` carries a `{"type":"hb"}` keepalive; the hub splits
+liveness into a **prober** (never fatal) and a **reaper** (sole teardown authority, fires only after
+the peer has been silent past 4× the interval), and maps failures to real close codes instead of a
+universal 1006. The browser reconnects **indefinitely** with capped jittered backoff (`api/reconnect.ts`
+— pure, unit-tested: 300 ms ×2 → 15 s cap, ±20 % jitter), reaching `stopped` only on a terminal close
+code. A 45 s staleness watchdog arms at socket open and drives the reconnect path directly rather
+than trusting a zombie socket to deliver `onclose`. Because the agent replays scrollback on *every*
+attach, the client calls `term.reset()` on the first binary frame of a re-attach (tracked at hook
+level via `replayedRef`) so a replay never doubles. Keystrokes are **not** buffered while
+disconnected. `useSnapshots` (overview) shares the same policy module.
+
+**Mobile + PWA.** Installable PWA — `web/public/manifest.webmanifest`, icons, and a **network-first,
+no-precache** service worker (`web/public/sw.js`) that never touches `/api/*` or `/ws/*`, so an online
+client can never be served stale fleet state. `httpapi/server.go`'s `init()` hand-registers the
+`.webmanifest` and `.ico` MIME types — browsers reject a sniffed manifest. Static paths are ungated
+**by construction** (the middleware only gates `/api/` and `/ws/` prefixes). Responsive contract is
+one module, `web/src/breakpoints.ts` (`PHONE_MAX=600`, `TABLET_MAX=900`, `useCoarsePointer`,
+`confirmTimeoutMs()`); the px values are hand-mirrored in `styles.css` `@media` blocks — **no
+build-time bridge, keep them in sync**. Tablet gets a drawer sidebar, phone a single-leaf pane view
+plus a header overflow menu and safe-area insets.
 
 ## Conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is
