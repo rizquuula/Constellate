@@ -103,6 +103,8 @@ Additive; older peers ignore it.
 ## Conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is
   `transport.AttachHeader{sessionID}`, then raw PTY bytes. `/ws/term` uses **binary** frames for terminal
-  I/O and **text** frames (`{"type":"resize",...}`) for resize.
+  I/O and **text** frames for control: `{"type":"resize",...}` browser→hub, `{"type":"hb",...}`
+  hub→browser keepalive. Close codes 4404 (not found) and 4410 (session ended) are terminal for the
+  client; 4503 (agent offline) and the rest are retried indefinitely with capped backoff.
 - Frontend builds to `web/dist` (gitignored except `.gitkeep`) and embeds via `web/embed.go`
   (`//go:embed all:dist`). `make build` runs `make web` first; the hub Docker image has a node stage.

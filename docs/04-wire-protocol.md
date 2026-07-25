@@ -72,8 +72,11 @@ graph TB
   `Snapshot`. Gated by `EnableSnaps` — [08 · Overview pipeline](08-overview-pipeline.md).
 
 **`/ws/term` frame convention** (browser side): terminal I/O rides **binary** WebSocket frames;
-resize rides **text** frames `{"type":"resize","cols":…,"rows":…}`. The hub translates between the
-browser WebSocket and the yamux data stream.
+**text** frames carry control JSON — `{"type":"resize","cols":…,"rows":…}` browser→hub, and a
+`{"type":"hb","ts":…}` keepalive hub→browser every 15 s (the client's staleness watchdog feeds on
+it). The hub translates between the browser WebSocket and the yamux data stream, and closes with an
+application code the client branches on: `4404` session not found and `4410` session ended are
+terminal (no retry); `4503` agent offline and everything else are retryable.
 
 ---
 

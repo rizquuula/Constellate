@@ -1113,23 +1113,36 @@ Sessions survive an agent restart. The single-process agent is split into two ro
   silently dropped, and the status dot reflects the *backend* session status — so a frozen pane
   still looked "running" until the operator hit the manual reload button. The overview socket
   already auto-reconnected (flat 2 s); the terminal panes now self-heal too.
-- **Hub** (`wsbrowser/terminal.go`): per-connection keepalive — each 15 s tick writes the
-  `{"type":"hb"}` text frame then a protocol `Ping` (10 s bounded); either failing tears the
-  attach down, so NAT-black-holed browsers free their agent stream instead of leaking it. Attach
-  and agent-stream errors now map to real close codes (`closeCodeFor`: 4404 / 4503 / 1001 / 1011,
-  see §9) instead of a universal 1006. Options via variadic `WithKeepalive` so tests can shorten.
+- **Hub** (`wsbrowser/terminal.go`): per-connection keepalive split into a **prober** and a
+  **reaper**. The prober's 15 s tick writes the `{"type":"hb"}` text frame then a protocol `Ping`
+  (10 s bounded), but its failures are *never* fatal — both fail spuriously while the pump holds
+  the conn's single write mutex for a slow-draining browser, which is exactly the connection worth
+  keeping. The reaper is the sole teardown authority: it cancels once the peer has been **silent**
+  past the stale budget (4× the interval = 60 s; `WithStaleTimeout` overrides). Liveness evidence
+  is inbound frames, completed pump writes, and successful pings (pong observed) — never the hb
+  write, which keeps succeeding into a black-holed flow's kernel send buffer for hours. So
+  NAT-black-holed browsers still free their agent stream, and firehosing-but-healthy ones survive.
+  Attach and agent-stream errors map to real close codes (`closeCodeFor`: 4404 / 4410 session
+  ended / 4503 / 1001 / 1011, see §9) instead of a universal 1006; `OpenStream` refuses
+  exited/lost sessions up front (`session.ErrEnded` → 4410), so a dead PTY is one clean refusal
+  rather than a retry loop writing a spurious attach audit row per attempt.
 - **Frontend** (`useTerminal.ts`): the one big effect split in two — terminal lifecycle (xterm
   instance, addons, ResizeObserver) vs connection (socket + reconnect state machine:
   `connecting|open|reconnecting|stopped`). Policy is a pure module (`api/reconnect.ts`, unit-
-  tested): backoff 300 ms ×2 → 15 s cap, ±20 % jitter; a connection open ≥3 s resets the streak;
-  5 consecutive unstable attempts → `stopped` (badge + Retry button). A 45 s staleness watchdog
-  is armed **only after the first `hb`** — against an older hub it stays disarmed, so version skew
-  can't cause false reconnect loops. `online`/`visibilitychange` retries immediately (0–300 ms
-  per-pane stagger to avoid a replay stampede), even from `stopped`.
+  tested): backoff 300 ms ×2 → 15 s cap, ±20 % jitter, retrying **indefinitely** — a hub restart
+  or overnight sleep must heal on its own, so `stopped` (badge + Retry button) is reached only on
+  a terminal close code (4404/4410), never by attempt count. A connection open ≥3 s starts the
+  next outage fresh at attempt 1. The 45 s staleness watchdog arms **at socket open** (client and
+  hub ship together — the SPA is embedded in the hub binary, so hb support never skews) and on
+  firing drives the reconnect path directly — badge, backoff, wake-retry — rather than trusting a
+  zombie socket to ever deliver `onclose`. `online`/`visibilitychange` retries immediately (0–300
+  ms per-pane stagger to avoid a replay stampede), even from `stopped`.
 - **Replay dedupe:** the agent replays its scrollback ring on every attach; on a reconnect the
   pre-blip screen is still in the kept-alive xterm, so the client calls `term.reset()` (not
-  `clear()` — modes/alt-screen must go too) on the **first binary frame** after a reconnect,
-  deferred to avoid a blank flash.
+  `clear()` — modes/alt-screen must go too) on the **first binary frame** of any attach into an
+  xterm that already took a replay, deferred to avoid a blank flash. Tracked at hook level
+  (`replayedRef`), because the connection effect remounts when the `enabled` gate flips across an
+  agent blip while the xterm — and its pre-blip screen — survives.
 - **The gate that matters:** the socket is enabled only for `running` sessions
   (`TerminalPane` passes `enabled = !sessionEnded`) — an exited/lost PTY can never be re-attached,
   and retrying it forever would hammer the hub. Session status is the authoritative stop signal;

@@ -67,7 +67,7 @@ machine-signed bearer assertion validated inside the handler
 
 | Path | Handler | Auth | Role |
 |------|---------|------|------|
-| `GET /ws/term?session={id\|new}` | `wsbrowser/terminal.go:38` | gated (cookie) | Browser ↔ PTY relay. Binary frames = terminal I/O; text `{"type":"resize"}` = resize |
+| `GET /ws/term?session={id\|new}` | `wsbrowser/terminal.go:38` | gated (cookie) | Browser ↔ PTY relay. Binary frames = terminal I/O; text frames: `{"type":"resize"}` browser→hub, `{"type":"hb","ts":…}` hub→browser keepalive (15 s). Close codes: 4404 not found, 4410 session ended, 4503 agent offline |
 | `GET /ws/overview` | `wsbrowser/overview.go:32` | gated (cookie) | Server-push snapshot fan-out for the tile grid |
 | `GET /ws/agent` | `wsagent/endpoint.go:59` | **bearer assertion** | Agent dial-home; yamux control stream. Not browser-facing |
 
