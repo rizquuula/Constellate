@@ -48,10 +48,10 @@ export function Keypad({ handle }: KeypadProps) {
     return handle.subscribeSelection(setHasSelection)
   }, [handle])
 
-  // The one line that actually suppresses (or restores) the system keyboard.
-  useEffect(() => {
-    handle.setInputMode(inputMode)
-  }, [handle, inputMode])
+  // Note: applying `inputMode` to the terminal is *not* done here. This
+  // component only mounts on coarse pointers and only while the pane is
+  // focused, so a desktop terminal would never be told to leave keypad mode.
+  // TerminalPane owns that call.
 
   const press = useKeyPress()
 

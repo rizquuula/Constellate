@@ -99,6 +99,30 @@ describe('layout invariants', () => {
     ].sort())
   })
 
+  // A reachability guard, not a style rule. The symbols layer once carried
+  // '!' '@' '$' '&' '*' '(' ')' as shiftText while the only shift key in the
+  // whole layout lived on the letters layer — so typing '$' meant latching
+  // shift on one layer and tapping the digit on another, a detour nothing on
+  // screen hinted at. A layer that hides glyphs behind shift must carry the
+  // key that reveals them. If you add a shiftText to a shift-less layer, this
+  // tells you now instead of leaving it to be spotted in a screenshot months
+  // later; the fn layer passes only because it has no shift-sensitive keys.
+  it('gives every layer that hides glyphs behind shift its own shift key', () => {
+    for (const layer of LAYER_NAMES) {
+      const keys = LAYERS[layer].flatMap((row) => row.keys)
+      const hidden = keys.filter(
+        (key) =>
+          JSON.stringify(resolveKey(key, 'off')) !== JSON.stringify(resolveKey(key, 'lock')),
+      )
+      if (hidden.length === 0) continue
+
+      const reachable = keys.some((key) => key.action.kind === 'shift')
+      expect(reachable, `${layer} hides ${hidden.map((k) => k.id).join(', ')} behind shift`).toBe(
+        true,
+      )
+    }
+  })
+
   // Cross-check against keys.ts: a typo'd F-key name fails here rather than
   // silently sending nothing on a phone.
   it('maps every special key to a non-empty byte sequence', () => {

@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, memo } from 'react'
+import { useRef, useState, useCallback, useEffect, memo } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { useStore } from '../../store'
 import { useTerminal } from './useTerminal'
@@ -56,6 +56,16 @@ function TerminalPaneImpl({
   )
   const coarsePointer = useCoarsePointer()
   const showKeypad = coarsePointer && focused && sessionId != null && !sessionEnded
+
+  // Suppressing the native keyboard is a *device* decision, so it is made here
+  // rather than in Keypad: that component mounts only on coarse pointers and
+  // only while the pane is focused, so a desktop terminal would keep whatever
+  // the hook defaulted to and silently run with a readOnly textarea — breaking
+  // IME input for anyone typing CJK on a laptop.
+  const inputMode = useStore((s) => s.inputMode)
+  useEffect(() => {
+    term.setInputMode(coarsePointer ? inputMode : 'native')
+  }, [term, coarsePointer, inputMode])
 
   // The ended overlay takes precedence — never stack two badges on one pane.
   const showConnBadge = !sessionEnded

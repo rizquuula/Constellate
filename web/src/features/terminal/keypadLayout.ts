@@ -113,17 +113,47 @@ function functionKey(name: FunctionKeyName): KeypadKey {
   return specialKey(`fn-${name.toLowerCase()}`, name, `Function key ${name}`, name)
 }
 
-// The bottom row is shared by all three layers: only its layer-switch key
-// differs, and its label ('?123' vs 'ABC') is data so the renderer stays dumb.
-// `withShiftText` is on for the letters layer only — that is where the shift
-// key lives, and where '?' and '_' would otherwise be unreachable.
-function bottomRow(
-  prefix: string,
-  target: KeypadLayer,
-  switchLabel: string,
-  switchAria: string,
-  withShiftText: boolean,
-): KeypadRow {
+// '-' with '_' behind shift on the letters layer; a plain '-' anywhere shift
+// cannot be reached, since a shiftText nobody can type is worse than no key.
+function hyphenKey(id: string, withUnderscore: boolean): KeypadKey {
+  return {
+    id,
+    label: '-',
+    shiftLabel: withUnderscore ? '_' : undefined,
+    aria: 'Hyphen minus',
+    action: withUnderscore
+      ? { kind: 'text', text: '-', shiftText: '_' }
+      : { kind: 'text', text: '-' },
+  }
+}
+
+interface BottomRowSpec {
+  /** Layer name; also the `<prefix>-bottom-<name>` id prefix. */
+  prefix: string
+  /** Where the layer-switch key jumps to. */
+  target: KeypadLayer
+  /** Layer-switch glyph ('?123' vs 'ABC') — data, so the renderer stays dumb. */
+  switchLabel: string
+  switchAria: string
+  /** The one slot that differs per layer, between '.' and backspace. */
+  variable: KeypadKey
+  /** Letters layer only: '?' behind shift on '/', where the shift key lives. */
+  slashShiftsToQuestion?: boolean
+}
+
+// The bottom row is shared by all three layers, so anything sitting in it costs
+// no layer switch — which is why '.' lives here rather than only on symbols:
+// `cd ..`, `./script`, `file.txt` and `.env` are constant on a terminal.
+// Everything but the layer switch and the variable slot is identical across
+// layers.
+function bottomRow({
+  prefix,
+  target,
+  switchLabel,
+  switchAria,
+  variable,
+  slashShiftsToQuestion = false,
+}: BottomRowSpec): KeypadRow {
   return {
     keys: [
       {
@@ -137,9 +167,9 @@ function bottomRow(
       {
         id: `${prefix}-bottom-slash`,
         label: '/',
-        shiftLabel: withShiftText ? '?' : undefined,
+        shiftLabel: slashShiftsToQuestion ? '?' : undefined,
         aria: 'Slash',
-        action: withShiftText
+        action: slashShiftsToQuestion
           ? { kind: 'text', text: '/', shiftText: '?' }
           : { kind: 'text', text: '/' },
       },
@@ -148,17 +178,15 @@ function bottomRow(
         label: 'Space',
         aria: 'Space',
         action: { kind: 'text', text: ' ' },
-        span: 3.5,
+        span: 2.5,
       },
       {
-        id: `${prefix}-bottom-minus`,
-        label: '-',
-        shiftLabel: withShiftText ? '_' : undefined,
-        aria: 'Hyphen minus',
-        action: withShiftText
-          ? { kind: 'text', text: '-', shiftText: '_' }
-          : { kind: 'text', text: '-' },
+        id: `${prefix}-bottom-period`,
+        label: '.',
+        aria: 'Period',
+        action: { kind: 'text', text: '.' },
       },
+      variable,
       backspaceKey(`${prefix}-bottom-backspace`),
       specialKey(`${prefix}-bottom-enter`, '⏎', 'Enter', 'Enter', { span: 2, tone: 'accent' }),
     ],
@@ -225,7 +253,14 @@ const LETTER_ROWS: readonly KeypadRow[] = [
       backspaceKey('letters-backspace-row3', 1.5),
     ],
   },
-  bottomRow('letters', 'symbols', '?123', 'Symbols layer', true),
+  bottomRow({
+    prefix: 'letters',
+    target: 'symbols',
+    switchLabel: '?123',
+    switchAria: 'Symbols layer',
+    variable: hyphenKey('letters-bottom-minus', true),
+    slashShiftsToQuestion: true,
+  }),
 ]
 
 const SYMBOL_ROWS: readonly KeypadRow[] = [
@@ -271,7 +306,23 @@ const SYMBOL_ROWS: readonly KeypadRow[] = [
       symbolKey('greater-than', '>', 'Greater than'),
     ],
   },
-  bottomRow('symbols', 'letters', 'ABC', 'Letters layer', false),
+  // The symbols layer spends its variable slot on shift rather than another
+  // '-' (row 2 already has one): the digit row hides '!' '@' '$' '&' '*' '('
+  // ')' behind shift, and without a shift key here they would be reachable
+  // only by latching shift over on the letters layer first.
+  bottomRow({
+    prefix: 'symbols',
+    target: 'letters',
+    switchLabel: 'ABC',
+    switchAria: 'Letters layer',
+    variable: {
+      id: 'symbols-bottom-shift',
+      label: '⇧',
+      aria: 'Shift',
+      action: { kind: 'shift' },
+      tone: 'mod',
+    },
+  }),
 ]
 
 const FN_ROWS: readonly KeypadRow[] = [
@@ -326,7 +377,14 @@ const FN_ROWS: readonly KeypadRow[] = [
       },
     ],
   },
-  bottomRow('fn', 'letters', 'ABC', 'Letters layer', false),
+  // No shift key on this layer, so nothing here may hide a glyph behind shift.
+  bottomRow({
+    prefix: 'fn',
+    target: 'letters',
+    switchLabel: 'ABC',
+    switchAria: 'Letters layer',
+    variable: hyphenKey('fn-bottom-minus', false),
+  }),
 ]
 
 export const LAYERS: Readonly<Record<KeypadLayer, readonly KeypadRow[]>> = {

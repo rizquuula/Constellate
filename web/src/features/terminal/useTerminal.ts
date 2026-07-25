@@ -13,7 +13,7 @@ import {
 } from '../../api/reconnect'
 import { applyModifiers, specialKeySeq } from './keys'
 import type { KeyMods, SpecialKey } from './keys'
-import { DEFAULT_INPUT_MODE, imeAttrsFor, type InputMode } from './inputMode'
+import { imeAttrsFor, type InputMode } from './inputMode'
 import { attachTouchScroll } from './touchScroll'
 
 // Imperative handle returned by useTerminal, so out-of-tree controls (the touch
@@ -138,9 +138,13 @@ export function useTerminal(
   // teardown. Subscribers (the Keypad) are notified on every change.
   const modsRef = useRef<KeyMods>({ ctrl: false, alt: false })
   // Which input mode the helper textarea should be in. Also at hook level so a
-  // reloadKey teardown + reattach re-applies the user's choice to the new
-  // textarea instead of silently reverting to the native keyboard.
-  const inputModeRef = useRef<InputMode>(DEFAULT_INPUT_MODE)
+  // reloadKey teardown + reattach re-applies the caller's choice to the new
+  // textarea instead of silently reverting.
+  //
+  // Starts 'native' — the permissive mode — rather than at the *preference*
+  // default: the caller decides whether this device suppresses its keyboard,
+  // and until it says so the terminal must not run with a readOnly textarea.
+  const inputModeRef = useRef<InputMode>('native')
   const modSubsRef = useRef<Set<(m: KeyMods) => void>>(new Set())
   const selSubsRef = useRef<Set<(hasSelection: boolean) => void>>(new Set())
 
