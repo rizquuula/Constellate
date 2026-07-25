@@ -1319,15 +1319,16 @@ body {
   background: var(--scanlines);
 }
 
-/* --danger on --danger-bg: ≈ 6:1 — passes AA */
-.pane-ended {
+/* Status badges pinned over a pane: same placement and shape, different palette
+   per state. Only the colors (and the reconnecting badge's inline layout, which
+   also holds a retry button) differ below. */
+.pane-ended,
+.pane-reconnecting {
   position: absolute;
   top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--danger-bg);
-  color: var(--danger);
-  border: 1px solid var(--danger-border);
+  border: 1px solid;
   border-radius: var(--radius-sm);
   padding: 4px 12px;
   font-size: var(--text-sm);
@@ -1335,26 +1336,24 @@ body {
   white-space: nowrap;
 }
 
-/* Transient connection state, pinned like .pane-ended but amber rather than
-   coral — the pane is recovering, not dead. Static by design: a spinner over a
-   live terminal is noise, and the text already says what is happening.
+/* --danger on --danger-bg: ≈ 6:1 — passes AA */
+.pane-ended {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+
+/* Transient connection state — amber rather than coral, since the pane is
+   recovering, not dead. Static by design: a spinner over a live terminal is
+   noise, and the text already says what is happening.
    --warning on --warning-bg: ≈ 8:1 — passes AA */
 .pane-reconnecting {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 8px;
   background: var(--warning-bg);
   color: var(--warning);
-  border: 1px solid var(--warning-border);
-  border-radius: var(--radius-sm);
-  padding: 4px 12px;
-  font-size: var(--text-sm);
-  z-index: 10;
-  white-space: nowrap;
+  border-color: var(--warning-border);
 }
 
 .pane-reconnect-retry {

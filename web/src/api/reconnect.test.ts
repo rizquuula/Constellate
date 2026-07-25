@@ -7,9 +7,9 @@ import {
   subscribeWake,
   BACKOFF_BASE_MS,
   BACKOFF_CAP_MS,
+  BACKOFF_JITTER,
   STABLE_AFTER_MS,
   STALE_AFTER_MS,
-  MAX_UNSTABLE_STREAK,
 } from './reconnect'
 
 // Deterministic stand-ins for Math.random: mid = no jitter, low/high = the edges.
@@ -34,6 +34,23 @@ describe('backoffDelay', () => {
     expect(backoffDelay(20, noJitter)).toBe(BACKOFF_CAP_MS)
   })
 
+  // Retries are unbounded now, so the cap is the steady state of a long outage
+  // rather than unreachable dead code: every attempt past the knee waits ~15s.
+  it('reaches the cap at the first exponent that exceeds it and holds there', () => {
+    expect(backoffDelay(5, noJitter)).toBe(9_600)
+    expect(backoffDelay(6, noJitter)).toBe(BACKOFF_CAP_MS)
+    expect(backoffDelay(7, noJitter)).toBe(BACKOFF_CAP_MS)
+    expect(backoffDelay(200, noJitter)).toBe(BACKOFF_CAP_MS)
+  })
+
+  it('keeps every delay within the jitter band of the cap', () => {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const delay = backoffDelay(attempt, Math.random)
+      expect(delay).toBeGreaterThanOrEqual(BACKOFF_BASE_MS * (1 - BACKOFF_JITTER))
+      expect(delay).toBeLessThanOrEqual(BACKOFF_CAP_MS * (1 + BACKOFF_JITTER))
+    }
+  })
+
   it('applies ±20% jitter at the extremes of rand', () => {
     expect(backoffDelay(0, minJitter)).toBe(240)
     expect(backoffDelay(0, maxJitter)).toBe(360)
@@ -47,6 +64,15 @@ describe('backoffDelay', () => {
   it('treats a negative attempt as the first one', () => {
     expect(backoffDelay(-1, noJitter)).toBe(BACKOFF_BASE_MS)
   })
+
+  // Callers count outage attempts from 1 (that is what the pane badge shows) and
+  // pass `streak - 1` as the exponent, so the first retry after a stable run is
+  // a ~300ms blink. The clamp keeps a streak of 0 harmless.
+  it('maps a 1-based attempt streak onto the base delay', () => {
+    expect(backoffDelay(1 - 1, noJitter)).toBe(BACKOFF_BASE_MS)
+    expect(backoffDelay(2 - 1, noJitter)).toBe(600)
+    expect(backoffDelay(0 - 1, noJitter)).toBe(BACKOFF_BASE_MS)
+  })
 })
 
 // ── shouldRetry ─────────────────────────────────────────────────────────────
@@ -54,6 +80,10 @@ describe('backoffDelay', () => {
 describe('shouldRetry', () => {
   it('gives up on 4404 (session not found)', () => {
     expect(shouldRetry(4404)).toBe(false)
+  })
+
+  it('gives up on 4410 (session ended)', () => {
+    expect(shouldRetry(4410)).toBe(false)
   })
 
   it('retries an abnormal network close', () => {
@@ -101,14 +131,6 @@ describe('isStale', () => {
 
   it('is true one millisecond past the threshold', () => {
     expect(isStale(10_000, 10_000 + STALE_AFTER_MS + 1)).toBe(true)
-  })
-})
-
-// ── constants ───────────────────────────────────────────────────────────────
-
-describe('MAX_UNSTABLE_STREAK', () => {
-  it('allows a handful of attempts before giving up', () => {
-    expect(MAX_UNSTABLE_STREAK).toBe(5)
   })
 })
 

@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { openTerminalSocket, parseTermControl, sendResize } from '../../api/ws'
+import { openTerminalSocket, sendResize } from '../../api/ws'
 import {
   backoffDelay,
   isStable,
   isStale,
   shouldRetry,
   subscribeWake,
-  MAX_UNSTABLE_STREAK,
   WAKE_STAGGER_MS,
   WATCHDOG_TICK_MS,
 } from '../../api/reconnect'
@@ -39,7 +38,8 @@ export interface TerminalHandle {
 // Connection state of the pane's terminal socket, surfaced so the pane can show
 // a reconnecting/disconnected badge. 'connecting' covers the very first attach
 // (no badge — a brief blank pane is the expected first paint); 'reconnecting'
-// and 'stopped' are the states a user needs told about.
+// and 'stopped' are the states a user needs told about. 'stopped' is reached
+// only on a terminal close code — retryable failures reconnect forever.
 export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'stopped'
 
 export interface ConnState {
@@ -105,6 +105,14 @@ export function useTerminal(
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+
+  // Whether the *current* xterm instance has already taken an attach replay.
+  // It lives at hook level, not inside the connection effect, because that
+  // effect remounts whenever `enabled` flips (session goes lost, then running
+  // again) while Effect A's terminal — still holding the pre-blip screen —
+  // survives. A per-effect counter would call the next attach "the first one"
+  // and append the replay to content already on screen, doubling every line.
+  const replayedRef = useRef(false)
 
   const [conn, setConn] = useState<ConnState>(CONN_IDLE)
 
@@ -234,6 +242,9 @@ export function useTerminal(
         foreground: '#e0e0e0',
       },
     })
+    // A brand-new terminal has no scrollback of its own, so the next attach
+    // replay is the first one and must not be preceded by a reset().
+    replayedRef.current = false
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(container)
@@ -316,7 +327,6 @@ export function useTerminal(
     }
 
     let disposed = false
-    let socketsOpened = 0
     let unstableStreak = 0
     let status: ConnStatus = 'connecting'
     let retryTimer: number | null = null
@@ -359,53 +369,59 @@ export function useTerminal(
       clearRetryTimer()
       closeActive()
 
-      // The agent replays its whole scrollback ring on every attach. On the first
-      // attach that lands in a fresh terminal, which is exactly right; on a
-      // reconnect the pre-blip screen is still there and the replay would double
-      // it. reset() (not clear(): modes and the alt screen must go too) right
-      // before the first replayed byte fixes that.
-      const isReconnect = socketsOpened > 0
-      socketsOpened++
-
       const ws = openTerminalSocket(sessionId)
       wsRef.current = ws
       let openedAtMs: number | null = null
       let pendingReset = false
 
-      // Older hubs never send 'hb', so the watchdog stays disarmed for them and
-      // behavior is exactly as before. Once a hub proves it heartbeats, silence
-      // past the staleness threshold means a zombie socket — common on mobile
-      // sleep and NAT timeouts, where no close event ever arrives — so close it
-      // and let the normal onclose path reconnect.
+      // Silence past the staleness threshold means a zombie socket — common on
+      // mobile sleep and NAT timeouts, where no close event ever arrives. The
+      // watchdog arms at open rather than on the first heartbeat: waiting for
+      // one leaves a ~15s blind window on every single connect, and a socket
+      // that black-holes immediately would never arm it at all. Any received
+      // frame (PTY bytes or an 'hb') refreshes lastRxMs.
       const armWatchdog = () => {
         if (watchdog !== null) return
         watchdog = window.setInterval(() => {
-          if (isStale(lastRxMs, Date.now())) ws.close()
+          if (!isStale(lastRxMs, Date.now())) return
+          // Not ws.close(): a black-holed socket may never fire onclose, which
+          // would leave the pane stuck at 'open' — no badge, keystrokes
+          // silently dropped, and the wake handler declining to retry. Drive
+          // the reconnect directly instead.
+          const wasStable = isStable(openedAtMs ?? lastRxMs, Date.now())
+          closeActive()
+          scheduleReconnect(wasStable)
         }, WATCHDOG_TICK_MS)
       }
 
       ws.onopen = () => {
         openedAtMs = Date.now()
         lastRxMs = openedAtMs
-        pendingReset = isReconnect
+        // The agent replays its whole scrollback ring on every attach. Into a
+        // fresh terminal that is exactly right; into one that already took a
+        // replay the pre-blip screen is still there and the replay would double
+        // it. reset() (not clear(): modes and the alt screen must go too) right
+        // before the first replayed byte fixes that.
+        pendingReset = replayedRef.current
         const term = termRef.current
         if (term) sendResize(ws, term.cols, term.rows)
+        armWatchdog()
         setStatus('open', 0)
       }
 
       ws.onmessage = (ev: MessageEvent) => {
         lastRxMs = Date.now()
-        if (ev.data instanceof ArrayBuffer) {
-          if (pendingReset) {
-            termRef.current?.reset()
-            pendingReset = false
-          }
-          termRef.current?.write(new Uint8Array(ev.data))
-          return
+        // Text frames are control frames ('hb' liveness heartbeats today); they
+        // carry no terminal state, so timestamping their arrival above is the
+        // whole of their handling. Arrival is timestamped locally rather than
+        // read off the frame, since the hub clock may skew from the browser's.
+        if (!(ev.data instanceof ArrayBuffer)) return
+        if (pendingReset) {
+          termRef.current?.reset()
+          pendingReset = false
         }
-        // Heartbeats only prove liveness; arrival is timestamped locally rather
-        // than from ctrl.ts, since the hub clock may skew from the browser's.
-        if (parseTermControl(ev.data)?.type === 'hb') armWatchdog()
+        replayedRef.current = true
+        termRef.current?.write(new Uint8Array(ev.data))
       }
 
       ws.onclose = (ev: CloseEvent) => {
@@ -413,21 +429,26 @@ export function useTerminal(
         if (disposed) return
         if (wsRef.current === ws) wsRef.current = null
 
-        // Only short-lived connections count toward giving up: a socket that ran
-        // for minutes before a blip earns a clean slate.
-        if (isStable(openedAtMs ?? Date.now(), Date.now())) unstableStreak = 0
-        else unstableStreak++
-
-        if (!shouldRetry(ev.code) || unstableStreak >= MAX_UNSTABLE_STREAK) {
+        const wasStable = isStable(openedAtMs ?? Date.now(), Date.now())
+        if (!shouldRetry(ev.code)) {
           setStatus('stopped', unstableStreak)
           return
         }
-        setStatus('reconnecting', unstableStreak)
-        retryTimer = window.setTimeout(connect, backoffDelay(unstableStreak, Math.random))
+        scheduleReconnect(wasStable)
       }
 
       // onclose always follows onerror, so the retry decision lives there alone.
       ws.onerror = () => {}
+    }
+
+    // A close after a stable run opens a *new* outage at attempt 1 — that is
+    // what the badge counts, and what makes the first retry a ~300ms blink
+    // rather than a resumption of some earlier outage's backoff. The exponent
+    // trails the attempt number by one so attempt 1 waits BACKOFF_BASE_MS.
+    const scheduleReconnect = (wasStable: boolean) => {
+      unstableStreak = wasStable ? 1 : unstableStreak + 1
+      setStatus('reconnecting', unstableStreak)
+      retryTimer = window.setTimeout(connect, backoffDelay(unstableStreak - 1, Math.random))
     }
 
     const requestRetry = () => {
