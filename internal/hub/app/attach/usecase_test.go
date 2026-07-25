@@ -37,6 +37,7 @@ func (f *fakeStream) Close() error                { return nil }
 type fakeGateway struct {
 	resizeCalls []resizeCall
 	streamErr   error
+	openCalls   int
 }
 
 type resizeCall struct {
@@ -45,6 +46,7 @@ type resizeCall struct {
 }
 
 func (g *fakeGateway) OpenDataStream(_ context.Context, machineID, sessionID string) (io.ReadWriteCloser, error) {
+	g.openCalls++
 	if g.streamErr != nil {
 		return nil, g.streamErr
 	}
@@ -123,6 +125,63 @@ func TestOpenStream_SessionNotFound(t *testing.T) {
 	// No audit event on failure.
 	if len(sink.calls) != 0 {
 		t.Errorf("audit calls on not-found: got %d, want 0", len(sink.calls))
+	}
+}
+
+// TestOpenStream_EndedSession guards the no-retry contract: a session whose PTY
+// is gone must be refused up front with session.ErrEnded, without touching the
+// agent gateway and without writing an attach audit row per doomed attempt.
+func TestOpenStream_EndedSession(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status session.Status
+	}{
+		{"exited", session.StatusExited},
+		{"lost", session.StatusLost},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := session.New("s1", "m1", "p1", "title", "/bin/bash", "", 1000)
+			s.SetStatus(tc.status)
+			store := &fakeSessionStore{data: map[string]session.Session{"s1": s}}
+			gw := &fakeGateway{}
+			sink := &fakeAuditSink{}
+			uc := attach.New(store, gw, discardLogger(), sink)
+
+			machineID, stream, err := uc.OpenStream(context.Background(), "s1")
+			if !errors.Is(err, session.ErrEnded) {
+				t.Errorf("OpenStream on %s session: got %v, want session.ErrEnded", tc.status, err)
+			}
+			if machineID != "" {
+				t.Errorf("machineID: got %q, want empty", machineID)
+			}
+			if stream != nil {
+				t.Error("stream should be nil for an ended session")
+			}
+			if gw.openCalls != 0 {
+				t.Errorf("gateway OpenDataStream calls: got %d, want 0", gw.openCalls)
+			}
+			if len(sink.calls) != 0 {
+				t.Errorf("audit calls: got %d, want 0", len(sink.calls))
+			}
+		})
+	}
+}
+
+// TestOpenStream_DisconnectedSessionProceeds pins the complement: a
+// disconnected machine may just be mid-blip, so the attach still reaches the
+// gateway and the retryable agent-offline path decides.
+func TestOpenStream_DisconnectedSessionProceeds(t *testing.T) {
+	s := session.New("s1", "m1", "p1", "title", "/bin/bash", "", 1000)
+	s.SetStatus(session.StatusDisconnected)
+	store := &fakeSessionStore{data: map[string]session.Session{"s1": s}}
+	gw := &fakeGateway{}
+	uc := attach.New(store, gw, discardLogger(), &fakeAuditSink{})
+
+	if _, _, err := uc.OpenStream(context.Background(), "s1"); err != nil {
+		t.Fatalf("OpenStream: %v", err)
+	}
+	if gw.openCalls != 1 {
+		t.Errorf("gateway OpenDataStream calls: got %d, want 1", gw.openCalls)
 	}
 }
 

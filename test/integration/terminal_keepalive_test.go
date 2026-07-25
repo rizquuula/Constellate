@@ -23,11 +23,13 @@ import (
 // application-level {"type":"hb","ts":…} text frame on its keepalive tick, and
 // that PTY traffic keeps flowing alongside it.
 //
-// The complementary half of the keepalive contract — dropping a peer that never
-// answers the protocol ping — is covered deterministically at unit level by
-// TestTerminalHandler_KeepaliveDropsUnresponsivePeer in the wsbrowser package:
-// in-process it needs a client that never reads, which is easier to express
-// against the handler directly than against a full hub + PTY stack.
+// The complementary half of the keepalive contract — reaping a peer that has
+// gone silent, and equally NOT reaping one that is merely slow — is covered
+// deterministically at unit level by TestTerminalHandler_ReapsSilentPeer and
+// friends in the wsbrowser package. Teardown there is driven by peer silence
+// rather than by a single failed probe, and expressing it needs a client that
+// never reads, which is easier against the handler directly than against a full
+// hub + PTY stack.
 func TestTerminalKeepaliveHeartbeat(t *testing.T) {
 	logger := log.New("error", "text")
 

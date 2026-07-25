@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -27,8 +28,31 @@ const (
 // client branches on to decide whether reconnecting is worth trying.
 const (
 	closeSessionNotFound websocket.StatusCode = 4404
+	closeSessionEnded    websocket.StatusCode = 4410
 	closeAgentOffline    websocket.StatusCode = 4503
 )
+
+// staleTimeoutFactor derives the silence budget from the keepalive interval when
+// no explicit budget is configured: at the 15 s default that is 60 s, which is
+// at least three missed probe cycles and sits past the browser's own 45 s
+// watchdog, so a client always notices a dead link before the hub reaps it.
+const staleTimeoutFactor = 4
+
+// liveness records the last instant the browser peer proved it was still there.
+// Only evidence originating from the peer counts: a frame it sent, a pong it
+// answered, or a write of ours it actually drained. Writes that merely land in
+// the kernel send buffer are not evidence.
+type liveness struct {
+	lastMS atomic.Int64
+}
+
+// mark records the current instant as the most recent proof of peer life.
+func (l *liveness) mark() { l.lastMS.Store(time.Now().UnixMilli()) }
+
+// idle reports how long the peer has been silent as of now.
+func (l *liveness) idle(now time.Time) time.Duration {
+	return time.Duration(now.UnixMilli()-l.lastMS.Load()) * time.Millisecond
+}
 
 // AttachService is the consumer-side port for attaching to PTY sessions.
 // *attach.UseCase satisfies this interface.
@@ -43,6 +67,9 @@ type TerminalHandler struct {
 	log               *slog.Logger
 	keepaliveInterval time.Duration
 	pingTimeout       time.Duration
+	// staleTimeout is the peer-silence budget. Zero means "derive it from
+	// keepaliveInterval"; see staleAfter.
+	staleTimeout time.Duration
 }
 
 // TerminalOption customizes a TerminalHandler at construction time.
@@ -57,6 +84,17 @@ func WithKeepalive(interval, pingTimeout time.Duration) TerminalOption {
 		}
 		if pingTimeout > 0 {
 			h.pingTimeout = pingTimeout
+		}
+	}
+}
+
+// WithStaleTimeout overrides how long a peer may stay silent before the
+// attachment is reaped. Non-positive values are ignored; unset, the budget is
+// derived from the keepalive interval.
+func WithStaleTimeout(d time.Duration) TerminalOption {
+	return func(h *TerminalHandler) {
+		if d > 0 {
+			h.staleTimeout = d
 		}
 	}
 }
@@ -89,8 +127,18 @@ type heartbeatMsg struct {
 }
 
 // heartbeatFrame renders the text frame payload sent on every keepalive tick.
-func heartbeatFrame(now time.Time) ([]byte, error) {
-	return json.Marshal(heartbeatMsg{Type: "hb", TS: now.UnixMilli()})
+// Marshalling a struct of a string and an int64 cannot fail.
+func heartbeatFrame(now time.Time) []byte {
+	payload, _ := json.Marshal(heartbeatMsg{Type: "hb", TS: now.UnixMilli()})
+	return payload
+}
+
+// staleAfter is the peer-silence budget for this handler.
+func (h *TerminalHandler) staleAfter() time.Duration {
+	if h.staleTimeout > 0 {
+		return h.staleTimeout
+	}
+	return staleTimeoutFactor * h.keepaliveInterval
 }
 
 // closeCodeFor maps an attach or data-stream error onto the close code and
@@ -99,6 +147,8 @@ func closeCodeFor(err error) (websocket.StatusCode, string) {
 	switch {
 	case errors.Is(err, session.ErrNotFound):
 		return closeSessionNotFound, "session not found"
+	case errors.Is(err, session.ErrEnded):
+		return closeSessionEnded, "session ended"
 	case errors.Is(err, agentlink.ErrAgentOffline):
 		return closeAgentOffline, "agent offline"
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF),
@@ -139,7 +189,11 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("wsbrowser: attached", "sessionID", sessionID)
 
-	go h.keepalive(ctx, cancel, c, sessionID)
+	live := &liveness{}
+	live.mark()
+
+	go h.reaper(ctx, cancel, live, sessionID)
+	go h.prober(ctx, c, live, sessionID)
 
 	// Pump agent→browser.
 	go func() {
@@ -151,6 +205,9 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					cancel()
 					return
 				}
+				// A completed data write means the peer drained what came
+				// before it — real evidence the flow is alive.
+				live.mark()
 			}
 			if err != nil {
 				// The agent side went away (session process exited). Send a real
@@ -166,19 +223,21 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Pump browser→agent (main goroutine). It doubles as the concurrent reader
 	// that Conn.Ping requires to observe the peer's pong.
+readLoop:
 	for {
 		typ, data, err := c.Read(ctx)
 		if err != nil {
 			// The browser is gone or the conn is already closing — there is
 			// nobody left to hand a close frame to.
 			cancel()
-			break
+			break readLoop
 		}
+		live.mark()
 		switch typ {
 		case websocket.MessageBinary:
 			if _, werr := stream.Write(data); werr != nil {
 				cancel()
-				return
+				break readLoop
 			}
 		case websocket.MessageText:
 			var msg resizeMsg
@@ -197,12 +256,44 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("wsbrowser: detached", "sessionID", sessionID)
 }
 
-// keepalive ticks until ctx is done, emitting an application-level heartbeat
-// text frame plus a protocol ping. A failure of either means the peer is gone
-// (or its TCP flow is black-holed), so it cancels the handler ctx to tear the
-// pumps down. Writes are safe from this second goroutine: the library
-// serializes them internally.
-func (h *TerminalHandler) keepalive(ctx context.Context, cancel context.CancelFunc, c *websocket.Conn, sessionID string) {
+// reaper is the sole teardown authority for an attachment: it cancels the
+// handler ctx once the peer has been silent for longer than the stale budget.
+// It never touches the conn, so it keeps ticking even while the prober is
+// parked behind a congested write — which is exactly the case the old
+// probe-failure teardown got wrong, killing healthy but slow connections.
+func (h *TerminalHandler) reaper(ctx context.Context, cancel context.CancelFunc, live *liveness, sessionID string) {
+	stale := h.staleAfter()
+	interval := h.keepaliveInterval
+	if quarter := stale / 4; quarter > 0 && quarter < interval {
+		interval = quarter
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			if idle := live.idle(now); idle > stale {
+				h.log.Info("wsbrowser: peer silent, dropping conn",
+					"sessionID", sessionID, "idle", idle, "staleAfter", stale)
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+// prober keeps the flow warm and gathers liveness evidence: an application-level
+// heartbeat text frame the browser's own watchdog reads, plus a protocol ping.
+// Neither failure is fatal — both fire equally when the main goroutine is merely
+// parked in stream.Write or attach.Resize — so only a successful ping, which
+// requires our read path to have observed the peer's pong, counts as evidence.
+// The heartbeat write deliberately never does: a 34-byte frame keeps succeeding
+// into the kernel send buffer of a black-holed flow for hours.
+func (h *TerminalHandler) prober(ctx context.Context, c *websocket.Conn, live *liveness, sessionID string) {
 	ticker := time.NewTicker(h.keepaliveInterval)
 	defer ticker.Stop()
 
@@ -211,28 +302,21 @@ func (h *TerminalHandler) keepalive(ctx context.Context, cancel context.CancelFu
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			payload, err := heartbeatFrame(now)
-			if err != nil {
-				h.log.Debug("wsbrowser: heartbeat marshal failed", "sessionID", sessionID, "err", err)
-				continue
-			}
 			writeCtx, writeCancel := context.WithTimeout(ctx, h.pingTimeout)
-			err = c.Write(writeCtx, websocket.MessageText, payload)
+			err := c.Write(writeCtx, websocket.MessageText, heartbeatFrame(now))
 			writeCancel()
 			if err != nil {
 				h.log.Debug("wsbrowser: heartbeat write failed", "sessionID", sessionID, "err", err)
-				cancel()
-				return
 			}
 
 			pingCtx, pingCancel := context.WithTimeout(ctx, h.pingTimeout)
 			err = c.Ping(pingCtx)
 			pingCancel()
 			if err != nil {
-				h.log.Info("wsbrowser: keepalive ping failed, dropping conn", "sessionID", sessionID, "err", err)
-				cancel()
-				return
+				h.log.Debug("wsbrowser: keepalive ping failed", "sessionID", sessionID, "err", err)
+				continue
 			}
+			live.mark()
 		}
 	}
 }

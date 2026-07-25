@@ -256,7 +256,10 @@ func readUntil(t *testing.T, ctx context.Context, c *websocket.Conn, marker stri
 			t.Logf("readUntil: read error (accumulated %d bytes): %v", buf.Len(), err)
 			break
 		}
-		if typ == websocket.MessageBinary || typ == websocket.MessageText {
+		// Binary frames only: text frames carry hub control messages (the
+		// keepalive hb tick), and interleaving them into the search buffer can
+		// split a PTY marker in half.
+		if typ == websocket.MessageBinary {
 			buf.Write(data)
 		}
 		if strings.Contains(buf.String(), marker) {
