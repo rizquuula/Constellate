@@ -37,8 +37,10 @@ import (
 // newInProcessHub wires up a complete hub (SQLite + all use cases) backed by a
 // temporary database and returns the test server, the sessions use case, the
 // enroll use case (for agent enrollment), and a wsURL helper.
+// Optional termOpts are forwarded to the /ws/term handler (e.g. to shorten the
+// keepalive interval); with none, production defaults apply.
 // The caller is responsible for closing the returned *httptest.Server.
-func newInProcessHub(t *testing.T) (ts *httptest.Server, sessionsUC *sessions.UseCase, enrollUC *enroll.UseCase, wsURL func(string) string) {
+func newInProcessHub(t *testing.T, termOpts ...wsbrowser.TerminalOption) (ts *httptest.Server, sessionsUC *sessions.UseCase, enrollUC *enroll.UseCase, wsURL func(string) string) {
 	t.Helper()
 	logger := log.New("error", "text")
 
@@ -70,7 +72,7 @@ func newInProcessHub(t *testing.T) (ts *httptest.Server, sessionsUC *sessions.Us
 	overviewUC := overview.New(gateway, logger)
 	enrollUC = enroll.New(tokenStore, credStore, machineStore, auditUC, enroll.SystemClock{}, id.New, 15*time.Minute, logger)
 	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, overviewUC, enrollUC, logger)
-	termHandler := wsbrowser.NewTerminalHandler(attachUC, logger)
+	termHandler := wsbrowser.NewTerminalHandler(attachUC, logger, termOpts...)
 	overviewHandler := wsbrowser.NewOverviewHandler(overviewUC, logger)
 	srv := httpapi.NewServer("127.0.0.1:0", reg, sessionsUC, projectsUC, enrollUC, endpoint, termHandler, overviewHandler, nil, nil, false, logger)
 
