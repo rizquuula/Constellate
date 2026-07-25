@@ -1,11 +1,11 @@
-// Terminal key-sequence helpers for the touch KeyBar.
+// Terminal key-sequence helpers for the touch keypad.
 //
 // Pure, framework-free (no React, no DOM): every function maps a logical key
 // press to the raw bytes a PTY expects, so a caller can send them verbatim over
 // the terminal WebSocket. Kept dependency-free on purpose — this is the shared
 // vocabulary between the on-screen key controls and the wire.
 
-// Special (non-printable) keys the KeyBar can emit. Printable characters are
+// Special (non-printable) keys the keypad can emit. Printable characters are
 // sent as-is and are not part of this set.
 export type SpecialKey =
   | 'Escape'
@@ -22,6 +22,19 @@ export type SpecialKey =
   | 'PageDown'
   | 'Insert'
   | 'Delete'
+  | 'ShiftTab'
+  | 'F1'
+  | 'F2'
+  | 'F3'
+  | 'F4'
+  | 'F5'
+  | 'F6'
+  | 'F7'
+  | 'F8'
+  | 'F9'
+  | 'F10'
+  | 'F11'
+  | 'F12'
 
 // Modifier state to fold into a key press. Both false ⇒ the data is untouched.
 export interface KeyMods {
@@ -97,6 +110,23 @@ const FIXED_KEY_SEQ: Readonly<Record<string, string>> = {
   PageDown: '\x1b[6~',
   Insert: '\x1b[2~',
   Delete: '\x1b[3~',
+  // Back-tab (CSI Z) — Shift+Tab has no cursor-mode variant.
+  ShiftTab: '\x1b[Z',
+  // F1–F4 are SS3 (ESC O) in *both* normal and application cursor mode, so they
+  // belong here rather than in the cursor table: appCursor must not change them.
+  F1: '\x1bOP',
+  F2: '\x1bOQ',
+  F3: '\x1bOR',
+  F4: '\x1bOS',
+  // F5–F12 are CSI ~ sequences; note the gaps at 16 and 22 (xterm convention).
+  F5: '\x1b[15~',
+  F6: '\x1b[17~',
+  F7: '\x1b[18~',
+  F8: '\x1b[19~',
+  F9: '\x1b[20~',
+  F10: '\x1b[21~',
+  F11: '\x1b[23~',
+  F12: '\x1b[24~',
 }
 
 // Cursor/navigation keys that switch form between normal (CSI, ESC [) and

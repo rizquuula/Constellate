@@ -124,6 +124,24 @@ const SEQ_TABLE: ReadonlyArray<[SpecialKey, string, string]> = [
   ['PageDown', '\x1b[6~', '\x1b[6~'],
   ['Insert', '\x1b[2~', '\x1b[2~'],
   ['Delete', '\x1b[3~', '\x1b[3~'],
+  ['ShiftTab', '\x1b[Z', '\x1b[Z'],
+  ['F1', '\x1bOP', '\x1bOP'],
+  ['F2', '\x1bOQ', '\x1bOQ'],
+  ['F3', '\x1bOR', '\x1bOR'],
+  ['F4', '\x1bOS', '\x1bOS'],
+  ['F5', '\x1b[15~', '\x1b[15~'],
+  ['F6', '\x1b[17~', '\x1b[17~'],
+  ['F7', '\x1b[18~', '\x1b[18~'],
+  ['F8', '\x1b[19~', '\x1b[19~'],
+  ['F9', '\x1b[20~', '\x1b[20~'],
+  ['F10', '\x1b[21~', '\x1b[21~'],
+  ['F11', '\x1b[23~', '\x1b[23~'],
+  ['F12', '\x1b[24~', '\x1b[24~'],
+]
+
+const FUNCTION_KEYS: readonly SpecialKey[] = [
+  'F1', 'F2', 'F3', 'F4', 'F5', 'F6',
+  'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
 ]
 
 describe('specialKeySeq', () => {
@@ -136,4 +154,10 @@ describe('specialKeySeq', () => {
       expect(specialKeySeq(key, true)).toBe(app)
     })
   }
+
+  it('emits identical F-key sequences regardless of cursor mode', () => {
+    for (const key of FUNCTION_KEYS) {
+      expect(specialKeySeq(key, true)).toBe(specialKeySeq(key, false))
+    }
+  })
 })

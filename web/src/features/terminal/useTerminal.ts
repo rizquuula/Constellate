@@ -13,10 +13,11 @@ import {
 } from '../../api/reconnect'
 import { applyModifiers, specialKeySeq } from './keys'
 import type { KeyMods, SpecialKey } from './keys'
+import { DEFAULT_INPUT_MODE, imeAttrsFor, type InputMode } from './inputMode'
 import { attachTouchScroll } from './touchScroll'
 
 // Imperative handle returned by useTerminal, so out-of-tree controls (the touch
-// KeyBar) can drive the live terminal without prop-drilling the xterm instance.
+// Keypad) can drive the live terminal without prop-drilling the xterm instance.
 // Methods dereference the hook's live refs, so the handle stays valid across a
 // reloadKey teardown + reattach.
 export interface TerminalHandle {
@@ -33,6 +34,7 @@ export interface TerminalHandle {
   setFontSize(px: number): void
   getFontSize(): number
   refit(): void
+  setInputMode(mode: InputMode): void
 }
 
 // Connection state of the pane's terminal socket, surfaced so the pane can show
@@ -76,6 +78,17 @@ function readFontSize(): number {
   } catch {
     return DEFAULT_FONT_SIZE
   }
+}
+
+// Applies an input mode to xterm's helper textarea — the one DOM write in the
+// input-mode path; the decision of *what* to write lives in inputMode.ts.
+function applyImeAttrs(ta: HTMLTextAreaElement, mode: InputMode): void {
+  const { attrs, readOnly } = imeAttrsFor(mode)
+  for (const [name, value] of Object.entries(attrs)) {
+    if (value === null) ta.removeAttribute(name)
+    else ta.setAttribute(name, value)
+  }
+  ta.readOnly = readOnly
 }
 
 function writeFontSize(px: number): void {
@@ -122,8 +135,12 @@ export function useTerminal(
   const retryNow = useCallback(() => { requestRetryRef.current() }, [])
 
   // One-shot modifier state lives outside the effect so it survives a reloadKey
-  // teardown. Subscribers (the KeyBar) are notified on every change.
+  // teardown. Subscribers (the Keypad) are notified on every change.
   const modsRef = useRef<KeyMods>({ ctrl: false, alt: false })
+  // Which input mode the helper textarea should be in. Also at hook level so a
+  // reloadKey teardown + reattach re-applies the user's choice to the new
+  // textarea instead of silently reverting to the native keyboard.
+  const inputModeRef = useRef<InputMode>(DEFAULT_INPUT_MODE)
   const modSubsRef = useRef<Set<(m: KeyMods) => void>>(new Set())
   const selSubsRef = useRef<Set<(hasSelection: boolean) => void>>(new Set())
 
@@ -221,6 +238,19 @@ export function useTerminal(
         const ws = wsRef.current
         if (ws) sendResize(ws, term.cols, term.rows)
       },
+      setInputMode: (mode) => {
+        inputModeRef.current = mode
+        const ta = termRef.current?.textarea
+        if (!ta) return
+        applyImeAttrs(ta, mode)
+        // Changing inputmode on an already-focused element does not re-negotiate
+        // the virtual keyboard, so bounce focus to make the switch take effect
+        // on the spot rather than on the next tap.
+        if (document.activeElement === ta) {
+          ta.blur()
+          termRef.current?.focus()
+        }
+      },
     }
   }
 
@@ -249,6 +279,10 @@ export function useTerminal(
     term.loadAddon(fitAddon)
     term.open(container)
     fitAddon.fit()
+
+    // Before anything can focus the new terminal: re-apply the chosen input
+    // mode, since open() creates a fresh helper textarea with default attrs.
+    if (term.textarea) applyImeAttrs(term.textarea, inputModeRef.current)
 
     // Ctrl+Shift+C / Ctrl+Shift+V → copy the selection / paste from the system
     // clipboard, instead of the browser default (Ctrl+Shift+C opens DevTools

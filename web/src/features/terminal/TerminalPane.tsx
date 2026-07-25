@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, memo } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { useStore } from '../../store'
 import { useTerminal } from './useTerminal'
-import { KeyBar } from './KeyBar'
+import { Keypad } from './Keypad'
 import { PaneDropZones } from './dnd'
 import { cropPwd } from './pwd'
 import { useCoarsePointer } from '../../breakpoints'
@@ -55,7 +55,7 @@ function TerminalPaneImpl({
     sessionId != null && !sessionEnded,
   )
   const coarsePointer = useCoarsePointer()
-  const showKeyBar = coarsePointer && focused && sessionId != null && !sessionEnded
+  const showKeypad = coarsePointer && focused && sessionId != null && !sessionEnded
 
   // The ended overlay takes precedence — never stack two badges on one pane.
   const showConnBadge = !sessionEnded
@@ -283,7 +283,7 @@ function TerminalPaneImpl({
         />
       </div>
 
-      {showKeyBar && <KeyBar handle={term} />}
+      {showKeypad && <Keypad handle={term} />}
     </div>
   )
 }

@@ -1,8 +1,15 @@
 import { useEffect } from 'react'
 import { useCoarsePointer } from '../../breakpoints'
 
-// Keeps the app shell sized to the *visible* viewport when the mobile soft
-// keyboard opens, so the terminal + KeyBar stay above it.
+// Keeps the app shell sized to the *visible* viewport when it shrinks under the
+// app — chiefly when the mobile soft keyboard opens — so the terminal and the
+// on-screen keypad stay above it.
+//
+// In the default 'keypad' input mode there is no system keyboard to open, so
+// this hook is effectively a no-op there. It stays because two cases still
+// shrink the visual viewport: 'native' input mode, where the user has opted the
+// system keyboard back in, and iOS Safari's collapsing/expanding URL bar, which
+// changes the visible height on its own.
 //
 // Platform behaviour this hook bridges:
 //   • iOS Safari never resizes the layout viewport — it pans the page and only

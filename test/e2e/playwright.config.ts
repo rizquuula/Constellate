@@ -29,7 +29,7 @@ export default defineConfig({
     },
     {
       // Mobile-emulation project: Pixel 7 reports isMobile + hasTouch, so
-      // Chromium exposes `pointer: coarse` and the phone/drawer/KeyBar behaviours
+      // Chromium exposes `pointer: coarse` and the phone/drawer/keypad behaviours
       // activate. Scoped to responsive.spec.ts so the desktop specs don't rerun
       // under emulation.
       name: 'mobile',

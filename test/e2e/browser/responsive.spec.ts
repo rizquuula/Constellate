@@ -1,10 +1,11 @@
-import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { createRunningSession, onlineMachineId } from './helpers';
 
 // These specs run under the `mobile` Playwright project (devices['Pixel 7'] →
 // isMobile + hasTouch), so Chromium reports `pointer: coarse` and the phone
-// drawer, MobilePane leaf switcher and KeyBar all activate. The desktop
-// `chromium` project ignores this file (see playwright.config.ts testIgnore).
+// drawer, MobilePane leaf switcher and the on-screen Keypad all activate. The
+// desktop `chromium` project ignores this file (see playwright.config.ts
+// testIgnore).
 
 // seedTwoLeafWindow writes a valid v2 workspace blob binding two leaves (in one
 // horizontal split) to the two sessions, so MobilePane renders the leaf switcher
@@ -61,6 +62,36 @@ async function attachSessionViaDrawer(page: Page, title: string): Promise<void> 
   await expect(page.locator('.layout.drawer-open')).toHaveCount(0);
 }
 
+// tapKeys presses keypad keys in order by their `data-key-id` (the stable e2e
+// handle every key in keypadLayout.ts carries). Keys emit on *pointerdown*, and
+// Playwright's click() dispatches a full pointerdown/pointerup/click sequence —
+// the press helper suppresses the trailing compatibility click, so one click is
+// exactly one keystroke.
+async function tapKeys(keypad: Locator, ids: readonly string[]): Promise<void> {
+  for (const id of ids) {
+    await keypad.locator(`[data-key-id="${id}"]`).click();
+  }
+}
+
+// ptyGeometry asks the shell for its window size and returns it as `<rows>x<cols>`.
+// Typed with the hardware keyboard (page.keyboard) because this measures the
+// PTY, not the keypad. The command substitution keeps the echoed input line
+// ("geo_$(stty size …)") textually distinct from the output ("geo_24x80"), so
+// the digits-bearing match can only come from the shell's answer.
+async function ptyGeometry(page: Page, marker: string): Promise<string> {
+  const xtermRows = page.locator('.xterm-rows');
+  const answer = new RegExp(`${marker}_(\\d+x\\d+)`);
+
+  await page.locator('.xterm-screen').click();
+  await page.keyboard.type(`echo ${marker}_$(stty size | tr " " "x")`);
+  await page.keyboard.press('Enter');
+  await expect(xtermRows).toContainText(answer, { timeout: 10_000 });
+
+  const matched = ((await xtermRows.innerText()) ?? '').match(answer);
+  if (!matched) throw new Error(`unreachable: ${marker} geometry matched then vanished`);
+  return matched[1];
+}
+
 test('PWA: manifest, icon, service worker and theme-color are served', async ({ page, request }) => {
   const manifest = await request.get('/manifest.webmanifest');
   expect(manifest.status()).toBe(200);
@@ -100,9 +131,12 @@ test('drawer: hamburger opens sidebar, tapping a running session attaches one pa
   await expect(page.locator('.xterm-rows')).toBeVisible({ timeout: 15_000 });
 });
 
-test('keybar: Ctrl one-shot sends SIGINT to the PTY', async ({ page, request }) => {
+test('keypad: types a command with taps alone and Ctrl one-shot sends SIGINT', async ({
+  page,
+  request,
+}) => {
   const machineID = await onlineMachineId(request);
-  const title = `keybar-${Date.now()}`;
+  const title = `keypad-${Date.now()}`;
   await createRunningSession(request, machineID, title);
 
   await page.goto('/');
@@ -111,24 +145,48 @@ test('keybar: Ctrl one-shot sends SIGINT to the PTY', async ({ page, request }) 
   const xtermRows = page.locator('.xterm-rows');
   await expect(xtermRows).toBeVisible({ timeout: 15_000 });
 
-  // The KeyBar activates only for a focused, live pane under coarse pointer.
-  const keybar = page.locator('.keybar');
-  await expect(keybar).toBeVisible();
+  // The keypad activates only for a focused, live pane under coarse pointer.
+  const keypad = page.locator('.keypad');
+  await expect(keypad).toBeVisible();
+
+  // This attribute *is* the fix: with no native virtual keyboard there is no
+  // xterm IME composing region, so punctuation cannot make CompositionHelper
+  // replay characters it already sent. If this regresses, typing '.' on a phone
+  // duplicates the word again (see inputMode.ts).
+  await expect(page.locator('.xterm-helper-textarea')).toHaveAttribute('inputmode', 'none');
 
   // Tapping Esc/Tab must not crash the pane (byte delivery is proven below).
-  // Scope to the KeyBar so 'Tab' can't match a window-tab button.
-  await keybar.getByRole('button', { name: 'Escape' }).click();
-  await keybar.getByRole('button', { name: 'Tab', exact: true }).click();
-  await expect(keybar).toBeVisible();
+  // Scope to the keypad so 'Tab' can't match a window-tab button.
+  await keypad.getByRole('button', { name: 'Escape' }).click();
+  await keypad.getByRole('button', { name: 'Tab', exact: true }).click();
+  await expect(keypad).toBeVisible();
 
-  // Start a blocking command, then interrupt it with the KeyBar's one-shot Ctrl.
+  // The whole point of the feature: build `echo keypad_ok_taps` from taps only —
+  // no page.keyboard anywhere in this block. The two underscores come from Shift
+  // + the '-' key, so the one-shot shift latch rides along in the same proof.
+  await tapKeys(keypad, [
+    'letters-e', 'letters-c', 'letters-h', 'letters-o', 'letters-bottom-space',
+    'letters-k', 'letters-e', 'letters-y', 'letters-p', 'letters-a', 'letters-d',
+    'letters-shift', 'letters-bottom-minus',
+    'letters-o', 'letters-k',
+    'letters-shift', 'letters-bottom-minus',
+    'letters-t', 'letters-a', 'letters-p', 'letters-s',
+    'letters-bottom-enter',
+  ]);
+
+  // xterm has no local echo — every glyph on screen came back from the PTY — so
+  // seeing the text at all proves the taps crossed browser → hub → agent → shell.
+  await expect(xtermRows).toContainText('keypad_ok_taps', { timeout: 10_000 });
+
+  // Start a blocking command. Typed with page.keyboard rather than taps: the tap
+  // path is already proven above, and this keeps the Ctrl assertion focused.
   await page.locator('.xterm-screen').click();
   await page.keyboard.type('sleep 30');
   await page.keyboard.press('Enter');
 
-  // One-shot modifier: arm Ctrl on the KeyBar, then the next typed key ('c')
+  // One-shot modifier: arm Ctrl on the keypad, then the next typed key ('c')
   // is transmitted as 0x03 → SIGINT kills `sleep`, returning us to a prompt.
-  await keybar.getByRole('button', { name: 'Control modifier' }).click();
+  await keypad.getByRole('button', { name: 'Control modifier' }).click();
   await page.keyboard.type('c');
 
   // Proof the interrupt reached the PTY: the shell accepts a new command again.
@@ -137,6 +195,65 @@ test('keybar: Ctrl one-shot sends SIGINT to the PTY', async ({ page, request }) 
   await page.keyboard.type(`echo ${marker}`);
   await page.keyboard.press('Enter');
   await expect(xtermRows).toContainText(marker, { timeout: 10_000 });
+});
+
+test('keypad: a layer switch must not resize the PTY', async ({ page, request }) => {
+  const machineID = await onlineMachineId(request);
+  const title = `keypadgeo-${Date.now()}`;
+  await createRunningSession(request, machineID, title);
+
+  await page.goto('/');
+  await attachSessionViaDrawer(page, title);
+
+  await expect(page.locator('.xterm-rows')).toBeVisible({ timeout: 15_000 });
+
+  const keypad = page.locator('.keypad');
+  await expect(keypad).toBeVisible();
+
+  const before = await ptyGeometry(page, 'geoa');
+
+  // '?123' swaps the letters layer for the symbols layer.
+  await tapKeys(keypad, ['letters-bottom-layer']);
+  await expect(keypad.locator('[data-key-id="symbols-period"]')).toBeVisible();
+
+  const after = await ptyGeometry(page, 'geob');
+
+  // End-to-end guard for the LAYER_ROWS invariant in keypadLayout.ts: the keypad
+  // sits in a flex column under a flex:1 terminal body, so a layer of a different
+  // height would change the body's height, fire the pane's ResizeObserver, refit
+  // xterm and send a real resize to the agent — silently reflowing every TUI
+  // running on the user's machine just because they reached for a '.'.
+  expect(after).toBe(before);
+});
+
+test('keypad: a hardware keyboard still types while the native one is suppressed', async ({
+  page,
+  request,
+}) => {
+  const machineID = await onlineMachineId(request);
+  const title = `keypadhw-${Date.now()}`;
+  await createRunningSession(request, machineID, title);
+
+  await page.goto('/');
+  await attachSessionViaDrawer(page, title);
+
+  const xtermRows = page.locator('.xterm-rows');
+  await expect(xtermRows).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.keypad')).toBeVisible();
+
+  // Keypad mode marks xterm's helper textarea inputmode="none" *and* readOnly.
+  const textarea = page.locator('.xterm-helper-textarea');
+  await expect(textarea).toHaveAttribute('inputmode', 'none');
+  await expect(textarea).toHaveJSProperty('readOnly', true);
+
+  // The tablet-with-Bluetooth-keyboard regression guard: readOnly suppresses
+  // input/composition events but *not* keydown/keypress, which is xterm's real
+  // key path. If that ever stops holding, hardware typing dies on touch devices —
+  // and most other specs in this suite, which drive terminals via page.keyboard.
+  await page.locator('.xterm-screen').click();
+  await page.keyboard.type('echo hardware_$(echo ok)');
+  await page.keyboard.press('Enter');
+  await expect(xtermRows).toContainText('hardware_ok', { timeout: 10_000 });
 });
 
 test('leaf switcher: two leaves in one window step 1/2 → 2/2', async ({ page, context, request }) => {

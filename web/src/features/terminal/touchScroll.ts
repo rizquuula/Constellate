@@ -17,7 +17,9 @@
 import type { Terminal } from '@xterm/xterm'
 
 // A drag of less than this many pixels vertically is not yet a scroll — it keeps
-// a tap eligible to become the compat click (focus + soft keyboard).
+// a tap eligible to become the compat click that focuses the terminal (in
+// 'native' input mode that focus is also what raises the soft keyboard; in the
+// default 'keypad' mode no system keyboard is raised at all).
 const VERTICAL_SLOP_PX = 8
 
 // Once horizontal travel exceeds this and dominates, the gesture is a horizontal

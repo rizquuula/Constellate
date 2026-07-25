@@ -115,6 +115,57 @@ sequenceDiagram
   path on hover. Distinct from the fixed spawn `cwd` — see [05 · Data model](05-data-model.md).
 - Bumping `reloadKey` (the reload button / `Shift+Alt+R`) tears down and reattaches the socket.
 
+### Touch input — the keypad replaces the native keyboard
+
+**Why.** Typing `.` on Android/GBoard duplicated already-sent characters. The cause is IME
+composition inside xterm.js: letters sit in an uncommitted composing region on the helper textarea,
+and when punctuation commits the word `CompositionHelper._finalizeComposition` re-sends
+`textarea.value.substring(compositionPosition.start)` — bytes it already emitted keystroke by
+keystroke (upstream xterm.js **#3191** and **#4152**). Attributes cannot fix it: xterm already sets
+`autocorrect`/`autocapitalize`/`spellcheck` off on that textarea itself.
+
+**How.** On coarse-pointer devices the app suppresses the system keyboard outright
+(`inputMode.ts` → `InputMode = 'keypad' | 'native'`, default `keypad`, persisted per device under
+`constellate.inputMode`). `imeAttrsFor()` returns the attributes plus a `readOnly` flag; `useTerminal`
+performs the single DOM write (re-applied after `fitAddon.fit()` so it survives a `reloadKey`
+reattach):
+
+| Written to `.xterm-helper-textarea` | Effect |
+|---|---|
+| `inputmode="none"` | Chrome/Android + iOS Safari never raise the virtual keyboard |
+| `readOnly = true` | suppresses `input`/composition events — **not** `keydown`/`keypress` |
+
+That last row is why hardware keyboards on tablets keep typing (xterm's real key path is `keydown`)
+and why paste keeps working (`navigator.clipboard.readText()` → `term.paste()`, not an input event).
+
+**The keypad.** `Keypad.tsx` renders an always-visible **command row** (Esc, Tab, Ctrl, Alt, arrows,
+Fn, ⌨) above one of three **layers** — `letters`, `symbols`, `fn`. The layout is *pure data* in
+`keypadLayout.ts` (no React, no DOM): each key is an `id` + labels + one `KeypadAction` variant, so
+the renderer is generic and adding a key is a layout edit only. Presses emit on `pointerdown`
+(`useKeyPress.ts`) with long-press auto-repeat for Backspace/Delete/arrows. Shift is a three-state
+latch — `off` → `once` → `lock` (a second tap within 400 ms caps-locks).
+
+> #### ⚠️ `LAYER_ROWS` — every layer must have exactly 4 rows
+> This is load-bearing, not cosmetic. The keypad sits in a flex column beneath a `flex:1` terminal
+> body, so **keypad height → terminal height**:
+>
+> ```mermaid
+> flowchart LR
+>     T["taller/shorter keypad"] --> RO[pane ResizeObserver]
+>     RO --> F["fitAddon.fit()"]
+>     F --> WS["{'type':'resize'} → hub → agent"]
+>     WS --> PTY["real PTY resize<br/>every running TUI reflows"]
+> ```
+>
+> A **layer** switch must never do that — reaching for a `.` may not reflow the user's `vim`. A
+> **mode** toggle (keypad ↔ native) legitimately does, since native mode drops the bottom row.
+> Guarded by a unit test on the layout and end-to-end by `keypad: a layer switch must not resize the
+> PTY` (`test/e2e/browser/responsive.spec.ts`, which reads `stty size` either side of the switch).
+
+**Native mode.** The ⌨ key toggles back to the system keyboard for voice input, emoji and non-Latin
+IMEs; the choice persists per device. Its attributes are best-effort hardening only — **the
+composition bug can still duplicate characters there**. That is exactly why `keypad` is the default.
+
 ---
 
 ## Overview — the color-tile grid

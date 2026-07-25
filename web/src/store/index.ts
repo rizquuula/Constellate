@@ -49,6 +49,7 @@ import {
   reorderWindow as listReorderWindow,
   normalizeFocus,
 } from '../features/terminal/windowList'
+import { INPUT_MODE_KEY, parseInputMode, type InputMode } from '../features/terminal/inputMode'
 import { COLLAPSED_KEY, parseCollapsed, serializeCollapsed, toggleKey } from '../features/sidebar/collapse'
 import { visibleSessionIds } from '../features/sidebar/order'
 
@@ -261,6 +262,11 @@ interface Store {
   setShowRevokedMachines: (v: boolean) => void
   collapsed: Set<string>
   toggleCollapsed: (key: string) => void
+  // Whether terminals take input from the on-screen keypad (native virtual
+  // keyboard suppressed) or the native keyboard. A per-device preference, not
+  // per-pane — every terminal on this device behaves the same way.
+  inputMode: InputMode
+  setInputMode: (m: InputMode) => void
 
   // ── dashboard ─────────────────────────────────────────────────────────────
   dashboard: Dashboard | null
@@ -371,6 +377,11 @@ export const useStore = create<Store>((set, get) => ({
     const next = toggleKey(get().collapsed, key)
     lsSet(COLLAPSED_KEY, serializeCollapsed(next))
     set({ collapsed: next })
+  },
+  inputMode: parseInputMode(lsGet(INPUT_MODE_KEY, '')),
+  setInputMode: (m) => {
+    lsSet(INPUT_MODE_KEY, m)
+    set({ inputMode: m })
   },
 
   dashboard: null,

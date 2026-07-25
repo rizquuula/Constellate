@@ -100,6 +100,13 @@ OSC 133 shell hook documented in `docs/shell-integration.md`.
 on the machine DTO; the sidebar shows `12% · 5.4/16 GB` under the machine name while online.
 Additive; older peers ignore it.
 
+**Mobile keypad.** On coarse-pointer devices the native virtual keyboard is suppressed
+(`inputmode="none"` + `readOnly` on xterm's helper textarea, `features/terminal/inputMode.ts`) because
+xterm.js IME composition replays already-sent characters when punctuation commits a word; input comes
+instead from an in-app on-screen keypad (`Keypad.tsx` over the pure-data `keypadLayout.ts` — command
+row + `letters`/`symbols`/`fn` layers, all exactly `LAYER_ROWS` tall so a layer switch never
+ResizeObserver-resizes the PTY), with a ⌨ escape hatch back to the native keyboard.
+
 ## Conventions worth knowing
 - Control stream: agent-opened/hub-accepted. **Data streams: hub-opened/agent-accepted**, first line is
   `transport.AttachHeader{sessionID}`, then raw PTY bytes. `/ws/term` uses **binary** frames for terminal

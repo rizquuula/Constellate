@@ -1393,11 +1393,15 @@ body {
   display: none;
 }
 
-/* ── Mobile terminal controls (KeyBar) ────────────────────────────────────── */
-/* On-screen key row shown only on coarse-pointer devices; renders below the
-   terminal body so the physical soft keyboard can reach Esc, Ctrl, arrows, and
-   shell symbols it otherwise cannot send. */
-.keybar {
+/* ── Mobile terminal controls (Keypad) ────────────────────────────────────── */
+/* Full on-screen keyboard shown only on coarse-pointer devices; it renders below
+   the terminal body and replaces the *native* virtual keyboard, which cannot be
+   trusted on xterm.js (IME composition replays already-sent characters — see
+   inputMode.ts). Rows come from keypadLayout.ts; the CSS is generic over them. */
+.keypad {
+  /* One shared key height so every layer is exactly as tall as every other: a
+     layer switch must never resize the pane and therefore the user's PTY. */
+  --keypad-key-h: clamp(34px, 6.2dvh, 46px);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1407,45 +1411,106 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
-.keybar-row {
+.keypad-row {
   display: flex;
-  flex-wrap: nowrap;
   gap: 4px;
+  min-height: var(--keypad-key-h);
+}
+
+/* The classic staggered `asdf` row: one key narrower, so it is inset instead. */
+.keypad-row-inset {
+  padding-inline: 5%;
+}
+
+/* The only scrollable row. The command row carries the widest labels (Ctrl,
+   Alt, Esc), so below ~320px it needs an escape hatch — but letter rows must
+   never scroll, or keys would slide out from under the finger mid-typing. */
+.keypad-row-command {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
 }
 
-.keybar-key {
-  flex-shrink: 0;
+.keypad-key {
+  /* --span is the key's width in row units, set inline from the layout data. */
+  flex: var(--span, 1) 1 0;
+  min-width: 0;
+  min-height: var(--keypad-key-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   background: var(--surface-hover);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  white-space: nowrap;
   cursor: pointer;
   touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Without this iOS pops a selection callout over a long-pressed key, which is
+     exactly the gesture that arms auto-repeat. */
+  -webkit-touch-callout: none;
 }
 
-.keybar-key:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent);
+/* Modifiers and utility keys sit back so the letters read as the primary field. */
+.keypad-key-mod,
+.keypad-key-util {
+  color: var(--text-secondary);
+  background: var(--surface-raised);
 }
 
-.keybar-key[aria-pressed='true'],
-.keybar-key-armed {
+.keypad-key-accent {
   color: var(--accent-text);
   background: var(--accent-bg);
   border-color: var(--accent-border);
 }
 
-.keybar-key:disabled {
+/* Caps lock is signalled by a shape (an underline), not colour alone, so it is
+   still legible to colourblind users and beside the armed accent styling. */
+.keypad-key-lock {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* Press feedback must be instant — a transition here would read as lag on the
+   one interaction where latency is most felt. */
+.keypad-key:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.keypad-key[aria-pressed='true'] {
+  color: var(--accent-text);
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+/* Last, so a press is always visible: --surface-raised is already the resting
+   background of the mod/util keys, and --accent-bg the resting background of an
+   armed one, so only a distinct tint reads as feedback on every key. */
+.keypad-key:active {
+  color: var(--accent-text);
+  background: var(--accent-bg-hover);
+}
+
+.keypad-key:disabled {
   color: var(--text-faint);
   opacity: 0.5;
   cursor: default;
+}
+
+/* Landscape phones have almost no vertical room; shrink the keys rather than
+   let the keypad eat the terminal. */
+@media (orientation: landscape) and (max-height: 480px) {
+  .keypad {
+    --keypad-key-h: 30px;
+  }
+
+  .keypad-key {
+    font-size: var(--text-xs);
+  }
 }
 
 /* ── Legacy terminal area (kept for CSS reset compatibility) ───────────────── */
@@ -3200,7 +3265,6 @@ body {
   .collapse-btn,
   .pane-btn,
   .mobile-leaf-btn,
-  .keybar-key,
   .session-confirm-yes,
   .session-confirm-no,
   .snackbar-close,
@@ -3234,6 +3298,12 @@ body {
     min-height: 44px;
     min-width: 36px;
   }
+
+  /* The keypad is deliberately absent from the list above: ten keys in one row
+     cannot each be 44px wide on a 360px screen (that would need 440px plus
+     gaps), so the 44px floor is honoured *vertically* instead, via
+     --keypad-key-h. The resulting ≈32×44 target clears WCAG 2.5.8's 24×24
+     minimum comfortably, and matches what every system keyboard already does. */
 
   .pane-rename-btn {
     display: inline-flex;
