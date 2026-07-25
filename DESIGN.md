@@ -1149,7 +1149,9 @@ Sessions survive an agent restart. The single-process agent is split into two ro
   close codes are a hint. Keystrokes are **not** buffered while disconnected (replaying a stale
   `rm …\n` minutes later is worse than dropping it; the badge makes the drop visible).
 - **Done when:** killing the network mid-session shows a "Reconnecting…" badge and, on restore,
-  the pane heals itself with the scrollback replayed exactly once (`reconnect.spec.ts`).
+  the pane heals itself with the scrollback replayed exactly once (`reconnect.spec.ts`); an
+  agent-side blip (session `disconnected` → back to `running`) also replays exactly once
+  (`agent-blip.spec.ts`).
 
 ---
 
