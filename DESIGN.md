@@ -454,6 +454,16 @@ GET /ws/overview                         snapshot feed for the grid (server push
 GET /ws/agent                            agent dial-home endpoint (credential auth; NOT browser-facing)
 ```
 
+`/ws/term` framing: **binary** frames are raw PTY bytes both ways; **text** frames are JSON
+control messages. Browser→hub: `{"type":"resize","cols":N,"rows":N}`. Hub→browser:
+`{"type":"hb","ts":<unix-ms>}` — a ~15 s liveness heartbeat (JS cannot observe protocol-level
+pings, which the hub also sends for its own dead-peer detection). Unknown `type`s are ignored on
+both sides, so new control frames are additive. Close codes the client branches on:
+**4404** session not found (don't retry), **4503** agent offline (retry), **1001** agent stream
+closed (retry), **1011** other attach failure (retry); an abrupt network death still surfaces as
+1006 (retry). This framing is hub-internal (the SPA is embedded in the hub binary) — it is *not*
+part of the hub↔agent wire protocol and needs no version bump.
+
 **Static**
 ```
 GET /  and /assets/*                     the React app, embedded in the hub binary via go:embed
@@ -1097,6 +1107,36 @@ Sessions survive an agent restart. The single-process agent is split into two ro
   The existing 2 s session poll refreshes it; no new fetch.
 - **Done when:** a pane header shows where its shell is, and running `cd /etc` updates it within a
   couple of heartbeats.
+
+### Post-M7 — resilient terminal sockets *(done)*
+- A network blip killed each pane's `/ws/term` socket **silently**: no `onclose` handler, input
+  silently dropped, and the status dot reflects the *backend* session status — so a frozen pane
+  still looked "running" until the operator hit the manual reload button. The overview socket
+  already auto-reconnected (flat 2 s); the terminal panes now self-heal too.
+- **Hub** (`wsbrowser/terminal.go`): per-connection keepalive — each 15 s tick writes the
+  `{"type":"hb"}` text frame then a protocol `Ping` (10 s bounded); either failing tears the
+  attach down, so NAT-black-holed browsers free their agent stream instead of leaking it. Attach
+  and agent-stream errors now map to real close codes (`closeCodeFor`: 4404 / 4503 / 1001 / 1011,
+  see §9) instead of a universal 1006. Options via variadic `WithKeepalive` so tests can shorten.
+- **Frontend** (`useTerminal.ts`): the one big effect split in two — terminal lifecycle (xterm
+  instance, addons, ResizeObserver) vs connection (socket + reconnect state machine:
+  `connecting|open|reconnecting|stopped`). Policy is a pure module (`api/reconnect.ts`, unit-
+  tested): backoff 300 ms ×2 → 15 s cap, ±20 % jitter; a connection open ≥3 s resets the streak;
+  5 consecutive unstable attempts → `stopped` (badge + Retry button). A 45 s staleness watchdog
+  is armed **only after the first `hb`** — against an older hub it stays disarmed, so version skew
+  can't cause false reconnect loops. `online`/`visibilitychange` retries immediately (0–300 ms
+  per-pane stagger to avoid a replay stampede), even from `stopped`.
+- **Replay dedupe:** the agent replays its scrollback ring on every attach; on a reconnect the
+  pre-blip screen is still in the kept-alive xterm, so the client calls `term.reset()` (not
+  `clear()` — modes/alt-screen must go too) on the **first binary frame** after a reconnect,
+  deferred to avoid a blank flash.
+- **The gate that matters:** the socket is enabled only for `running` sessions
+  (`TerminalPane` passes `enabled = !sessionEnded`) — an exited/lost PTY can never be re-attached,
+  and retrying it forever would hammer the hub. Session status is the authoritative stop signal;
+  close codes are a hint. Keystrokes are **not** buffered while disconnected (replaying a stale
+  `rm …\n` minutes later is worse than dropping it; the badge makes the drop visible).
+- **Done when:** killing the network mid-session shows a "Reconnecting…" badge and, on restore,
+  the pane heals itself with the scrollback replayed exactly once (`reconnect.spec.ts`).
 
 ---
 
