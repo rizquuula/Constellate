@@ -322,3 +322,51 @@ export function orderedLeafIds(root: PaneNode): string[] {
   if (root.kind === 'leaf') return [root.id]
   return root.children.flatMap((child) => orderedLeafIds(child))
 }
+
+export type PaneMoveDirection = 'left' | 'right' | 'up' | 'down'
+
+// edgeLeafId descends to the leaf nearest the boundary just crossed: entering a
+// split that runs along `axis`, `delta === 1` (moving right/down) lands on the
+// first child, `delta === -1` on the last. A perpendicular split carries no
+// positional information in a pure tree — both of its children touch the
+// boundary equally — so the first child is the deterministic choice.
+function edgeLeafId(node: PaneNode, axis: PaneDirection, delta: number): string {
+  if (node.kind === 'leaf') return node.id
+  const alongAxis = node.direction === axis
+  const child = alongAxis && delta === -1 ? node.children[node.children.length - 1] : node.children[0]
+  return edgeLeafId(child, axis, delta)
+}
+
+// movePaneFocus returns the id of the leaf to focus when moving directionally
+// from paneId, or null when there is no pane that way (also for an unknown
+// paneId, or a root that is a single leaf).
+//
+// The walk is purely structural — no DOM measurement, no rects. Nothing in this
+// codebase knows where a pane sits on screen (the store drives the DOM, never
+// the reverse), and a rect registry would have to be fed back from render.
+// Instead it climbs to the nearest ancestor that splits along the requested
+// axis and steps to the adjacent sibling there, which matches what the layout
+// actually renders for every tree the split operations can produce.
+export function movePaneFocus(
+  root: PaneNode,
+  paneId: string,
+  direction: PaneMoveDirection,
+): string | null {
+  // findParent returning null is ambiguous (root vs. absent), so check membership.
+  if (!containsId(root, paneId)) return null
+
+  const axis: PaneDirection = direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical'
+  const delta = direction === 'left' || direction === 'up' ? -1 : 1
+
+  let currentId = paneId
+  for (;;) {
+    const parent = findParent(root, currentId)
+    if (parent === null) return null // climbed off the root: no pane that way
+    if (parent.direction === axis) {
+      const idx = parent.children.findIndex((c) => c.id === currentId)
+      const sibling = parent.children[idx + delta]
+      if (sibling !== undefined) return edgeLeafId(sibling, axis, delta)
+    }
+    currentId = parent.id
+  }
+}

@@ -8,6 +8,7 @@ import {
   splitPaneWithSession,
   findLeaf,
   orderedLeafIds,
+  movePaneFocus,
   type LeafPane,
   type SplitPane,
   type PaneNode,
@@ -520,5 +521,90 @@ describe('orderedLeafIds', () => {
     const [r3, dId] = splitPane(r2, cId, 'vertical') // C → vertical [C, D]
     // Depth-first order: A, B, then C, D from the nested split.
     expect(orderedLeafIds(r3)).toEqual([a.id, bId, cId, dId])
+  })
+})
+
+// ── movePaneFocus ─────────────────────────────────────────────────────────────
+
+function makeSplit(direction: 'horizontal' | 'vertical', children: PaneNode[]): SplitPane {
+  return { kind: 'split', id: `split-${direction}-${children.map((c) => c.id).join('+')}`, direction, children }
+}
+
+describe('movePaneFocus', () => {
+  it('returns null in every direction for a single-leaf root', () => {
+    const leaf = makeLeaf()
+    expect(movePaneFocus(leaf, leaf.id, 'left')).toBeNull()
+    expect(movePaneFocus(leaf, leaf.id, 'right')).toBeNull()
+    expect(movePaneFocus(leaf, leaf.id, 'up')).toBeNull()
+    expect(movePaneFocus(leaf, leaf.id, 'down')).toBeNull()
+  })
+
+  it('walks a 2-child horizontal split and stops at its edges', () => {
+    const a = makeLeaf()
+    const b = makeLeaf()
+    const root = makeSplit('horizontal', [a, b])
+
+    expect(movePaneFocus(root, a.id, 'right')).toBe(b.id)
+    expect(movePaneFocus(root, b.id, 'left')).toBe(a.id)
+    expect(movePaneFocus(root, b.id, 'right')).toBeNull()
+    expect(movePaneFocus(root, a.id, 'left')).toBeNull()
+  })
+
+  it('returns null on the perpendicular axis of a horizontal split', () => {
+    const a = makeLeaf()
+    const b = makeLeaf()
+    const root = makeSplit('horizontal', [a, b])
+
+    expect(movePaneFocus(root, a.id, 'up')).toBeNull()
+    expect(movePaneFocus(root, a.id, 'down')).toBeNull()
+    expect(movePaneFocus(root, b.id, 'up')).toBeNull()
+    expect(movePaneFocus(root, b.id, 'down')).toBeNull()
+  })
+
+  it('steps both ways through a flattened 3-child group, ends are dead-ends outward', () => {
+    const a = makeLeaf()
+    const b = makeLeaf()
+    const c = makeLeaf()
+    const root = makeSplit('horizontal', [a, b, c])
+
+    expect(movePaneFocus(root, b.id, 'left')).toBe(a.id)
+    expect(movePaneFocus(root, b.id, 'right')).toBe(c.id)
+    expect(movePaneFocus(root, a.id, 'left')).toBeNull()
+    expect(movePaneFocus(root, c.id, 'right')).toBeNull()
+  })
+
+  it('climbs past a non-matching ancestor: horizontal[A, vertical[B, C]]', () => {
+    const a = makeLeaf()
+    const b = makeLeaf()
+    const c = makeLeaf()
+    const root = makeSplit('horizontal', [a, makeSplit('vertical', [b, c])])
+
+    expect(movePaneFocus(root, a.id, 'right')).toBe(b.id)
+    expect(movePaneFocus(root, b.id, 'down')).toBe(c.id)
+    expect(movePaneFocus(root, c.id, 'up')).toBe(b.id)
+    // C's parent splits vertically, so `left` has to climb to the outer split.
+    expect(movePaneFocus(root, c.id, 'left')).toBe(a.id)
+  })
+
+  it('descends to the edge leaf of the sibling subtree', () => {
+    const a = makeLeaf()
+    const b = makeLeaf()
+    const c = makeLeaf()
+    const d = makeLeaf()
+    const root = makeSplit('horizontal', [
+      makeSplit('vertical', [a, b]),
+      makeSplit('vertical', [c, d]),
+    ])
+
+    expect(movePaneFocus(root, a.id, 'right')).toBe(c.id)
+    expect(movePaneFocus(root, d.id, 'left')).toBe(a.id)
+  })
+
+  it('returns null for an unknown paneId', () => {
+    const a = makeLeaf()
+    const b = makeLeaf()
+    const root = makeSplit('horizontal', [a, b])
+
+    expect(movePaneFocus(root, 'nonexistent-id', 'right')).toBeNull()
   })
 })

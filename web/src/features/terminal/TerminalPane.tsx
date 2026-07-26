@@ -40,6 +40,7 @@ function TerminalPaneImpl({
   const renameSession = useStore((s) => s.renameSession)
   const reloadKey = useStore((s) => s.paneReloads[paneId] ?? 0)
   const containerRef = useRef<HTMLDivElement>(null)
+  const paneRef = useRef<HTMLDivElement>(null)
 
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -66,6 +67,29 @@ function TerminalPaneImpl({
   useEffect(() => {
     term.setInputMode(coarsePointer ? inputMode : 'native')
   }, [term, coarsePointer, inputMode])
+
+  // The store's focusedPaneId is the single source of truth for which pane is
+  // focused, but only DOM focus decides where keystrokes land — so store focus
+  // has to be mirrored into the DOM, or a keyboard-driven focus move would shift
+  // the highlight while typing kept going to the previously focused terminal.
+  //
+  // Fires only on a false → true transition, never on mount: mounting a whole
+  // layout would have every pane grab focus in turn, and the pane restored as
+  // focused from localStorage would steal focus from whatever the user is
+  // actually typing in.
+  const wasFocusedRef = useRef(focused)
+  useEffect(() => {
+    const gainedFocus = focused && !wasFocusedRef.current
+    wasFocusedRef.current = focused
+    if (!gainedFocus) return
+    if (sessionId != null && !sessionEnded) {
+      term.focus()
+      return
+    }
+    // Empty or ended pane: there is no terminal to type into, so focus the pane
+    // wrapper (already tabIndex={0}) to keep the focus ring somewhere real.
+    paneRef.current?.focus()
+  }, [focused, term, sessionId, sessionEnded])
 
   // The ended overlay takes precedence — never stack two badges on one pane.
   const showConnBadge = !sessionEnded
@@ -131,6 +155,7 @@ function TerminalPaneImpl({
 
   return (
     <div
+      ref={paneRef}
       className={`terminal-pane${focused ? ' terminal-pane-focused' : ''}`}
       tabIndex={0}
       aria-label={paneAriaLabel}

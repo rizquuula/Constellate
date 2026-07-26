@@ -324,11 +324,18 @@ is open (`document.querySelector('[aria-modal="true"]')`) — capture phase mean
 | `Shift+Alt+W` | `KeyW` | close focused pane |
 | `Shift+Alt+E` | `KeyE` | detach session from focused pane |
 | `Shift+Alt+R` | `KeyR` | reload focused pane — fresh socket + scrollback replay |
+| `Shift+Alt+←` | `ArrowLeft` | move focus to the pane left of the focused one; no-op at the edge |
+| `Shift+Alt+→` | `ArrowRight` | move focus to the pane right of the focused one; no-op at the edge |
+| `Shift+Alt+↑` | `ArrowUp` | move focus to the pane above the focused one; no-op at the edge |
+| `Shift+Alt+↓` | `ArrowDown` | move focus to the pane below the focused one; no-op at the edge |
 | `Shift+Alt+T` | `KeyT` | `addWindow()` — new window, activated |
 | `Shift+Alt+PageUp` | `PageUp` | previous window, ring-wraps |
 | `Shift+Alt+PageDown` | `PageDown` | next window, ring-wraps |
 
-Window stepping is a no-op with fewer than two windows. Full keybinding reference:
+Window stepping is a no-op with fewer than two windows. Arrow moves resolve through
+`movePaneFocus()` in `paneTree.ts` — a purely structural climb to the nearest ancestor splitting along
+the requested axis, no rects — and `TerminalPane` mirrors the resulting store focus into the DOM on
+each `false → true` transition of its `focused` prop. Full keybinding reference:
 [`hub.shortcut.md`](hub.shortcut.md).
 
 ---

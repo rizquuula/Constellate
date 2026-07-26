@@ -20,6 +20,7 @@ import { Snackbar, type SnackbarVariant } from './components/Snackbar'
 import { useStore, hashToView, activeWindowOf } from './store'
 import { authStatus, logout, passkeyRegister } from './api/rest'
 import { parsePaneDropId } from './features/terminal/dnd'
+import { movePaneFocus, type PaneMoveDirection } from './features/terminal/paneTree'
 import type { SessionDragData } from './features/terminal/dnd'
 
 const hasPasskeySupport = typeof window !== 'undefined' && !!window.PublicKeyCredential
@@ -139,8 +140,9 @@ export function App() {
   }, [authState, setViewMode])
 
   // Shift+Alt pane controls act on the focused pane of the active window: split
-  // H (−), split V (=), close (W), detach (E), reload (R). The same family also
-  // drives windows: new window (T), previous/next window (PageUp/PageDown).
+  // H (−), split V (=), close (W), detach (E), reload (R), and move focus to the
+  // neighbouring pane (arrows). The same family also drives windows: new window
+  // (T), previous/next window (PageUp/PageDown).
   // Physical e.code keeps them layout-independent (Alt often rewrites the
   // produced character). Capture phase + stop/prevent so the shortcut wins even
   // while a terminal is focused and xterm would otherwise swallow the keystroke.
@@ -156,8 +158,8 @@ export function App() {
       if (document.querySelector('[aria-modal="true"]')) return
       const state = useStore.getState()
       if (state.viewMode !== 'workspace') return
-      const { splitPane, closePane, detachPane, reloadPane, addWindow, setActiveWindow } = state
-      const { focusedPaneId } = activeWindowOf(state)
+      const { splitPane, closePane, detachPane, reloadPane, focusPane, addWindow, setActiveWindow } = state
+      const { root, focusedPaneId } = activeWindowOf(state)
 
       // step wraps around the window strip, so PageDown on the last window
       // returns to the first — the tabs read as a ring, not a dead end.
@@ -169,6 +171,14 @@ export function App() {
         setActiveWindow(windows[next].id)
       }
 
+      // Moving toward a layout edge with no pane there is a deliberate no-op:
+      // focus stays put (tmux/vim semantics) while the keystroke is still
+      // swallowed below, so xterm never receives the raw arrow escape.
+      const move = (direction: PaneMoveDirection) => {
+        const next = movePaneFocus(root, focusedPaneId, direction)
+        if (next !== null) focusPane(next)
+      }
+
       switch (e.code) {
         case 'Minus':    splitPane(focusedPaneId, 'horizontal'); break
         case 'Equal':    splitPane(focusedPaneId, 'vertical'); break
@@ -178,6 +188,10 @@ export function App() {
         case 'KeyT':     addWindow(); break
         case 'PageUp':   step(-1); break
         case 'PageDown': step(1); break
+        case 'ArrowLeft':  move('left'); break
+        case 'ArrowRight': move('right'); break
+        case 'ArrowUp':    move('up'); break
+        case 'ArrowDown':  move('down'); break
         default: return
       }
       e.preventDefault()
