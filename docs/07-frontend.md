@@ -549,10 +549,13 @@ within `SHIFT_LOCK_WINDOW_MS = 400` caps-locks).
 >     WS --> PTY["real PTY resize<br/>every running TUI reflows"]
 > ```
 >
-> A **layer** switch must never do that — reaching for a `.` may not reflow the user's `vim`. A
-> **mode** toggle (keypad ↔ native) legitimately does, since native mode drops the bottom row.
-> Guarded by a unit test on the layout and end-to-end by `keypad: a layer switch must not resize the
-> PTY` (`test/e2e/browser/responsive.spec.ts`, which reads `stty size` either side of the switch).
+> A **layer** switch must never do that — reaching for a `.` may not reflow the user's `vim`. Two
+> things legitimately do: a **mode** toggle (keypad ↔ native), since native mode drops the bottom
+> row, and a **collapse** to the handle bar, which hides every row on purpose — both are the user
+> explicitly trading keypad for terminal. Guarded by a unit test on the layout and end-to-end by
+> `keypad: a layer switch must not resize the PTY` (`test/e2e/browser/responsive.spec.ts`, which
+> reads `stty size` either side of the switch) plus its inverse, `keypad: collapsing to the handle
+> gives the PTY its rows back`.
 
 **Native mode.** The ⌨ key toggles back to the system keyboard for voice input, emoji and non-Latin
 IMEs; the choice persists per device. Its attributes are best-effort hardening only — **the

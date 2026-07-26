@@ -267,6 +267,10 @@ interface Store {
   // per-pane — every terminal on this device behaves the same way.
   inputMode: InputMode
   setInputMode: (m: InputMode) => void
+  // Whether the keypad is minimized to its handle bar. Device-wide like
+  // inputMode: a phone user reclaiming screen height means it everywhere.
+  keypadCollapsed: boolean
+  setKeypadCollapsed: (v: boolean) => void
 
   // ── dashboard ─────────────────────────────────────────────────────────────
   dashboard: Dashboard | null
@@ -382,6 +386,11 @@ export const useStore = create<Store>((set, get) => ({
   setInputMode: (m) => {
     lsSet(INPUT_MODE_KEY, m)
     set({ inputMode: m })
+  },
+  keypadCollapsed: lsGet('constellate.keypadCollapsed', 'false') === 'true',
+  setKeypadCollapsed: (v) => {
+    lsSet('constellate.keypadCollapsed', String(v))
+    set({ keypadCollapsed: v })
   },
 
   dashboard: null,

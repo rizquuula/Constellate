@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { useKeyPress, type PressHandlers } from './useKeyPress'
 import {
@@ -22,6 +22,12 @@ import type { TerminalHandle } from './useTerminal'
 // This component is a dumb renderer over keypadLayout.ts: rows are data, and the
 // only thing it knows how to do is dispatch the small set of KeypadAction
 // variants. Adding or moving a key is a layout edit, never a change here.
+//
+// The handle bar minimizes the keypad to reclaim screen height. Collapsing
+// deliberately does *not* change `inputMode`: in keypad mode the native keyboard
+// stays suppressed, so while collapsed the user can read but not type — which is
+// the point (minimize = read a long wall of output on a phone). The ⌨ glyph on
+// the collapsed handle is what signals "your keyboard is in here".
 
 interface KeypadProps {
   handle: TerminalHandle
@@ -34,6 +40,13 @@ export function Keypad({ handle }: KeypadProps) {
 
   const inputMode = useStore((s) => s.inputMode)
   const setInputMode = useStore((s) => s.setInputMode)
+
+  // Workspace keeps every window mounted, so several <Keypad> instances are live
+  // at once (Workspace.tsx) — a hardcoded id would give duplicate aria-controls
+  // targets.
+  const rowsId = useId()
+  const collapsed = useStore((s) => s.keypadCollapsed)
+  const setCollapsed = useStore((s) => s.setKeypadCollapsed)
 
   const [mods, setMods] = useState(() => handle.getModifiers())
   const [hasSelection, setHasSelection] = useState(() => handle.hasSelection())
@@ -141,10 +154,35 @@ export function Keypad({ handle }: KeypadProps) {
 
   return (
     <div className="keypad" role="group" aria-label="On-screen keyboard">
-      {renderRow(COMMAND_ROW, 'command', ' keypad-row-command')}
-      {/* Rows are a fixed positional layout, not a reorderable list, so the
-          row's position within its layer is its stable identity. */}
-      {rows.map((row, i) => renderRow(row, `${layer}-${i}`))}
+      {/* Disclosure DOM order: the handle comes first, because as a last child it
+          would sit directly under Enter/Space/Backspace — a mis-tap magnet. */}
+      <button
+        type="button"
+        className="keypad-handle"
+        aria-expanded={!collapsed}
+        aria-controls={rowsId}
+        aria-label={collapsed ? 'Show keypad' : 'Hide keypad'}
+        // Mirrors useKeyPress.ts — never let the button steal focus from the PTY.
+        onPointerDown={(e) => e.preventDefault()}
+        onClick={(e) => {
+          setCollapsed(!collapsed)
+          // e.detail === 0 means keyboard activation (Enter/Space on a tablet
+          // with a hardware keyboard); don't yank focus to the PTY out from
+          // under them.
+          if (e.detail > 0) handle.focus()
+        }}
+      >
+        <span aria-hidden="true">{collapsed ? '⌨ ⌃' : '⌄'}</span>
+      </button>
+      {/* `hidden` rather than a conditional render, so aria-controls keeps a live
+          IDREF; display:none removes the subtree from the a11y tree and from
+          sequential focus either way, so tab order is identical. */}
+      <div id={rowsId} className="keypad-rows" hidden={collapsed}>
+        {renderRow(COMMAND_ROW, 'command', ' keypad-row-command')}
+        {/* Rows are a fixed positional layout, not a reorderable list, so the
+            row's position within its layer is its stable identity. */}
+        {rows.map((row, i) => renderRow(row, `${layer}-${i}`))}
+      </div>
     </div>
   )
 }

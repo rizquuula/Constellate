@@ -1402,6 +1402,7 @@ body {
   /* One shared key height so every layer is exactly as tall as every other: a
      layer switch must never resize the pane and therefore the user's PTY. */
   --keypad-key-h: clamp(34px, 6.2dvh, 46px);
+  --keypad-handle-h: 24px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1409,6 +1410,47 @@ body {
   padding: 4px;
   background: var(--surface-chrome);
   border-top: 1px solid var(--border-subtle);
+}
+
+/* Disclosure handle. Always present, even collapsed: it is the only way back to
+   the keyboard, so it can never be the thing that scrolls away. */
+.keypad-handle {
+  min-height: var(--keypad-handle-h); /* WCAG 2.5.8 floor — a fixed px, never a
+                                         dvh clamp, or it shrinks below 24 on
+                                         exactly the short screens where
+                                         collapsing matters most. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.keypad-handle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* No transition anywhere on the collapse: the pane's ResizeObserver coalesces on
+   the *leading* edge only (useTerminal.ts), so every frame of an animated height
+   would fire its own fitAddon.fit() and PTY resize. It must snap. */
+.keypad-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Required, not decorative: there is no [hidden] rule anywhere in this file, and
+   an author `display` beats the UA sheet's `[hidden] { display: none }` — without
+   this the hidden attribute changes nothing on screen. */
+.keypad-rows[hidden] {
+  display: none;
 }
 
 .keypad-row {
@@ -1504,6 +1546,9 @@ body {
 /* Landscape phones have almost no vertical room; shrink the keys rather than
    let the keypad eat the terminal. */
 @media (orientation: landscape) and (max-height: 480px) {
+  /* --keypad-handle-h is deliberately not touched here: it is a floor, not a
+     scale. Shrinking it would drop the only control that brings the keyboard
+     back below the 24px tap minimum, on the screens where it matters most. */
   .keypad {
     --keypad-key-h: 30px;
   }

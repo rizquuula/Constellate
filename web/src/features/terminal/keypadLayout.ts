@@ -53,6 +53,11 @@ export const ROW_UNITS = 10
 // so any change in keypad height fires the pane's ResizeObserver, refits xterm
 // and sends a real PTY resize to the agent. A layer switch must never resize
 // the user's shell — so all layers are the same height, always.
+//
+// Two height changes *are* sanctioned, because the user asked for them
+// explicitly: switching to native mode (which drops the bottom row) and
+// collapsing the keypad to its handle bar (which hides every row). Neither is a
+// layer switch; both are the user deliberately trading keypad for terminal.
 export const LAYER_ROWS = 4
 
 /** Two shift taps closer together than this latch caps lock. */
@@ -299,7 +304,9 @@ const SYMBOL_ROWS: readonly KeypadRow[] = [
       symbolKey('quote', "'", 'Single quote'),
       symbolKey('double-quote', '"', 'Double quote'),
       symbolKey('comma', ',', 'Comma'),
-      symbolKey('period', '.', 'Period'),
+      // '.' is not lost: bottomRow() puts it on every layer, so this slot is
+      // free for the one glyph that was previously reachable only behind shift.
+      symbolKey('question', '?', 'Question mark'),
       symbolKey('colon', ':', 'Colon'),
       symbolKey('semicolon', ';', 'Semicolon'),
       symbolKey('less-than', '<', 'Less than'),

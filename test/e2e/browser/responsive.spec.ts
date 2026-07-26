@@ -214,7 +214,7 @@ test('keypad: a layer switch must not resize the PTY', async ({ page, request })
 
   // '?123' swaps the letters layer for the symbols layer.
   await tapKeys(keypad, ['letters-bottom-layer']);
-  await expect(keypad.locator('[data-key-id="symbols-period"]')).toBeVisible();
+  await expect(keypad.locator('[data-key-id="symbols-question"]')).toBeVisible();
 
   const after = await ptyGeometry(page, 'geob');
 
@@ -224,6 +224,56 @@ test('keypad: a layer switch must not resize the PTY', async ({ page, request })
   // xterm and send a real resize to the agent — silently reflowing every TUI
   // running on the user's machine just because they reached for a '.'.
   expect(after).toBe(before);
+});
+
+test('keypad: collapsing to the handle gives the PTY its rows back', async ({ page, request }) => {
+  const machineID = await onlineMachineId(request);
+  const title = `keypadmin-${Date.now()}`;
+  await createRunningSession(request, machineID, title);
+
+  await page.goto('/');
+  await attachSessionViaDrawer(page, title);
+
+  await expect(page.locator('.xterm-rows')).toBeVisible({ timeout: 15_000 });
+
+  const keypad = page.locator('.keypad');
+  await expect(keypad).toBeVisible();
+
+  const expanded = await ptyGeometry(page, 'geoc');
+
+  await page.locator('.keypad-handle').click();
+
+  // The handle bar survives the collapse — it is the only way back to the
+  // keyboard, so it can never be what disappears.
+  await expect(keypad).toBeVisible();
+  await expect(page.locator('.keypad-rows')).toBeHidden();
+  await expect(page.locator('.keypad-handle')).toHaveAttribute('aria-expanded', 'false');
+  const handleBox = await page.locator('.keypad-handle').boundingBox();
+  expect(handleBox?.height ?? 0).toBeGreaterThanOrEqual(24);
+
+  const collapsed = await ptyGeometry(page, 'geod');
+
+  // This is the exact inverse of the layer-switch guarantee above: collapsing is
+  // *supposed* to resize the PTY, and asserting the row count actually grew is
+  // what a purely visual check would miss. Hiding the rows with
+  // `visibility: hidden`, or dropping the `.keypad-rows[hidden]` rule so the
+  // attribute never takes effect, would still look collapsed while reclaiming
+  // zero terminal space — the user minimizes to read more output, not to stare
+  // at the same 12 rows.
+  const rowsOf = (geo: string): number => Number(geo.split('x')[0]);
+  expect(rowsOf(collapsed)).toBeGreaterThan(rowsOf(expanded));
+
+  // Device-wide preference, persisted like inputMode.
+  await page.reload();
+  await attachSessionViaDrawer(page, title);
+  await expect(page.locator('.xterm-rows')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.keypad-rows')).toBeHidden();
+  await expect(page.locator('.keypad-handle')).toHaveAttribute('aria-expanded', 'false');
+
+  // Expanding again hands the rows straight back.
+  await page.locator('.keypad-handle').click();
+  await expect(page.locator('.keypad-rows')).toBeVisible();
+  expect(await ptyGeometry(page, 'geoe')).toBe(expanded);
 });
 
 test('keypad: a hardware keyboard still types while the native one is suppressed', async ({
