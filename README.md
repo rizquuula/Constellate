@@ -5,6 +5,12 @@
 [![Made with React](https://img.shields.io/badge/UI-React%20%2B%20xterm.js-61DAFB?logo=react&logoColor=white)](web/)
 [![Status](https://img.shields.io/badge/status-feature--complete-success.svg)](#what-works-today)
 
+![Constellate workspace — a project-grouped machine sidebar beside four live PTYs split across a single browser tab](docs/assets/main-terminal.png)
+
+*One browser tab: the project-grouped sidebar on the left, four live shells across three machines in a
+split-pane workspace, named windows along the bottom, and the workspace / overview / dashboard toggle
+up top.*
+
 > A self-hosted control plane for a fleet of developer machines: one web UI, served from a public
 > hub, giving a single operator live terminal access to every machine they own — organized by
 > project, persistent across reconnects, with a mission-control overview of every running terminal at
