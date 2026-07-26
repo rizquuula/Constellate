@@ -88,7 +88,12 @@ function findTouch(list: TouchList, identifier: number): Touch | null {
 // per line, each carrying a ±1 DOM_DELTA_LINE deltaY so xterm's wheel pipeline
 // scrolls exactly one line per event through whichever path the current mode
 // requires. No-op when term.element is not yet attached.
-function dispatchWheelLines(term: Terminal, lines: number, clientX: number, clientY: number): void {
+//
+// Exported because the swipe bridge below is no longer its only caller: the
+// drag-to-scroll nub (ScrollNub.tsx, via TerminalHandle.scrollLines) routes
+// through it too. This routing is precisely what makes both work in every
+// terminal mode — term.scrollLines() would be dead in the alternate screen.
+export function dispatchWheelLines(term: Terminal, lines: number, clientX: number, clientY: number): void {
   const element = term.element
   if (!element) return
 

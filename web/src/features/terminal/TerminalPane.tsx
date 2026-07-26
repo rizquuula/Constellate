@@ -3,6 +3,7 @@ import { useDraggable } from '@dnd-kit/core'
 import { useStore } from '../../store'
 import { useTerminal } from './useTerminal'
 import { Keypad } from './Keypad'
+import { ScrollNub } from './ScrollNub'
 import { PaneDropZones } from './dnd'
 import { cropPwd } from './pwd'
 import { useCoarsePointer } from '../../breakpoints'
@@ -56,7 +57,8 @@ function TerminalPaneImpl({
     sessionId != null && !sessionEnded,
   )
   const coarsePointer = useCoarsePointer()
-  const showKeypad = coarsePointer && focused && sessionId != null && !sessionEnded
+  // Gates both touch-only controls: the on-screen keypad and the scroll nub.
+  const showTouchControls = coarsePointer && focused && sessionId != null && !sessionEnded
 
   // Suppressing the native keyboard is a *device* decision, so it is made here
   // rather than in Keypad: that component mounts only on coarse pointers and
@@ -316,9 +318,10 @@ function TerminalPaneImpl({
           style={{ display: sessionId && !sessionEnded ? 'block' : 'none' }}
           data-pane-id={paneId}
         />
+        {showTouchControls && <ScrollNub handle={term} />}
       </div>
 
-      {showKeypad && <Keypad handle={term} />}
+      {showTouchControls && <Keypad handle={term} />}
     </div>
   )
 }

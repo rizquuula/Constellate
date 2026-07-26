@@ -1385,12 +1385,102 @@ body {
 
 .pane-xterm .xterm-viewport {
   overflow-y: auto;
+  /* Hitting the top or bottom of scrollback must not chain to the page: on a
+     phone that surfaces as pull-to-refresh or a rubber-band bounce mid-read. */
+  overscroll-behavior: contain;
 }
 
 /* Rename affordance for touch: double-click is unavailable on a phone, so a
    pencil button stands in. Hidden on fine-pointer devices (see coarse block). */
 .pane-rename-btn {
   display: none;
+}
+
+/* ── Mobile scroll nub ────────────────────────────────────────────────────── */
+/* Drag-to-scroll joystick pinned to the right edge of the terminal body, shown
+   under the same gate as the Keypad (coarse pointer + focused + live session).
+   Deflection sets a scroll *rate*, so long scrollback costs one held gesture
+   rather than a dozen flicks over the text being read — see scrollNub.ts. */
+
+/* Positioning lives on the wrapper and the drag transform on the button, so two
+   rules never fight over one `transform`. Above .pane-ended's z-index: 10, since
+   an ended pane never mounts the nub anyway and the badge must not cover it. */
+.scroll-nub-anchor {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 12;
+}
+
+/* Travel track, drawn only while dragging: at rest it would be permanent chrome
+   over the terminal, but mid-drag it is the only cue for how much travel is
+   left (and therefore how much faster the scroll can still get). */
+.scroll-nub-anchor-dragging::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 192px; /* 2 × NUB_TRAVEL_PX in scrollNub.ts */
+  transform: translate(-50%, -50%);
+  border-radius: 1px;
+  background: var(--border-subtle);
+}
+
+/* 44px meets the WCAG 2.5.5 (AAA) target size, which is the right floor for a
+   control operated by a thumb parked over live terminal output.
+   --text-secondary on --surface-chrome: ≈ 7:1 — passes AA. */
+.scroll-nub {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  /* Required: without it the browser claims the vertical drag for page scroll
+     and the pointermove stream stops after the first few pixels. */
+  touch-action: none;
+  color: var(--text-secondary);
+  background: var(--surface-chrome);
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  font-size: var(--text-sm);
+  /* Dim at rest: it sits on top of output the user is reading. */
+  opacity: 0.45;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: transform 220ms cubic-bezier(.22, 1, .36, 1), opacity 200ms ease;
+}
+
+/* Fades further once untouched, so a long read is not spent behind a widget. */
+.scroll-nub-idle {
+  opacity: 0.18;
+}
+
+/* Spring-back is the transform transition above; suppress it while dragging or
+   the nub would lag the thumb by the full 220ms easing. */
+.scroll-nub-dragging {
+  opacity: 1;
+  cursor: grabbing;
+  transition: opacity 200ms ease;
+}
+
+.scroll-nub:focus-visible {
+  outline: none;
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-nub,
+  .scroll-nub-dragging {
+    transition: none;
+  }
 }
 
 /* ── Mobile terminal controls (Keypad) ────────────────────────────────────── */

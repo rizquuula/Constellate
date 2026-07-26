@@ -14,7 +14,7 @@ import {
 import { applyModifiers, specialKeySeq } from './keys'
 import type { KeyMods, SpecialKey } from './keys'
 import { imeAttrsFor, type InputMode } from './inputMode'
-import { attachTouchScroll } from './touchScroll'
+import { attachTouchScroll, dispatchWheelLines } from './touchScroll'
 
 // Imperative handle returned by useTerminal, so out-of-tree controls (the touch
 // Keypad) can drive the live terminal without prop-drilling the xterm instance.
@@ -35,6 +35,8 @@ export interface TerminalHandle {
   getFontSize(): number
   refit(): void
   setInputMode(mode: InputMode): void
+  /** Scroll by whole lines; positive moves toward newer output. */
+  scrollLines(lines: number): void
 }
 
 // Connection state of the pane's terminal socket, surfaced so the pane can show
@@ -254,6 +256,21 @@ export function useTerminal(
           ta.blur()
           termRef.current?.focus()
         }
+      },
+      // Routed through the wheel pipeline rather than term.scrollLines(), which
+      // is a no-op in the alternate screen and under mouse tracking.
+      //
+      // The synthetic wheel is aimed at the *centre* of the terminal element:
+      // with mouse tracking on, xterm turns the wheel into a mouse report for
+      // the cell under the pointer, and the nub sits at the far-right edge — so
+      // using the nub's own x would scroll the rightmost tmux split instead of
+      // the one the user is reading.
+      scrollLines: (lines) => {
+        const term = termRef.current
+        const element = term?.element
+        if (!term || !element || lines === 0) return
+        const rect = element.getBoundingClientRect()
+        dispatchWheelLines(term, lines, rect.left + rect.width / 2, rect.top + rect.height / 2)
       },
     }
   }
