@@ -107,6 +107,12 @@ describe('layout invariants', () => {
   // key that reveals them. If you add a shiftText to a shift-less layer, this
   // tells you now instead of leaving it to be spotted in a screenshot months
   // later; the fn layer passes only because it has no shift-sensitive keys.
+  //
+  // COMMAND_ROW is deliberately out of scope. It is shift-sensitive (`cmd-tab`
+  // becomes back-tab under the latch) yet carries no ⇧ of its own, and that is
+  // fine: it renders above whichever layer is active, so it borrows that
+  // layer's shift key. The one layer with no ⇧ — fn — is also the one carrying
+  // `fn-shift-tab` as a direct one-tap key, so nothing is unreachable there.
   it('gives every layer that hides glyphs behind shift its own shift key', () => {
     for (const layer of LAYER_NAMES) {
       const keys = LAYERS[layer].flatMap((row) => row.keys)
@@ -159,11 +165,34 @@ describe('resolveKey', () => {
     }
   })
 
-  it('never lets shift modify a special key', () => {
+  // Shift+Tab cycles Claude Code's permission mode, so it has to be reachable
+  // without leaving the always-visible command row for the Fn layer.
+  it('turns Tab into back-tab while the shift latch is engaged', () => {
     const tab = keyById('cmd-tab')
-    for (const shift of SHIFT_STATES) {
-      expect(resolveKey(tab, shift)).toEqual({ kind: 'special', key: 'Tab' })
+    expect(resolveKey(tab, 'off')).toEqual({ kind: 'special', key: 'Tab' })
+    expect(resolveKey(tab, 'once')).toEqual({ kind: 'special', key: 'ShiftTab' })
+    expect(resolveKey(tab, 'lock')).toEqual({ kind: 'special', key: 'ShiftTab' })
+  })
+
+  // The shift latch is opt-in per special key, so a latch left armed from a
+  // previous keystroke can never silently turn Enter into something else.
+  it('leaves a special key that declares no shiftKey untouched in every shift state', () => {
+    const unshiftable = { 'cmd-escape': 'Escape', 'letters-bottom-enter': 'Enter' } as const
+    for (const [id, key] of Object.entries(unshiftable)) {
+      for (const shift of SHIFT_STATES) {
+        expect(resolveKey(keyById(id), shift), id).toEqual({ kind: 'special', key })
+      }
     }
+  })
+
+  // Two routes reach back-tab — the shifted command-row Tab and the Fn layer's
+  // one-tap '⇤' — and they must stay the same keystroke. If one is ever
+  // retargeted, this fails instead of leaving the phone with two Tab keys that
+  // disagree.
+  it('agrees with the fn layer one-tap back-tab key', () => {
+    expect(resolveKey(keyById('cmd-tab'), 'once')).toEqual(
+      resolveKey(keyById('fn-shift-tab'), 'off'),
+    )
   })
 
   it('returns null for keys that only change keypad state', () => {

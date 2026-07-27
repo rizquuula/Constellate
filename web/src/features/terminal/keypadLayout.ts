@@ -17,7 +17,7 @@ export type ShiftState = 'off' | 'once' | 'lock'
 
 export type KeypadAction =
   | { kind: 'text'; text: string; shiftText?: string }
-  | { kind: 'special'; key: SpecialKey }
+  | { kind: 'special'; key: SpecialKey; shiftKey?: SpecialKey }
   | { kind: 'modifier'; mod: 'ctrl' | 'alt' }
   | { kind: 'shift' }
   | { kind: 'layer'; layer: KeypadLayer }
@@ -205,7 +205,17 @@ function bottomRow({
 export const COMMAND_ROW: KeypadRow = {
   keys: [
     specialKey('cmd-escape', 'Esc', 'Escape', 'Escape', { tone: 'util' }),
-    specialKey('cmd-tab', 'Tab', 'Tab', 'Tab', { tone: 'util' }),
+    // Spelled out rather than built by specialKey(): that builder spreads its
+    // `extra` over the whole key, so it can add a `tone` but never reach inside
+    // the action it just built to add a `shiftKey`.
+    {
+      id: 'cmd-tab',
+      label: 'Tab',
+      shiftLabel: '⇤',
+      aria: 'Tab',
+      action: { kind: 'special', key: 'Tab', shiftKey: 'ShiftTab' },
+      tone: 'util',
+    },
     {
       id: 'cmd-ctrl',
       label: 'Ctrl',
@@ -415,10 +425,17 @@ export function resolveKey(
       // everything that has no uppercase form (digits, punctuation, space).
       return { kind: 'text', text: action.shiftText ?? action.text.toUpperCase() }
     }
-    // Shift never modifies a special key — that is why Shift+Tab is its own
-    // '⇤' key on the fn layer rather than a shifted Tab.
+    // A special key is shift-sensitive only when it declares `shiftKey`; every
+    // other one ignores the latch, so shift can never turn Enter or Escape into
+    // something else. Tab is the one that declares it: Shift+Tab cycles Claude
+    // Code's permission mode, so it has to be reachable from the always-visible
+    // command row. `fn-shift-tab` stays as the direct one-tap path, which is
+    // what the Fn layer needs — that layer carries no ⇧ key.
     case 'special':
-      return { kind: 'special', key: action.key }
+      return {
+        kind: 'special',
+        key: shift !== 'off' && action.shiftKey ? action.shiftKey : action.key,
+      }
     case 'modifier':
     case 'shift':
     case 'layer':
