@@ -1426,16 +1426,21 @@ body {
   height: 192px; /* 2 × NUB_TRAVEL_PX in scrollNub.ts */
   transform: translate(-50%, -50%);
   border-radius: 1px;
-  background: var(--border-subtle);
+  background: var(--accent-border);
 }
 
 /* 44px meets the WCAG 2.5.5 (AAA) target size, which is the right floor for a
    control operated by a thumb parked over live terminal output.
-   Contrast is an *effective* figure, not the token pair: --text-secondary on
-   --surface-chrome is ≈ 7:1 on its own, but the whole control is composited at
-   the `opacity` below, which scales its separation from the terminal behind it.
-   WCAG 1.4.11 wants ≥ 3:1 for a UI component's boundary, so the opacity — not
-   the token pair — is what has to clear the bar (see .scroll-nub-idle). */
+   Amber, not neutral grey: the nub sits at the right edge of dark terminal
+   output, where a low-opacity --text-secondary control is simply not findable
+   on a phone — it reads as part of the output rather than as chrome. The fill
+   stays translucent (--accent-bg, not a solid accent) so the text behind it is
+   still readable while the thumb is parked.
+   Contrast is an *effective* figure, not the token pair: the whole control is
+   composited at the `opacity` below, which scales its separation from the
+   terminal behind it. WCAG 1.4.11 wants ≥ 3:1 for a UI component's boundary,
+   so the opacity — not the token pair — is what has to clear the bar (see
+   .scroll-nub-idle). */
 .scroll-nub {
   position: relative;
   width: 44px;
@@ -1447,13 +1452,17 @@ body {
   /* Required: without it the browser claims the vertical drag for page scroll
      and the pointermove stream stops after the first few pixels. */
   touch-action: none;
-  color: var(--text-secondary);
-  background: var(--surface-chrome);
-  border: 1px solid var(--border-subtle);
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
   border-radius: 50%;
   font-size: var(--text-sm);
-  /* Dim at rest: it sits on top of output the user is reading. */
-  opacity: 0.45;
+  /* The ↕ glyph is a lone character in a 44px circle; at regular weight it
+     thins out to near-nothing against the translucent fill. */
+  font-weight: 600;
+  /* Held just off full: it sits on top of output the user is reading, so the
+     terminal keeps showing through, but not so far back that it hides. */
+  opacity: 0.8;
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
@@ -1467,7 +1476,7 @@ body {
    where it stops being visible. A touch anywhere in the pane body cancels it
    (ScrollNub.tsx), so reaching for the terminal brings it straight back. */
 .scroll-nub-idle {
-  opacity: 0.3;
+  opacity: 0.55;
 }
 
 /* Spring-back is the transform transition above; suppress it while dragging or
