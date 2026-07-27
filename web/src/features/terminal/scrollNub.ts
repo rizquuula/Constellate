@@ -45,9 +45,16 @@ export function clampOffset(dy: number): number {
 
 // rateFor maps a deflection to a signed scroll rate in lines per second.
 //
-// Sign convention matches touchScroll.ts: the offset is `pointerY - startY`, so
-// dragging *down* is positive ⇒ positive lines ⇒ wheel deltaY > 0 ⇒ the view
-// moves toward newer output, and dragging up scrolls back into history.
+// The offset is `pointerY - startY`, so dragging *down* is positive ⇒ positive
+// lines ⇒ wheel deltaY > 0 ⇒ the view moves toward newer output, and dragging up
+// scrolls back into history.
+//
+// Note this is the physical *opposite* of touchScroll.ts, which counts positive
+// as `lastClientY - currentClientY` (finger moving up). That is deliberate, not a
+// bug to reconcile: the nub is a scrollbar-thumb metaphor (drag the thumb down,
+// the view goes down) while a swipe is a content-drag metaphor (push the content
+// up to see what is below). What the two share is the *output* convention — both
+// end up producing a wheel deltaY with the same sign for "toward newer output".
 export function rateFor(offset: number): number {
   const clamped = clampOffset(offset)
   const magnitude = Math.abs(clamped)

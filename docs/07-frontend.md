@@ -7,7 +7,7 @@ assets (`web/dist` is gitignored except `.gitkeep`). No separate frontend server
 Build: `make web` → `npm ci && npm run build` (`tsc && vite build`). The hub Docker image builds it in
 a `node:22` stage. Unit tests are `vitest` (`npm run test:run`); the `*.test.ts` files sit next to the
 pure modules they cover (`paneTree`, `windowList`, `reconnect`, `keys`, `touchScroll`, `order`,
-`sessionSettings`, `collapse`, `inputMode`, `keypadLayout`, `dnd`, `paneActions`).
+`sessionSettings`, `collapse`, `inputMode`, `keypadLayout`, `scrollNub`, `dnd`, `paneActions`).
 
 > ### ⚠️ Drift: the real stack is leaner than `DESIGN.md` §13 claims
 > | `DESIGN.md` §13 says | The code (`web/package.json`) actually uses |
@@ -464,8 +464,8 @@ session-ended overlay takes precedence, so two badges never stack on one pane.
 
 ## Touch input
 
-Four modules make a terminal usable under a thumb. Three of them are pure and unit-tested; only the
-keypad is a component.
+Five modules make a terminal usable under a thumb. Three of them have pure, unit-tested cores; the
+keypad and the scroll nub are components.
 
 | Module | Shape | Job |
 |---|---|---|
@@ -473,6 +473,7 @@ keypad is a component.
 | `touchScroll.ts` | pure core + DOM wiring | swipe → synthetic wheel events |
 | `useVisualViewport.ts` | hook, coarse-pointer only | keeps the shell above the soft keyboard |
 | `Keypad.tsx` + `keypadLayout.ts` | component + pure data | the on-screen keyboard |
+| `ScrollNub.tsx` + `scrollNub.ts` | component + pure rate model | drag-to-scroll joystick: deflection → scroll rate |
 
 **`keys.ts`** is the shared vocabulary between the on-screen controls and the wire. `specialKeySeq`
 knows that F1–F4 are SS3 (`ESC O P/Q/R/S`) in *both* cursor modes while F5–F12 are CSI `~`
@@ -491,6 +492,14 @@ residual so fractional movement accumulates without drift. Guard rails: `VERTICA
 tap eligible to become the compat click that focuses the terminal, `HORIZONTAL_SLOP_PX = 12` yields a
 dominant horizontal swipe back to the platform (OS back-gesture), and listeners run in the **capture**
 phase so an intercepted swipe can stop propagation before xterm's own bubble-phase handlers.
+
+**`scrollNub.ts` + `ScrollNub.tsx`** answer the other half of that problem: a swipe is *positional*,
+so crossing hundreds of lines of scrollback costs a dozen flicks over the very text being read. The
+nub is a vertical joystick pinned to the pane's right edge whose deflection sets a scroll **rate**
+(quadratic ramp, `MIN_RATE_LPS = 2` → `MAX_RATE_LPS = 45`, with a dead zone and a `MAX_FRAME_MS`
+ceiling so a backgrounded tab can't lurch on resume). `scrollNub.ts` is the pure model (`clampOffset`,
+`rateFor`, `advance` with a sub-line residual); `ScrollNub.tsx` owns the pointer capture and the rAF
+loop, and — like the keypad — cancels `pointerdown` so xterm's helper textarea keeps focus.
 
 **`useVisualViewport.ts`** (called once, in `App.tsx`) mirrors `window.visualViewport.height` into the
 `--app-height` custom property that `.app-root` sizes against, rAF-debounced, and pins page scroll to

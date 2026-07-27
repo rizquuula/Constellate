@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { advance, clampOffset, rateFor, NUB_TRAVEL_PX, type RateAccum } from './scrollNub'
+import { advance, clampOffset, rateFor, type RateAccum } from './scrollNub'
 import type { TerminalHandle } from './useTerminal'
 
 // Floating drag-to-scroll nub for touch devices: a vertical joystick pinned to
@@ -27,6 +27,7 @@ export function ScrollNub({ handle }: ScrollNubProps) {
 
   // The live offset is mirrored into a ref because the rAF loop is created once
   // per drag and would otherwise read the offset captured at pointerdown.
+  const anchorRef = useRef<HTMLDivElement | null>(null)
   const offsetRef = useRef(0)
   const draggingRef = useRef(false)
   const startYRef = useRef(0)
@@ -67,6 +68,28 @@ export function ScrollNub({ handle }: ScrollNubProps) {
     }
   }, [armIdle, clearIdleTimer, stopLoop])
 
+  // Reaching for the terminal is the exact moment the affordance is wanted back,
+  // so any touch in the pane body un-fades the nub and restarts the countdown —
+  // otherwise a three-second read leaves the user grabbing at a control they can
+  // barely see. Strictly passive and non-cancelling: xterm owns selection and
+  // scrolling inside this element and must not have its gestures perturbed.
+  useEffect(() => {
+    const anchor = anchorRef.current
+    const paneBody = anchor?.closest('.pane-body')
+    if (!anchor || !paneBody) return
+
+    const wake = (e: Event): void => {
+      // The nub's own pointerdown already handles this; waking here too would
+      // arm an idle timer that then fires in the middle of the drag.
+      if (anchor.contains(e.target as Node)) return
+      setIdle(false)
+      armIdle()
+    }
+
+    paneBody.addEventListener('pointerdown', wake, { passive: true })
+    return () => paneBody.removeEventListener('pointerdown', wake)
+  }, [armIdle])
+
   const startLoop = useCallback(() => {
     const step = (now: number): void => {
       const dt = now - lastMsRef.current
@@ -83,6 +106,12 @@ export function ScrollNub({ handle }: ScrollNubProps) {
   const endDrag = useCallback(
     (e?: React.PointerEvent<HTMLButtonElement>) => {
       if (!draggingRef.current) return
+      // A second thumb landing on the same 44px circle is ignored on pointerdown
+      // but still delivers its own pointerup here; without this check it would
+      // tear down the first thumb's live drag and release its capture.
+      // `lostpointercapture` carries the id of the pointer whose capture ended,
+      // so the same check is correct on that path too.
+      if (e && e.pointerId !== pointerIdRef.current) return
       draggingRef.current = false
       stopLoop()
       accumRef.current.residual = 0
@@ -93,8 +122,8 @@ export function ScrollNub({ handle }: ScrollNubProps) {
 
       const pointerId = pointerIdRef.current
       pointerIdRef.current = null
-      // Releasing capture re-enters here via lostpointercapture; the guard above
-      // makes that a no-op.
+      // Releasing capture re-enters here via lostpointercapture; draggingRef is
+      // already false by then, so that pass is a no-op.
       if (e && pointerId !== null && e.currentTarget.hasPointerCapture(pointerId)) {
         e.currentTarget.releasePointerCapture(pointerId)
       }
@@ -104,6 +133,11 @@ export function ScrollNub({ handle }: ScrollNubProps) {
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLButtonElement>) => {
+      // Cancelling pointerdown stops focus moving to the button, so xterm's
+      // helper textarea keeps focus and the terminal stays live — same reason as
+      // useKeyPress.ts. Without it, tapping the nub on a tablet with a hardware
+      // keyboard silently sends every subsequent keystroke nowhere.
+      e.preventDefault()
       if (draggingRef.current) return
       e.currentTarget.setPointerCapture(e.pointerId)
       pointerIdRef.current = e.pointerId
@@ -155,18 +189,20 @@ export function ScrollNub({ handle }: ScrollNubProps) {
     .join(' ')
 
   return (
-    <div className={`scroll-nub-anchor${dragging ? ' scroll-nub-anchor-dragging' : ''}`}>
+    <div
+      ref={anchorRef}
+      className={`scroll-nub-anchor${dragging ? ' scroll-nub-anchor-dragging' : ''}`}
+    >
+      {/* Deliberately a plain button, not role="slider": this is a *rate*
+          joystick with no position to report, so an aria-value* triple would
+          only ever announce a number that means nothing (and ARIA-in-HTML
+          forbids `slider` on <button> anyway). The label names the keyboard
+          path because that is the part a screen-reader user cannot discover. */}
       <button
         type="button"
         className={className}
         style={{ transform: `translateY(${offset}px)` }}
-        role="slider"
-        aria-label="Scroll terminal"
-        aria-orientation="vertical"
-        aria-valuemin={-100}
-        aria-valuemax={100}
-        aria-valuenow={Math.round((offset / NUB_TRAVEL_PX) * 100)}
-        tabIndex={0}
+        aria-label="Scroll terminal (drag, or arrow and page keys)"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}

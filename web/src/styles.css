@@ -1431,7 +1431,11 @@ body {
 
 /* 44px meets the WCAG 2.5.5 (AAA) target size, which is the right floor for a
    control operated by a thumb parked over live terminal output.
-   --text-secondary on --surface-chrome: ≈ 7:1 — passes AA. */
+   Contrast is an *effective* figure, not the token pair: --text-secondary on
+   --surface-chrome is ≈ 7:1 on its own, but the whole control is composited at
+   the `opacity` below, which scales its separation from the terminal behind it.
+   WCAG 1.4.11 wants ≥ 3:1 for a UI component's boundary, so the opacity — not
+   the token pair — is what has to clear the bar (see .scroll-nub-idle). */
 .scroll-nub {
   position: relative;
   width: 44px;
@@ -1457,9 +1461,13 @@ body {
   transition: transform 220ms cubic-bezier(.22, 1, .36, 1), opacity 200ms ease;
 }
 
-/* Fades further once untouched, so a long read is not spent behind a widget. */
+/* Fades once untouched, so a long read is not spent behind a widget — but this
+   is the resting state of an interactive control, so it is floored at the point
+   where the composited border still clears WCAG 1.4.11's 3:1, not at the point
+   where it stops being visible. A touch anywhere in the pane body cancels it
+   (ScrollNub.tsx), so reaching for the terminal brings it straight back. */
 .scroll-nub-idle {
-  opacity: 0.18;
+  opacity: 0.3;
 }
 
 /* Spring-back is the transform transition above; suppress it while dragging or
