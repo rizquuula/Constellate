@@ -117,6 +117,12 @@ const WORKSPACE_KEY = 'constellate.workspace'
 // Pre-multi-window keys. Read once at startup to migrate, then deleted.
 const LEGACY_PANE_ROOT_KEY = 'constellate.paneRoot'
 const LEGACY_FOCUSED_PANE_KEY = 'constellate.focusedPaneId'
+// Keypad collapse used to persist here. It no longer does — a device-wide
+// "collapsed" that survived a restart could leave a phone with no input path at
+// all (keypad mode suppresses the native keyboard, and the ⌨ escape hatch lives
+// inside the rows the collapse hides). Deleted once at startup so existing
+// installs don't carry a dead entry forever.
+const LEGACY_KEYPAD_COLLAPSED_KEY = 'constellate.keypadCollapsed'
 
 // Not bumped for the additive optional `layout` field: old blobs (no layout)
 // still validate and new blobs stay readable by prior builds. Bumping would make
@@ -267,8 +273,9 @@ interface Store {
   // per-pane — every terminal on this device behaves the same way.
   inputMode: InputMode
   setInputMode: (m: InputMode) => void
-  // Whether the keypad is minimized to its handle bar. Device-wide like
-  // inputMode: a phone user reclaiming screen height means it everywhere.
+  // Whether the keypad is minimized to its handle bar. App-wide (a phone user
+  // reclaiming screen height means it everywhere) but *not* persisted — it is
+  // per-session state that always starts expanded.
   keypadCollapsed: boolean
   setKeypadCollapsed: (v: boolean) => void
 
@@ -359,6 +366,8 @@ export function activeWindowOf(s: {
 
 const initial = loadWorkspace()
 
+lsRemove(LEGACY_KEYPAD_COLLAPSED_KEY)
+
 export const useStore = create<Store>((set, get) => ({
   viewMode: hashToView(typeof window !== 'undefined' ? window.location.hash : ''),
   setViewMode: (mode) => {
@@ -387,11 +396,10 @@ export const useStore = create<Store>((set, get) => ({
     lsSet(INPUT_MODE_KEY, m)
     set({ inputMode: m })
   },
-  keypadCollapsed: lsGet('constellate.keypadCollapsed', 'false') === 'true',
-  setKeypadCollapsed: (v) => {
-    lsSet('constellate.keypadCollapsed', String(v))
-    set({ keypadCollapsed: v })
-  },
+  // Deliberately not persisted (see LEGACY_KEYPAD_COLLAPSED_KEY): every load
+  // starts expanded, so a restart always restores a usable input path.
+  keypadCollapsed: false,
+  setKeypadCollapsed: (v) => set({ keypadCollapsed: v }),
 
   dashboard: null,
   dashboardError: false,

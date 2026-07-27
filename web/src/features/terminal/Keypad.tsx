@@ -28,6 +28,11 @@ import type { TerminalHandle } from './useTerminal'
 // stays suppressed, so while collapsed the user can read but not type — which is
 // the point (minimize = read a long wall of output on a phone). The ⌨ glyph on
 // the collapsed handle is what signals "your keyboard is in here".
+//
+// Because collapsed means "no input path", the collapse is per-session state and
+// is never persisted (store/index.ts): every load starts expanded, so reopening
+// the app always lands on a keypad that can type — including the ⌨ escape hatch
+// back to the native keyboard, which lives in the rows the collapse hides.
 
 interface KeypadProps {
   handle: TerminalHandle
