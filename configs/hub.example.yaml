@@ -2,7 +2,7 @@
 # Copy to hub.yaml and edit as needed.
 # All fields can be overridden with environment variables:
 #   CONSTELLATE_ADDR, CONSTELLATE_DB_PATH, CONSTELLATE_PUBLIC_URL
-#   CONSTELLATE_ENROLL_TOKEN_TTL
+#   CONSTELLATE_ENROLL_TOKEN_TTL, CONSTELLATE_SESSION_TTL
 #
 # Agent enrollment: run `constellate-hub enroll-token` to mint a one-time token,
 # then on each agent machine run:
@@ -14,6 +14,12 @@ db_path: "./constellate.db"
 
 # Enrollment token lifetime (parsed as Go duration, e.g. "15m", "1h").
 enroll_token_ttl: "15m"
+
+# Operator login lifetime (parsed as Go duration). This is a *sliding* window:
+# every authenticated request pushes the expiry back out to now + session_ttl,
+# so it measures time since last use, not time since login. There is no absolute
+# cap — a session you keep using never expires until you log out.
+session_ttl: "24h"
 
 log:
   level: "info"    # debug | info | warn | error

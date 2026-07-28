@@ -56,6 +56,7 @@ func buildMachinesTestServer(t *testing.T, enrollSvc httpapi.EnrollService) (*ht
 		uc,
 		nil,
 		false,
+		24*time.Hour,
 		logger,
 	)
 	ts := httptest.NewServer(srv.Handler())

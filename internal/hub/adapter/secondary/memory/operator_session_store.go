@@ -27,16 +27,29 @@ func (s *OperatorSessionStore) Create(ctx context.Context, id string, createdAt,
 	return nil
 }
 
-func (s *OperatorSessionStore) Validate(ctx context.Context, id string, now int64) (bool, error) {
+func (s *OperatorSessionStore) Validate(ctx context.Context, id string, now int64) (bool, int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[id]
 	if !ok || sess.expiresAt <= now {
-		return false, nil
+		return false, 0, nil
 	}
 	sess.lastSeenAt = now
 	s.sessions[id] = sess
-	return true, nil
+	return true, sess.expiresAt, nil
+}
+
+// Refresh moves the session's expiry to expiresAt. An unknown id is a no-op.
+func (s *OperatorSessionStore) Refresh(ctx context.Context, id string, expiresAt int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return nil
+	}
+	sess.expiresAt = expiresAt
+	s.sessions[id] = sess
+	return nil
 }
 
 func (s *OperatorSessionStore) Delete(ctx context.Context, id string) error {

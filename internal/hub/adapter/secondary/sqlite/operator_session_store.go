@@ -29,25 +29,38 @@ func (s *OperatorSessionStore) Create(ctx context.Context, id string, createdAt,
 	return nil
 }
 
-// Validate returns true if the session exists and has not expired. Updates last_seen_at on success.
-func (s *OperatorSessionStore) Validate(ctx context.Context, id string, now int64) (bool, error) {
+// Validate returns true and the session's expiry if the session exists and has
+// not expired. Updates last_seen_at on success.
+func (s *OperatorSessionStore) Validate(ctx context.Context, id string, now int64) (bool, int64, error) {
 	var expiresAt int64
 	err := s.db.QueryRowContext(ctx,
 		`SELECT expires_at FROM operator_sessions WHERE id = ?`, id,
 	).Scan(&expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return false, 0, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("sqlite: validate operator session: %w", err)
+		return false, 0, fmt.Errorf("sqlite: validate operator session: %w", err)
 	}
 	if expiresAt <= now {
-		return false, nil
+		return false, 0, nil
 	}
 	_, _ = s.db.ExecContext(ctx,
 		`UPDATE operator_sessions SET last_seen_at = ? WHERE id = ?`, now, id,
 	)
-	return true, nil
+	return true, expiresAt, nil
+}
+
+// Refresh moves the session's expiry to expiresAt. Updating an absent row
+// affects zero rows, which is not an error.
+func (s *OperatorSessionStore) Refresh(ctx context.Context, id string, expiresAt int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE operator_sessions SET expires_at = ? WHERE id = ?`, expiresAt, id,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: refresh operator session: %w", err)
+	}
+	return nil
 }
 
 // Delete removes the operator session.

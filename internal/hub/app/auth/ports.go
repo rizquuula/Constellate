@@ -43,7 +43,11 @@ type ChallengeStore interface {
 
 type SessionStore interface {
 	Create(ctx context.Context, id string, createdAt, expiresAt int64) error
-	Validate(ctx context.Context, id string, now int64) (ok bool, err error)
+	// Validate reports whether the session is live and returns its current
+	// absolute expiry (unix seconds) so the caller can decide to slide it.
+	Validate(ctx context.Context, id string, now int64) (ok bool, expiresAt int64, err error)
+	// Refresh moves the session's expiry to expiresAt. Absent rows are a no-op.
+	Refresh(ctx context.Context, id string, expiresAt int64) error
 	Delete(ctx context.Context, id string) error
 }
 

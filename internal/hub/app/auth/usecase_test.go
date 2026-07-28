@@ -79,34 +79,46 @@ func (s *fakeOperatorStore) SetTOTPStep(_ context.Context, step int64) error {
 	return nil
 }
 
+type fakeSession struct {
+	createdAt int64
+	expiresAt int64
+}
+
 type fakeSessionStore struct {
-	sessions map[string]struct {
-		createdAt int64
-		expiresAt int64
-	}
+	sessions     map[string]fakeSession
+	refreshCalls int
+	refreshErr   error
 }
 
 func newFakeSessionStore() *fakeSessionStore {
-	return &fakeSessionStore{sessions: make(map[string]struct {
-		createdAt int64
-		expiresAt int64
-	})}
+	return &fakeSessionStore{sessions: make(map[string]fakeSession)}
 }
 
 func (s *fakeSessionStore) Create(_ context.Context, id string, createdAt, expiresAt int64) error {
-	s.sessions[id] = struct {
-		createdAt int64
-		expiresAt int64
-	}{createdAt, expiresAt}
+	s.sessions[id] = fakeSession{createdAt: createdAt, expiresAt: expiresAt}
 	return nil
 }
 
-func (s *fakeSessionStore) Validate(_ context.Context, id string, now int64) (bool, error) {
+func (s *fakeSessionStore) Validate(_ context.Context, id string, now int64) (bool, int64, error) {
+	sess, ok := s.sessions[id]
+	if !ok || sess.expiresAt <= now {
+		return false, 0, nil
+	}
+	return true, sess.expiresAt, nil
+}
+
+func (s *fakeSessionStore) Refresh(_ context.Context, id string, expiresAt int64) error {
+	s.refreshCalls++
+	if s.refreshErr != nil {
+		return s.refreshErr
+	}
 	sess, ok := s.sessions[id]
 	if !ok {
-		return false, nil
+		return nil
 	}
-	return sess.expiresAt > now, nil
+	sess.expiresAt = expiresAt
+	s.sessions[id] = sess
+	return nil
 }
 
 func (s *fakeSessionStore) Delete(_ context.Context, id string) error {
@@ -297,22 +309,143 @@ func TestValidateSession_ValidExpiredMissing(t *testing.T) {
 	}
 
 	// Valid
-	ok, err := uc.ValidateSession(context.Background(), sid)
+	ok, _, err := uc.ValidateSession(context.Background(), sid)
 	if err != nil || !ok {
 		t.Errorf("expected valid session: ok=%v err=%v", ok, err)
 	}
 
 	// Missing
-	ok2, err2 := uc.ValidateSession(context.Background(), "no-such-id")
+	ok2, _, err2 := uc.ValidateSession(context.Background(), "no-such-id")
 	if err2 != nil || ok2 {
 		t.Errorf("expected missing session to be invalid: ok=%v err=%v", ok2, err2)
 	}
 
 	// Expired: advance clock past TTL
 	clk.now = 1000 + int64((25*time.Hour).Seconds())
-	ok3, err3 := uc.ValidateSession(context.Background(), sid)
+	ok3, _, err3 := uc.ValidateSession(context.Background(), sid)
 	if err3 != nil || ok3 {
 		t.Errorf("expected expired session to be invalid: ok=%v err=%v", ok3, err3)
+	}
+}
+
+// newSlidingUC builds a use case with a settable clock and an explicit TTL, plus
+// a logged-in session, for the sliding-window tests below.
+func newSlidingUC(t *testing.T, sess *fakeSessionStore, clk *mutableClock, ttl time.Duration) (*auth.UseCase, string) {
+	t.Helper()
+	ops := newFakeOperatorStore()
+	uc := auth.New(ops, sess, fakeTOTP{}, &fakeAuditSink{}, clk, func() string { return "ignored" }, ttl, nil, nil, nil)
+	if _, _, _, err := uc.BootstrapTOTP(context.Background(), "Constellate", "operator"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	sid, err := uc.LoginTOTP(context.Background(), "000000")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	return uc, sid
+}
+
+func TestValidateSession_SlidesExpiryPastSkew(t *testing.T) {
+	const ttl = time.Hour
+	sess := newFakeSessionStore()
+	clk := &mutableClock{now: 1000}
+	uc, sid := newSlidingUC(t, sess, clk, ttl)
+
+	// Age the session well past the renew skew.
+	clk.now = 1000 + 1800
+	ok, renewed, err := uc.ValidateSession(context.Background(), sid)
+	if err != nil || !ok {
+		t.Fatalf("expected valid session: ok=%v err=%v", ok, err)
+	}
+	if !renewed {
+		t.Error("expected renewed=true after aging past the skew")
+	}
+	want := clk.now + int64(ttl.Seconds())
+	if got := sess.sessions[sid].expiresAt; got != want {
+		t.Errorf("expiresAt: got %d, want %d", got, want)
+	}
+}
+
+func TestValidateSession_InsideSkew_DoesNotRefresh(t *testing.T) {
+	sess := newFakeSessionStore()
+	clk := &mutableClock{now: 1000}
+	uc, sid := newSlidingUC(t, sess, clk, time.Hour)
+
+	clk.now = 1000 + 1800
+	if _, renewed, err := uc.ValidateSession(context.Background(), sid); err != nil || !renewed {
+		t.Fatalf("first validate: renewed=%v err=%v", renewed, err)
+	}
+	before := sess.refreshCalls
+
+	// A validate immediately after the slide is still inside the skew window.
+	ok, renewed, err := uc.ValidateSession(context.Background(), sid)
+	if err != nil || !ok {
+		t.Fatalf("expected valid session: ok=%v err=%v", ok, err)
+	}
+	if renewed {
+		t.Error("expected renewed=false inside the skew window")
+	}
+	if sess.refreshCalls != before {
+		t.Errorf("Refresh calls: got %d, want %d", sess.refreshCalls, before)
+	}
+}
+
+func TestValidateSession_RepeatedUse_OutlivesFixedWindow(t *testing.T) {
+	const ttl = time.Hour
+	sess := newFakeSessionStore()
+	clk := &mutableClock{now: 1000}
+	uc, sid := newSlidingUC(t, sess, clk, ttl)
+
+	fixedWindowEnd := 1000 + int64(ttl.Seconds())
+
+	// Touch the session every half TTL for 2.5 TTLs.
+	for _, at := range []int64{2800, 4600, 6400, 8200, 10000} {
+		clk.now = at
+		ok, _, err := uc.ValidateSession(context.Background(), sid)
+		if err != nil || !ok {
+			t.Fatalf("validate at %d: ok=%v err=%v", at, ok, err)
+		}
+	}
+
+	if clk.now <= fixedWindowEnd {
+		t.Fatalf("test is not past the old fixed window: now=%d end=%d", clk.now, fixedWindowEnd)
+	}
+}
+
+func TestValidateSession_RefreshError_StillValid(t *testing.T) {
+	sess := newFakeSessionStore()
+	sess.refreshErr = errors.New("boom")
+	clk := &mutableClock{now: 1000}
+	uc, sid := newSlidingUC(t, sess, clk, time.Hour)
+
+	clk.now = 1000 + 1800
+	ok, renewed, err := uc.ValidateSession(context.Background(), sid)
+	if err != nil {
+		t.Fatalf("expected refresh failure to be swallowed, got %v", err)
+	}
+	if !ok {
+		t.Error("expected session to remain valid despite refresh failure")
+	}
+	if renewed {
+		t.Error("expected renewed=false when Refresh failed")
+	}
+}
+
+func TestValidateSession_Expired_NeverRefreshes(t *testing.T) {
+	const ttl = time.Hour
+	sess := newFakeSessionStore()
+	clk := &mutableClock{now: 1000}
+	uc, sid := newSlidingUC(t, sess, clk, ttl)
+
+	clk.now = 1000 + int64(ttl.Seconds()) + 1
+	ok, renewed, err := uc.ValidateSession(context.Background(), sid)
+	if err != nil {
+		t.Fatalf("ValidateSession: %v", err)
+	}
+	if ok || renewed {
+		t.Errorf("expected expired session to be invalid: ok=%v renewed=%v", ok, renewed)
+	}
+	if sess.refreshCalls != 0 {
+		t.Errorf("expected no Refresh on an expired session, got %d calls", sess.refreshCalls)
 	}
 }
 
@@ -334,7 +467,7 @@ func TestLogout_DeletesSession(t *testing.T) {
 		t.Fatalf("logout: %v", err)
 	}
 
-	ok, err := uc.ValidateSession(context.Background(), sid)
+	ok, _, err := uc.ValidateSession(context.Background(), sid)
 	if err != nil || ok {
 		t.Errorf("expected session gone after logout: ok=%v err=%v", ok, err)
 	}

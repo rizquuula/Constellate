@@ -30,12 +30,15 @@ func TestOperatorSessionStore_CreateAndValidate(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	ok, err := store.Validate(ctx, "sess1", 1001)
+	ok, expiresAt, err := store.Validate(ctx, "sess1", 1001)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 	if !ok {
 		t.Error("expected valid session")
+	}
+	if expiresAt != 9000 {
+		t.Errorf("expiresAt: got %d, want 9000", expiresAt)
 	}
 }
 
@@ -48,7 +51,7 @@ func TestOperatorSessionStore_Validate_Expired(t *testing.T) {
 	}
 
 	// now >= expires_at → invalid
-	ok, err := store.Validate(ctx, "sess2", 2000)
+	ok, _, err := store.Validate(ctx, "sess2", 2000)
 	if err != nil {
 		t.Fatalf("Validate expired: %v", err)
 	}
@@ -61,7 +64,7 @@ func TestOperatorSessionStore_Validate_Missing(t *testing.T) {
 	store := openTestOperatorSessionDB(t)
 	ctx := context.Background()
 
-	ok, err := store.Validate(ctx, "no-such-session", 1000)
+	ok, _, err := store.Validate(ctx, "no-such-session", 1000)
 	if err != nil {
 		t.Fatalf("Validate missing: %v", err)
 	}
@@ -82,11 +85,44 @@ func TestOperatorSessionStore_Delete(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	ok, err := store.Validate(ctx, "sess3", 1001)
+	ok, _, err := store.Validate(ctx, "sess3", 1001)
 	if err != nil {
 		t.Fatalf("Validate after delete: %v", err)
 	}
 	if ok {
 		t.Error("expected session to be gone after delete")
+	}
+}
+
+func TestOperatorSessionStore_Refresh_MovesExpiry(t *testing.T) {
+	store := openTestOperatorSessionDB(t)
+	ctx := context.Background()
+
+	if err := store.Create(ctx, "sess4", 1000, 2000); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := store.Refresh(ctx, "sess4", 9000); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// The session was about to expire at 2000; it must now survive past it.
+	ok, expiresAt, err := store.Validate(ctx, "sess4", 2500)
+	if err != nil {
+		t.Fatalf("Validate after refresh: %v", err)
+	}
+	if !ok {
+		t.Error("expected refreshed session to still be valid")
+	}
+	if expiresAt != 9000 {
+		t.Errorf("expiresAt: got %d, want 9000", expiresAt)
+	}
+}
+
+func TestOperatorSessionStore_Refresh_UnknownID_NotAnError(t *testing.T) {
+	store := openTestOperatorSessionDB(t)
+
+	if err := store.Refresh(context.Background(), "no-such-session", 9000); err != nil {
+		t.Errorf("Refresh on unknown id: got %v, want nil", err)
 	}
 }

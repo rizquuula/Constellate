@@ -108,10 +108,19 @@ graph TD
 
 ### The session cookie
 
-`constellate_session` (`httpapi/auth.go:26`): `Path=/`, **HttpOnly**, **SameSite=Lax**, `MaxAge=24h`,
-and `Secure` = `strings.HasPrefix(public_url, "https")` (`cmd/hub/main.go:213`). Backed by a
-server-side row in `operator_sessions` (opaque random id), validated on every gated request; a second
-opaque cookie `constellate_wa_challenge` carries only the transient WebAuthn ceremony key.
+`constellate_session` (`httpapi/auth.go:26`): `Path=/`, **HttpOnly**, **SameSite=Lax**,
+`MaxAge=session_ttl` (default `24h`), and `Secure` = `strings.HasPrefix(public_url, "https")`
+(`cmd/hub/main.go:213`). Backed by a server-side row in `operator_sessions` (opaque random id),
+validated on every gated request; a second opaque cookie `constellate_wa_challenge` carries only the
+transient WebAuthn ceremony key.
+
+The lifetime is a **sliding window**. A successful validation pushes `expires_at` out to
+`now + session_ttl` and re-issues the cookie with a fresh `MaxAge`, so the TTL bounds *idle* time
+rather than total session age. The slide is throttled — it only writes when the expiry would advance
+by at least 5 minutes — so a polling frontend costs ~12 writes/hour, not one per request. There is
+deliberately **no absolute cap**: the trade is that a stolen cookie stays useful for as long as the
+thief keeps using it, so `session_ttl` is the knob to tighten (and logout/row-delete is the hard
+revocation path).
 
 ---
 

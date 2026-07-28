@@ -20,12 +20,17 @@ YAML file via `--config`, with per-field `CONSTELLATE_*` env overrides for conta
 | `public_url` | `""` | `CONSTELLATE_PUBLIC_URL` |
 | `db_path` | `./constellate.db` | `CONSTELLATE_DB_PATH` |
 | `enroll_token_ttl` | `15m` | `CONSTELLATE_ENROLL_TOKEN_TTL` |
+| `session_ttl` | `24h` | `CONSTELLATE_SESSION_TTL` |
 | `tls.cert` / `tls.key` | `""` / `""` | — |
 | `webauthn.rp_id` / `webauthn.origins` | derived from `public_url` | — |
 | `log.level` / `log.format` | `info` / `text` | — |
 
 `public_url` is load-bearing: it drives the session-cookie `Secure` flag (`https…` ⇒ Secure) and the
 WebAuthn RP-ID/origins.
+
+`session_ttl` is a **sliding** window, not a fixed one: each authenticated request pushes the
+operator session's expiry out to `now + session_ttl`, so it bounds *idle* time, not total time. There
+is no absolute cap — logging out (or `DELETE`ing the row) is what ends a session that stays in use.
 
 ### Agent (`internal/platform/config/agent.go`)
 

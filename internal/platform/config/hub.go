@@ -26,6 +26,7 @@ type Hub struct {
 	PublicURL      string         `yaml:"public_url"`
 	DBPath         string         `yaml:"db_path"`
 	EnrollTokenTTL string         `yaml:"enroll_token_ttl"`
+	SessionTTL     string         `yaml:"session_ttl"`
 	TLS            TLSConfig      `yaml:"tls"`
 	Log            LogConfig      `yaml:"log"`
 	WebAuthn       WebAuthnConfig `yaml:"webauthn"`
@@ -36,6 +37,7 @@ func defaultHub() Hub {
 		Addr:           "127.0.0.1:8080",
 		DBPath:         "./constellate.db",
 		EnrollTokenTTL: "15m",
+		SessionTTL:     "24h",
 		Log: LogConfig{
 			Level:  "info",
 			Format: "text",
@@ -75,5 +77,8 @@ func applyHubEnv(cfg *Hub) {
 	}
 	if v := os.Getenv("CONSTELLATE_ENROLL_TOKEN_TTL"); v != "" {
 		cfg.EnrollTokenTTL = v
+	}
+	if v := os.Getenv("CONSTELLATE_SESSION_TTL"); v != "" {
+		cfg.SessionTTL = v
 	}
 }

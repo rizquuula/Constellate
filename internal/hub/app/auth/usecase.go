@@ -29,6 +29,10 @@ type UseCase struct {
 // challengeTTL is how long a WebAuthn challenge session survives (seconds).
 const challengeTTL = 5 * 60
 
+// sessionRenewSkew is the minimum advance (seconds) before sliding a session's
+// expiry is worth a write. It throttles the 2 s frontend poll to ~12 writes/hour.
+const sessionRenewSkew = 5 * 60
+
 func New(
 	ops OperatorStore,
 	sessions SessionStore,
@@ -154,8 +158,28 @@ func (u *UseCase) LoginRecovery(ctx context.Context, code string) (sessionID str
 	return sid, nil
 }
 
-func (u *UseCase) ValidateSession(ctx context.Context, sessionID string) (bool, error) {
-	return u.sessions.Validate(ctx, sessionID, u.clock.Now())
+// ValidateSession reports whether sessionID is live, sliding its expiry out to
+// now+sessionTTL when it has aged past sessionRenewSkew. renewed is true only
+// when the expiry actually moved, so the caller can re-issue the cookie.
+func (u *UseCase) ValidateSession(ctx context.Context, sessionID string) (ok, renewed bool, err error) {
+	now := u.clock.Now()
+	live, expiresAt, err := u.sessions.Validate(ctx, sessionID, now)
+	if err != nil || !live {
+		return false, false, err
+	}
+	if u.sessionTTL <= 0 {
+		return true, false, nil
+	}
+	newExpiry := now + int64(u.sessionTTL.Seconds())
+	if newExpiry-expiresAt < sessionRenewSkew {
+		return true, false, nil
+	}
+	if rerr := u.sessions.Refresh(ctx, sessionID, newExpiry); rerr != nil {
+		// The session is still valid; it just did not slide.
+		u.log.Warn("session refresh failed", "err", rerr)
+		return true, false, nil
+	}
+	return true, true, nil
 }
 
 func (u *UseCase) Logout(ctx context.Context, sessionID string) error {

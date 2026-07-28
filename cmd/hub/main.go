@@ -223,6 +223,17 @@ func cmdServe(args []string) {
 	}
 	enrollUC := enroll.New(enrollTokenStore, credStore, machineStore, auditUC, enroll.SystemClock{}, id.New, enrollTTL, log)
 
+	sessionTTL, err := time.ParseDuration(cfg.SessionTTL)
+	if err != nil {
+		log.Error("serve: invalid session_ttl", "value", cfg.SessionTTL, "err", err)
+		os.Exit(1)
+	}
+	if sessionTTL <= 0 {
+		// A non-positive TTL would mint sessions that are already expired.
+		log.Error("serve: invalid session_ttl", "value", cfg.SessionTTL, "err", "must be positive")
+		os.Exit(1)
+	}
+
 	operatorStore := sqlite.NewOperatorStore(db, id.New)
 	sessionStore := sqlite.NewOperatorSessionStore(db)
 	totpVerifier := totpadapter.New()
@@ -239,13 +250,13 @@ func cmdServe(args []string) {
 		waChallenge = memstore.NewChallengeStore()
 	}
 
-	authUC := authapp.New(operatorStore, sessionStore, totpVerifier, auditUC, authapp.SystemClock{}, id.New, 24*time.Hour, log, waProvider, waChallenge)
+	authUC := authapp.New(operatorStore, sessionStore, totpVerifier, auditUC, authapp.SystemClock{}, id.New, sessionTTL, log, waProvider, waChallenge)
 
 	dashboardUC := dashboard.New(machineStore, links, sessStore, projStore, auditStore, log)
 	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, overviewUC, enrollUC, log)
 	termHandler := wsbrowser.NewTerminalHandler(attachUC, log)
 	overviewHandler := wsbrowser.NewOverviewHandler(overviewUC, log)
-	srv := httpapi.NewServer(cfg.Addr, reg, sessionsUC, projectsUC, enrollUC, endpoint, termHandler, overviewHandler, authUC, dashboardUC, secureCookies, log)
+	srv := httpapi.NewServer(cfg.Addr, reg, sessionsUC, projectsUC, enrollUC, endpoint, termHandler, overviewHandler, authUC, dashboardUC, secureCookies, sessionTTL, log)
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -477,12 +488,23 @@ func cmdOperatorAdd(args []string) {
 		os.Exit(1)
 	}
 
+	sessionTTL, err := time.ParseDuration(cfg.SessionTTL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "operator add: invalid session_ttl %q: %v\n", cfg.SessionTTL, err)
+		os.Exit(1)
+	}
+	if sessionTTL <= 0 {
+		// A non-positive TTL would mint sessions that are already expired.
+		fmt.Fprintf(os.Stderr, "operator add: invalid session_ttl %q: must be positive\n", cfg.SessionTTL)
+		os.Exit(1)
+	}
+
 	log := platlog.New("error", "text")
 	auditUC := auditapp.New(sqlite.NewAuditStore(db), auditapp.SystemClock{}, log)
 	operatorStore := sqlite.NewOperatorStore(db, id.New)
 	sessionStore := sqlite.NewOperatorSessionStore(db)
 	totpVerifier := totpadapter.New()
-	authUC := authapp.New(operatorStore, sessionStore, totpVerifier, auditUC, authapp.SystemClock{}, id.New, 24*time.Hour, log, nil, nil)
+	authUC := authapp.New(operatorStore, sessionStore, totpVerifier, auditUC, authapp.SystemClock{}, id.New, sessionTTL, log, nil, nil)
 
 	secret, uri, codes, err := authUC.BootstrapTOTP(ctx, *issuer, *account)
 	if err != nil {

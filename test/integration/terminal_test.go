@@ -74,7 +74,7 @@ func newInProcessHub(t *testing.T, termOpts ...wsbrowser.TerminalOption) (ts *ht
 	endpoint := wsagent.NewEndpoint(reg, links, sessionsUC, overviewUC, enrollUC, logger)
 	termHandler := wsbrowser.NewTerminalHandler(attachUC, logger, termOpts...)
 	overviewHandler := wsbrowser.NewOverviewHandler(overviewUC, logger)
-	srv := httpapi.NewServer("127.0.0.1:0", reg, sessionsUC, projectsUC, enrollUC, endpoint, termHandler, overviewHandler, nil, nil, false, logger)
+	srv := httpapi.NewServer("127.0.0.1:0", reg, sessionsUC, projectsUC, enrollUC, endpoint, termHandler, overviewHandler, nil, nil, false, 24*time.Hour, logger)
 
 	ts = httptest.NewServer(srv.Handler())
 	wsURL = func(path string) string {

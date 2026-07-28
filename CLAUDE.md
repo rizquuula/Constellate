@@ -81,7 +81,9 @@ wired. Machine lifecycle is also REST + UI: `POST /api/machines/{id}/revoke|unre
 then cascading sessions → projects → credentials → machine in one transaction (app-level, **not** an
 FK `ON DELETE CASCADE`). Un-revoke re-arms the *existing* keypair — nothing is rotated. **Operator auth** — TOTP (`pquerna/otp`) + single-use recovery codes + WebAuthn passkeys
 (`go-webauthn`); server-side sessions in `operator_sessions`; opaque cookie `constellate_session`
-(HttpOnly, SameSite=Lax, Secure, 24 h). Rate limiting (per-IP + global) + TOTP single-use
+(HttpOnly, SameSite=Lax, Secure, `session_ttl` default 24 h — a **sliding** window: every gated
+request pushes `expires_at` to `now + session_ttl` and re-issues the cookie, throttled to one write
+per 5 min, no absolute cap). Rate limiting (per-IP + global) + TOTP single-use
 anti-replay. **Auth middleware** gates all `/api/*` + `/ws/*`; explicit allowlist for unauthenticated
 paths. **Audit log** wired via `AuditSink` port in `attach`, `sessions`, `enroll`, `auth` use cases.
 **TLS** via Caddy (`deploy/caddy/Caddyfile` + `deploy/compose.yaml`) or optional in-app

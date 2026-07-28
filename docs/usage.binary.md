@@ -63,11 +63,12 @@ Key fields:
 | `public_url` | Externally reachable URL (drives cookie `Secure` flag + WebAuthn) | `http://localhost:8080` |
 | `db_path` | SQLite file | `./constellate.db` |
 | `enroll_token_ttl` | Lifetime of enrollment tokens (Go duration, e.g. `15m`) | `15m` |
+| `session_ttl` | Operator login lifetime (Go duration) — **sliding**, measured from last use | `24h` |
 | `tls.cert` / `tls.key` | PEM cert + key for in-app HTTPS (optional) | empty |
 | `webauthn.rp_id` / `webauthn.origins` | Passkey settings (derived from `public_url` if unset) | derived |
 
 Any field can be overridden by environment variable: `CONSTELLATE_ADDR`, `CONSTELLATE_DB_PATH`,
-`CONSTELLATE_PUBLIC_URL`, `CONSTELLATE_ENROLL_TOKEN_TTL`.
+`CONSTELLATE_PUBLIC_URL`, `CONSTELLATE_ENROLL_TOKEN_TTL`, `CONSTELLATE_SESSION_TTL`.
 
 > **TLS:** either set `tls.cert` / `tls.key` for the hub to terminate HTTPS itself, **or** leave
 > them empty and run behind a TLS-terminating reverse proxy. A ready-made
@@ -145,7 +146,9 @@ Open the hub URL in a browser and log in with the current **6-digit code** from 
 - Codes are **single-use**: once a code is accepted it can't be replayed, even within its 30-second
   window. If login says the code was already used, wait for the next one.
 
-On success the hub sets the `constellate_session` cookie (HttpOnly, 24 h). Once logged in you can
+On success the hub sets the `constellate_session` cookie (HttpOnly, `session_ttl` — 24 h by default).
+The window slides while you use the app, so you only have to re-enter a code after ~24 h of *inactivity*,
+not 24 h after logging in. Once logged in you can
 register a **WebAuthn passkey** for faster, phishing-resistant logins afterward.
 
 ---

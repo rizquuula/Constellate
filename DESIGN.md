@@ -495,7 +495,9 @@ owns the fleet. The model is built around that fact.
   additive (registration requires an existing session). Bootstrap: `hub operator add` prints the
   `otpauth://` URI + one-time recovery codes. Server-side sessions (`operator_sessions` table,
   migration 0004) with an opaque random cookie `constellate_session` (HttpOnly, SameSite=Lax,
-  Secure derived from `https` `public_url`, 24 h). Every terminal attach (`/ws/term`,
+  Secure derived from `https` `public_url`, `session_ttl` default 24 h). The window **slides**: every
+  gated request pushes `expires_at` out to `now + session_ttl` (throttled to one write per 5 min) and
+  re-issues the cookie, so the TTL measures time since last use, not since login. Every terminal attach (`/ws/term`,
   `/ws/overview`) re-checks the session via the auth middleware. **Brute-force hardening:**
   per-IP (~5/min) + global (~15/min) in-memory rate limiting with HTTP 429 + `Retry-After` on
   TOTP/recovery endpoints; TOTP single-use (matched 30 s step recorded in `last_used_at`;
@@ -806,6 +808,7 @@ addr: "127.0.0.1:8080"                          # listen address
 public_url: "https://constellate.example.com"   # external URL (cookies, WebAuthn RP)
 db_path: "./constellate.db"
 enroll_token_ttl: "15m"                         # one-time agent enrollment token lifetime
+session_ttl: "24h"                              # operator login lifetime — sliding, measured from last use
 tls:                                            # optional direct TLS (else terminate at Caddy)
   cert: ""                                      # PEM cert path; leave empty to run behind proxy
   key:  ""
@@ -982,7 +985,8 @@ acceptance check passes.
 - **Operator auth:** TOTP (`pquerna/otp`) + single-use recovery codes (SHA-256-hashed) + WebAuthn
   passkeys (`go-webauthn`, registration requires an existing session). Server-side sessions in
   `operator_sessions` (migration 0004); opaque random cookie `constellate_session` (HttpOnly,
-  SameSite=Lax, Secure from `https` `public_url`, 24 h). Rate limiting (per-IP + global) + TOTP
+  SameSite=Lax, Secure from `https` `public_url`, `session_ttl` default 24 h, **sliding** — refreshed
+  on every gated request, no absolute cap). Rate limiting (per-IP + global) + TOTP
   single-use anti-replay. Bootstrap: `hub operator add`.
 - **Auth middleware** gates all `/api/*` + `/ws/*` with an explicit allowlist for unauthenticated
   paths; terminal attach re-checks the session on every WS upgrade.

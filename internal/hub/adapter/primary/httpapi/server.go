@@ -44,13 +44,14 @@ type Server struct {
 	auth               AuthService
 	dashboard          DashboardService
 	secureCookies      bool
+	sessionTTL         time.Duration
 	log                *slog.Logger
 	loginIPLimiter     *rateLimiter
 	loginGlobalLimiter *rateLimiter
 }
 
 // NewServer wires up the mux and returns a ready-to-start Server.
-func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, enrollSvc EnrollService, agentWS http.Handler, termWS http.Handler, overviewWS http.Handler, authSvc AuthService, dashboardSvc DashboardService, secureCookies bool, log *slog.Logger) *Server {
+func NewServer(addr string, machines MachineService, sessions SessionService, projects ProjectService, enrollSvc EnrollService, agentWS http.Handler, termWS http.Handler, overviewWS http.Handler, authSvc AuthService, dashboardSvc DashboardService, secureCookies bool, sessionTTL time.Duration, log *slog.Logger) *Server {
 	s := &Server{
 		addr:               addr,
 		machines:           machines,
@@ -60,6 +61,7 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 		auth:               authSvc,
 		dashboard:          dashboardSvc,
 		secureCookies:      secureCookies,
+		sessionTTL:         sessionTTL,
 		log:                log,
 		loginIPLimiter:     newRateLimiter(loginIPMax, loginWindow),
 		loginGlobalLimiter: newRateLimiter(loginGlobalMax, loginWindow),
@@ -107,7 +109,7 @@ func NewServer(addr string, machines MachineService, sessions SessionService, pr
 	mux.Handle("/{path...}", spaHandler(distFS))
 
 	s.mux = mux
-	s.handler = loggingMiddleware(log, authMiddleware(authSvc, secureCookies, log, mux))
+	s.handler = loggingMiddleware(log, authMiddleware(authSvc, secureCookies, sessionTTL, log, mux))
 	s.http = &http.Server{
 		Addr:    addr,
 		Handler: s.handler,

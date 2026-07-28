@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rizquuula/Constellate/internal/hub/domain/audit"
 )
@@ -30,7 +31,7 @@ var unauthenticatedPaths = []string{
 
 // authMiddleware gates /api/* and /ws/* except the explicit allowlist above.
 // When authSvc is nil, all requests pass through (dev/test mode) with a one-time warning.
-func authMiddleware(authSvc AuthService, secureCookies bool, log *slog.Logger, next http.Handler) http.Handler {
+func authMiddleware(authSvc AuthService, secureCookies bool, sessionTTL time.Duration, log *slog.Logger, next http.Handler) http.Handler {
 	var warnOnce sync.Once
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if authSvc == nil {
@@ -64,10 +65,16 @@ func authMiddleware(authSvc AuthService, secureCookies bool, log *slog.Logger, n
 			writeError(w, http.StatusUnauthorized, "unauthorized", "no session")
 			return
 		}
-		ok, err := authSvc.ValidateSession(r.Context(), c.Value)
+		ok, renewed, err := authSvc.ValidateSession(r.Context(), c.Value)
 		if err != nil || !ok {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired session")
 			return
+		}
+		if renewed {
+			// The session slid, so the browser's cookie Max-Age is now stale.
+			// Gating on renewed (rather than re-issuing every request) keeps this
+			// to at most one Set-Cookie per renewal skew window.
+			setSessionCookie(w, c.Value, secureCookies, sessionTTL)
 		}
 
 		ctx := audit.ContextWithActor(r.Context(), "operator")

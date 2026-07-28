@@ -74,13 +74,26 @@ func (s stubProjectSvcMW) Create(_ context.Context, _ projects.CreateInput) (pro
 func (s stubProjectSvcMW) List(_ context.Context) ([]project.Project, error) { return nil, nil }
 func (s stubProjectSvcMW) Delete(_ context.Context, _ string) error          { return nil }
 
+// mwClock is a settable Clock so tests can age a session without sleeping.
+type mwClock struct{ now int64 }
+
+func (c *mwClock) Now() int64 { return c.now }
+
 func buildMiddlewareTestServer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	ts, sid, _ := buildMiddlewareTestServerWithClock(t, &mwClock{now: 1000}, 24*time.Hour)
+	return ts, sid
+}
+
+// buildMiddlewareTestServerWithClock wires the real auth use case behind the
+// real middleware using the supplied clock and session TTL.
+func buildMiddlewareTestServerWithClock(t *testing.T, clk appauth.Clock, ttl time.Duration) (*httptest.Server, string, *memory.OperatorSessionStore) {
 	t.Helper()
 	logger := platlog.New("error", "text")
 
 	ops := memory.NewOperatorStore()
 	sess := memory.NewOperatorSessionStore()
-	uc := appauth.New(ops, sess, fakeTOTPMW{}, fakeAuditMW{}, appauth.SystemClock{}, func() string { return "tok" }, 24*time.Hour, nil, nil, nil)
+	uc := appauth.New(ops, sess, fakeTOTPMW{}, fakeAuditMW{}, clk, func() string { return "tok" }, ttl, nil, nil, nil)
 	_, _, _, err := uc.BootstrapTOTP(context.Background(), "Constellate", "operator")
 	if err != nil {
 		t.Fatalf("BootstrapTOTP: %v", err)
@@ -102,10 +115,11 @@ func buildMiddlewareTestServer(t *testing.T) (*httptest.Server, string) {
 		uc,
 		nil,
 		false,
+		ttl,
 		logger,
 	)
 	ts := httptest.NewServer(srv.Handler())
-	return ts, sid
+	return ts, sid, sess
 }
 
 func TestMiddleware_NoCookie_Returns401(t *testing.T) {
@@ -228,5 +242,48 @@ func TestMiddleware_WebAuthnRegisterBegin_RequiresCookie(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected register/begin to require session, got %d", resp.StatusCode)
+	}
+}
+
+// sessionCookieOn reports whether resp re-issued the operator session cookie.
+func sessionCookieOn(resp *http.Response) bool {
+	for _, c := range resp.Cookies() {
+		if c.Name == "constellate_session" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestMiddleware_SlidingSession_ReissuesCookieOnlyAfterSkew(t *testing.T) {
+	clk := &mwClock{now: 1000}
+	ts, sid, _ := buildMiddlewareTestServerWithClock(t, clk, time.Hour)
+	defer ts.Close()
+
+	get := func() *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/machines", nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		req.AddCookie(&http.Cookie{Name: "constellate_session", Value: sid})
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET /api/machines: %v", err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		return resp
+	}
+
+	// Freshly created session: its expiry is already now+TTL, so nothing slides.
+	if resp := get(); sessionCookieOn(resp) {
+		t.Error("expected no Set-Cookie for a freshly created session")
+	}
+
+	// Age the session past the renewal skew — the expiry slides and the cookie
+	// must be re-issued with a fresh Max-Age.
+	clk.now = 1000 + 1800
+	if resp := get(); !sessionCookieOn(resp) {
+		t.Error("expected Set-Cookie once the session aged past the skew")
 	}
 }

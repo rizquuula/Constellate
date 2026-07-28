@@ -15,7 +15,7 @@ type AuthService interface {
 	HasOperator(ctx context.Context) (bool, error)
 	LoginTOTP(ctx context.Context, code string) (sessionID string, err error)
 	LoginRecovery(ctx context.Context, code string) (sessionID string, err error)
-	ValidateSession(ctx context.Context, sessionID string) (bool, error)
+	ValidateSession(ctx context.Context, sessionID string) (ok, renewed bool, err error)
 	Logout(ctx context.Context, sessionID string) error
 	BeginPasskeyRegistration(ctx context.Context) (optionsJSON []byte, challengeKey string, err error)
 	FinishPasskeyRegistration(ctx context.Context, challengeKey string, body io.Reader) error
@@ -26,7 +26,7 @@ type AuthService interface {
 const sessionCookieName = "constellate_session"
 const waChallengesCookieName = "constellate_wa_challenge"
 
-func setSessionCookie(w http.ResponseWriter, sessionID string, secure bool) {
+func setSessionCookie(w http.ResponseWriter, sessionID string, secure bool, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    sessionID,
@@ -34,7 +34,7 @@ func setSessionCookie(w http.ResponseWriter, sessionID string, secure bool) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   secure,
-		MaxAge:   int((24 * time.Hour).Seconds()),
+		MaxAge:   int(ttl.Seconds()),
 	})
 }
 
@@ -58,9 +58,14 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	authenticated := false
 	if c, err := r.Cookie(sessionCookieName); err == nil {
-		ok, verr := s.auth.ValidateSession(ctx, c.Value)
+		ok, renewed, verr := s.auth.ValidateSession(ctx, c.Value)
 		if verr == nil && ok {
 			authenticated = true
+			if renewed {
+				// This route is on the unauthenticated allowlist, so the auth
+				// middleware never runs and cannot re-issue the cookie for us.
+				setSessionCookie(w, c.Value, s.secureCookies, s.sessionTTL)
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{
@@ -85,7 +90,7 @@ func (s *Server) handleLoginTOTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, statusFor(err), "unauthorized", err.Error())
 		return
 	}
-	setSessionCookie(w, sid, s.secureCookies)
+	setSessionCookie(w, sid, s.secureCookies, s.sessionTTL)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -105,7 +110,7 @@ func (s *Server) handleLoginRecovery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, statusFor(err), "unauthorized", err.Error())
 		return
 	}
-	setSessionCookie(w, sid, s.secureCookies)
+	setSessionCookie(w, sid, s.secureCookies, s.sessionTTL)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -185,7 +190,7 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 		writeError(w, statusFor(err), "webauthn_error", err.Error())
 		return
 	}
-	setSessionCookie(w, sid, s.secureCookies)
+	setSessionCookie(w, sid, s.secureCookies, s.sessionTTL)
 	clearWaChallengeCookie(w)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
